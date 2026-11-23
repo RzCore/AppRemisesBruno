@@ -622,6 +622,67 @@ export default function CoordinadorDashboard() {
       fetchData();
     });
 
+    socket.on('solicitud_atencion_humana', (data: { telefono: string; nombre: string; mensaje?: string }) => {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const ctx = new AudioContextClass();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+          osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+          gain.gain.setValueAtTime(0.2, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.45);
+        }
+      } catch {}
+
+      toast((t) => (
+        <div className="flex flex-col gap-1.5 py-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">💬</span>
+            <div>
+              <p className="font-bold text-sm text-gray-900 dark:text-white">
+                ¡Solicitud de atención humana en WhatsApp!
+              </p>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                <span className="font-semibold">{data.nombre || 'Pasajero'}</span> ({data.telefono})
+              </p>
+            </div>
+          </div>
+          {data.mensaje && (
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 italic bg-gray-50 dark:bg-gray-800 p-1.5 rounded">
+              "{data.mensaje}"
+            </p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <a
+              href={`https://wa.me/${data.telefono.replace(/\D/g, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => toast.dismiss(t.id)}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg text-center"
+            >
+              Abrir WhatsApp Web
+            </a>
+            <button
+              onClick={() => toast.dismiss(t.id)}
+              className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 text-xs rounded-lg"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      ), {
+        duration: 25000,
+        id: `atencion-${data.telefono}`,
+      });
+    });
+
     return () => {
       socket.disconnect();
     };

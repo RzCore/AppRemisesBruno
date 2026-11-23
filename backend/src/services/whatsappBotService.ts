@@ -46,6 +46,9 @@ interface SesionClienteWhatsApp {
 // Almacenamiento en memoria de sesiones activas (expiran a los 30 minutos de inactividad)
 const sesionesMap = new Map<string, SesionClienteWhatsApp>();
 
+// Almacenamiento en memoria de pausas para atención humana directa con el coordinador (30 min)
+const pausasHumanasMap = new Map<string, { hasta: Date; nombre?: string }>();
+
 function getSesion(telefono: string): SesionClienteWhatsApp {
   const cleanTel = whatsappService.formatearNumero(telefono);
   const ahora = Date.now();
@@ -910,6 +913,30 @@ export const whatsappBotService = {
     // Marcar mensaje como leído en WhatsApp
     whatsappService.marcarComoLeido(messageId).catch(() => {});
 
+    // 0. VERIFICACIÓN DE PAUSA DEL BOT (ATENCIÓN HUMANA POR WHATSAPP)
+    const pausaActual = pausasHumanasMap.get(cleanFrom);
+    if (pausaActual) {
+      if (Date.now() < pausaActual.hasta.getTime()) {
+        const txt = (texto || '').trim().toLowerCase();
+        // Si el usuario solicita reactivar el bot explícitamente
+        if (txt === 'bot' || txt === 'menu' || txt === 'menú' || txt === 'reiniciar' || txt === 'activar bot') {
+          pausasHumanasMap.delete(cleanFrom);
+          resetSesion(cleanFrom);
+          const saludoReanudado = `🤖 *Asistente automático reactivado*\n\n¡Hola de nuevo! El bot está listo para tomar tus viajes y reservas. ¿Cómo querés viajar hoy?`;
+          return await whatsappService.enviarBotones(cleanFrom, saludoReanudado, [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+            { id: 'BTN_ESTADO', title: '📍 Estado / Ayuda' },
+          ]);
+        }
+        // El bot está pausado: no responde nada para permitir diálogo fluido con el operador humano
+        return;
+      } else {
+        // Pausa expirada tras 30 minutos
+        pausasHumanasMap.delete(cleanFrom);
+      }
+    }
+
     // 1. Identificar o registrar al cliente en la base de datos
     let cliente = await prisma.cliente.findFirst({
       where: {
@@ -1049,11 +1076,50 @@ export const whatsappBotService = {
       );
     }
 
-    if (actionId === 'BTN_OPERADOR' || textoLower === 'operador' || textoLower === 'central') {
-      return await whatsappService.enviarTexto(
-        cleanFrom,
-        `📞 Podés comunicarte directamente con nuestros operadores a los teléfonos fijos:\n☎️ 2346-427637\n☎️ 2346-433000\n\nEstamos a tu disposición las 24 horas.`
-      );
+    const esSolicitudOperador = (
+      actionId === 'BTN_OPERADOR' ||
+      textoLower === 'operador' ||
+      textoLower === 'central' ||
+      textoLower === 'coordinador' ||
+      textoLower === 'humano' ||
+      textoLower === 'persona' ||
+      textoLower.includes('hablar con') ||
+      textoLower.includes('atencion humana') ||
+      textoLower.includes('atención humana') ||
+      textoLower === 'hablar con operador' ||
+      textoLower === 'hablar con coordinador' ||
+      textoLower === 'hablar con alguien'
+    );
+
+    if (esSolicitudOperador) {
+      // Activar pausa del bot por 30 minutos para permitir diálogo humano con el operador
+      const hasta = new Date(Date.now() + 30 * 60 * 1000);
+      pausasHumanasMap.set(cleanFrom, { hasta, nombre: nombreMostrado });
+
+      // Notificar al coordinador en tiempo real por WebSocket
+      try {
+        const { getIO } = await import('../lib/socket');
+        const io = getIO();
+        io.to(remiseriaId).emit('solicitud_atencion_humana', {
+          telefono: cleanFrom,
+          nombre: nombreMostrado,
+          mensaje: texto || 'El pasajero solicitó contactarse con el operador/coordinador.',
+          timestamp: new Date().toISOString(),
+          expiraEnMinutos: 30,
+        });
+      } catch (wsErr) {
+        console.warn('Aviso socket al emitir solicitud_atencion_humana:', wsErr);
+      }
+
+      const msgDerivacion =
+        `👤 *TRANSFERENCIA CON EL COORDINADOR*\n` +
+        `━━━━━━━━━━━━━━━━━━━\n` +
+        `Hola, *${nombreMostrado}*. Un operador de *Remises Bruno* se pondrá en contacto con vos por este chat a la brevedad.\n\n` +
+        `⏸️ *El bot ha sido pausado por 30 minutos* para que puedas conversar directamente con la central sin interrupciones automáticas.\n\n` +
+        `💡 _Si necesitás volver a activar el bot en cualquier momento, solo escribí_ *MENU* _o_ *BOT*.\n` +
+        `📞 _Líneas directas de guardia:_ 2346-427637 / 2346-433000.`;
+
+      return await whatsappService.enviarTexto(cleanFrom, msgDerivacion);
     }
 
     if (actionId === 'BTN_ESTADO' || textoLower === 'estado' || textoLower === 'mis viajes') {
@@ -2097,5 +2163,38 @@ export const whatsappBotService = {
         });
       }
     }
+  },
+
+  /**
+   * Pausa las respuestas automáticas del bot para un número específico por N minutos
+   */
+  pausarBotParaCliente(telefono: string, minutos: number = 30, nombre?: string) {
+    const cleanTel = whatsappService.formatearNumero(telefono);
+    pausasHumanasMap.set(cleanTel, {
+      hasta: new Date(Date.now() + minutos * 60 * 1000),
+      nombre,
+    });
+  },
+
+  /**
+   * Reanuda las respuestas automáticas del bot para un número
+   */
+  reanudarBotParaCliente(telefono: string) {
+    const cleanTel = whatsappService.formatearNumero(telefono);
+    pausasHumanasMap.delete(cleanTel);
+  },
+
+  /**
+   * Verifica si el bot está pausado para un número
+   */
+  estaBotPausado(telefono: string): boolean {
+    const cleanTel = whatsappService.formatearNumero(telefono);
+    const pausa = pausasHumanasMap.get(cleanTel);
+    if (!pausa) return false;
+    if (Date.now() >= pausa.hasta.getTime()) {
+      pausasHumanasMap.delete(cleanTel);
+      return false;
+    }
+    return true;
   },
 };
