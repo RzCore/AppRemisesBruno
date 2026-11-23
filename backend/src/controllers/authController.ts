@@ -698,10 +698,9 @@ export const loginCliente = async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
-    return res.json({
-      success: true,
-      message: '¡Bienvenido a Remises Bruno!',
+    const authPayload = {
       token: accessToken,
+      accessToken,
       refreshToken,
       user: {
         id: cliente.user.id,
@@ -709,6 +708,13 @@ export const loginCliente = async (req: Request, res: Response) => {
         rol: cliente.user.rol,
         cliente,
       },
+    };
+
+    return res.json({
+      success: true,
+      message: '¡Bienvenido a Remises Bruno!',
+      data: authPayload,
+      ...authPayload,
     });
   } catch (error: any) {
     console.error('Error en loginCliente:', error);
@@ -802,9 +808,29 @@ export const verificarCodigoCliente = async (req: Request, res: Response) => {
     const cleanCode = String(codigo).trim();
 
     // Verificar en el mapa de OTPs
-    const entry = clienteOtpMap.get(cleanDigits) || (cleanDigits.length >= 8 ? clienteOtpMap.get(cleanDigits.slice(-8)) : undefined);
+    let entry = clienteOtpMap.get(cleanDigits) || (cleanDigits.length >= 8 ? clienteOtpMap.get(cleanDigits.slice(-8)) : undefined);
     if (!entry) {
-      return res.status(400).json({ success: false, error: 'El código expiró o no fue solicitado' });
+      // Si no se encontró directo, buscar si el identificador es un DNI o teléfono de cliente registrado
+      const c = await prisma.cliente.findFirst({
+        where: {
+          OR: [
+            ...(cleanDigits.length >= 7 ? [{ dni: cleanDigits }] : []),
+            ...(cleanDigits.length >= 6 ? [{ telefono: cleanDigits }, { telefono: { contains: cleanDigits.slice(-8) } }] : []),
+          ],
+        },
+      });
+      if (c) {
+        if (c.dni && clienteOtpMap.has(c.dni)) {
+          entry = clienteOtpMap.get(c.dni);
+        } else if (c.telefono) {
+          const pKey = c.telefono.replace(/\D/g, '');
+          entry = clienteOtpMap.get(pKey) || (pKey.length >= 8 ? clienteOtpMap.get(pKey.slice(-8)) : undefined);
+        }
+      }
+    }
+
+    if (!entry) {
+      return res.status(400).json({ success: false, error: 'El código expiró o no fue solicitado. Por favor pedí uno nuevo.' });
     }
 
     if (Date.now() > entry.expiresAt) {
@@ -818,6 +844,9 @@ export const verificarCodigoCliente = async (req: Request, res: Response) => {
 
     // Código válido -> eliminarlo
     clienteOtpMap.delete(cleanDigits);
+    if (entry.telefono) {
+      clienteOtpMap.delete(entry.telefono.replace(/\D/g, ''));
+    }
 
     // Buscar el cliente para loguearlo
     let cliente = entry.clienteId
@@ -858,10 +887,9 @@ export const verificarCodigoCliente = async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
-    return res.json({
-      success: true,
-      message: 'Ingreso exitoso',
+    const authPayload = {
       token: accessToken,
+      accessToken,
       refreshToken,
       user: {
         id: cliente.user.id,
@@ -869,6 +897,13 @@ export const verificarCodigoCliente = async (req: Request, res: Response) => {
         rol: cliente.user.rol,
         cliente,
       },
+    };
+
+    return res.json({
+      success: true,
+      message: 'Ingreso exitoso',
+      data: authPayload,
+      ...authPayload,
     });
   } catch (error: any) {
     console.error('Error en verificarCodigoCliente:', error);
@@ -920,10 +955,9 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
         jwtRefreshSecret,
         { expiresIn: '7d' }
       );
-      return res.json({
-        success: true,
-        message: 'Cuenta vinculada exitosamente',
+      const payloadExistente = {
         token: accessToken,
+        accessToken,
         refreshToken,
         user: {
           id: clienteExistente.user.id,
@@ -931,6 +965,12 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
           rol: clienteExistente.user.rol,
           cliente: clienteExistente,
         },
+      };
+      return res.json({
+        success: true,
+        message: 'Cuenta vinculada exitosamente',
+        data: payloadExistente,
+        ...payloadExistente,
       });
     }
 
@@ -973,10 +1013,9 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
-    return res.json({
-      success: true,
-      message: '¡Registro completado! Bienvenido a Remises Bruno',
+    const authPayloadNuevo = {
       token: accessToken,
+      accessToken,
       refreshToken,
       user: {
         id: user.id,
@@ -984,6 +1023,13 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
         rol: user.rol,
         cliente: nuevoCliente,
       },
+    };
+
+    return res.json({
+      success: true,
+      message: '¡Registro completado! Bienvenido a Remises Bruno',
+      data: authPayloadNuevo,
+      ...authPayloadNuevo,
     });
   } catch (error: any) {
     console.error('Error en registroExpressCliente:', error);

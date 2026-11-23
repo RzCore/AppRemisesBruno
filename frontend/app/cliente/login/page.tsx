@@ -109,9 +109,14 @@ export default function ClienteLoginPage() {
     setLoading(true);
     try {
       const res = await clienteAuthService.loginCliente(identificador, pin);
-      if (res.success && res.data) {
+      const payload: any = res.data || res;
+      const userObj = payload?.user || (res as any)?.user;
+      const token = payload?.accessToken || payload?.token || (res as any)?.token;
+      const refreshToken = payload?.refreshToken || (res as any)?.refreshToken;
+
+      if (res.success && userObj && token) {
         toast.success(res.message || '¡Bienvenido a Remises Bruno!', { icon: '🚗' });
-        login(res.data.user, res.data.token, res.data.refreshToken);
+        login(userObj, token, refreshToken);
         router.replace('/cliente/app');
       } else {
         toast.error(res.message || 'PIN incorrecto. Podés ingresar solicitando un código por WhatsApp.');
@@ -155,9 +160,14 @@ export default function ClienteLoginPage() {
     setLoading(true);
     try {
       const res = await clienteAuthService.verificarCodigo(identificador, codigoOtp);
-      if (res.success && res.data) {
+      const payload: any = res.data || res;
+      const userObj = payload?.user || (res as any)?.user;
+      const token = payload?.accessToken || payload?.token || (res as any)?.token;
+      const refreshToken = payload?.refreshToken || (res as any)?.refreshToken;
+
+      if (res.success && userObj && token) {
         toast.success('¡Identidad verificada exitosamente!', { icon: '✅' });
-        login(res.data.user, res.data.token, res.data.refreshToken);
+        login(userObj, token, refreshToken);
         router.replace('/cliente/app');
       } else {
         toast.error(res.message || 'Código incorrecto o expirado');
@@ -197,9 +207,14 @@ export default function ClienteLoginPage() {
         pin: nuevoPin || undefined
       });
 
-      if (res.success && res.data) {
+      const payload: any = res.data || res;
+      const userObj = payload?.user || (res as any)?.user;
+      const token = payload?.accessToken || payload?.token || (res as any)?.token;
+      const refreshToken = payload?.refreshToken || (res as any)?.refreshToken;
+
+      if (res.success && userObj && token) {
         toast.success(res.message || '¡Cuenta creada con éxito!', { icon: '🎉' });
-        login(res.data.user, res.data.token, res.data.refreshToken);
+        login(userObj, token, refreshToken);
         router.replace('/cliente/app');
       } else {
         toast.error(res.message || 'Error al completar el registro');
