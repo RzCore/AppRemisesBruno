@@ -1209,6 +1209,55 @@ export const appUsageService = {
 
 // Servicios para clientes (registro y perfil)
 export const clienteAuthService = {
+  loginCliente: async (identificador: string, pin?: string, password?: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post('/auth/cliente/login', { identificador, pin, password });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Error al iniciar sesión',
+        data: error.response?.data,
+      };
+    }
+  },
+
+  solicitarCodigo: async (identificador: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post('/auth/cliente/solicitar-codigo', { identificador });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Error al solicitar código por WhatsApp',
+      };
+    }
+  },
+
+  verificarCodigo: async (identificador: string, codigo: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post('/auth/cliente/verificar-codigo', { identificador, codigo });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Código inválido o expirado',
+      };
+    }
+  },
+
+  registroExpress: async (data: { dni: string; nombre: string; apellido?: string; telefono: string; pin?: string }): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post('/auth/cliente/registro-express', data);
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Error en el registro express',
+      };
+    }
+  },
+
   register: async (data: any): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/cliente/register', data);

@@ -685,7 +685,7 @@ export default function ClienteApp() {
 
   useEffect(() => {
     if (!user || user.rol !== 'CLIENTE') {
-      router.push('/login');
+      router.push('/cliente/login');
       return;
     }
     buscarViajeActivo();

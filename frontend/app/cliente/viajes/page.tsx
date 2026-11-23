@@ -39,7 +39,7 @@ export default function MisViajesPage() {
 
   useEffect(() => {
     if (!user || user.rol !== 'CLIENTE') {
-      router.push('/login');
+      router.push('/cliente/login');
       return;
     }
     loadData();

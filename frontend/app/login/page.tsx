@@ -104,7 +104,21 @@ export default function LoginPage() {
               <LogoBruno size={96} />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Remises Bruno</h1>
-            <p className="text-gray-600 mt-2">Inicia sesión en tu cuenta</p>
+            <p className="text-gray-600 mt-2">Acceso a la Central (Choferes, Coordinación y Dueño)</p>
+          </div>
+
+          {/* Banner para derivar a clientes al nuevo portal exclusivo */}
+          <div className="mb-6 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+            <p className="text-xs text-emerald-800 font-semibold mb-1">
+              ¿Sos pasajero y querés pedir un remís?
+            </p>
+            <Link
+              href="/cliente/login"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3.5 py-1.5 rounded-lg transition-all shadow-sm"
+            >
+              <span>Acceder al Portal Clientes con DNI</span>
+              <span>➔</span>
+            </Link>
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">

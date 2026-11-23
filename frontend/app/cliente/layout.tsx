@@ -69,6 +69,11 @@ export default function ClienteLayout({
   const isPedirActive = pathname === '/cliente/app' || pathname === '/cliente/reserva';
   const isViajesActive = pathname === '/cliente/viajes';
 
+  // Si es la página de login exclusivo de clientes, renderizar limpio sin header ni nav de app
+  if (pathname === '/cliente/login') {
+    return <ThemeModuleProvider>{children}</ThemeModuleProvider>;
+  }
+
   return (
     <ThemeModuleProvider>
       <div className="cliente-module min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 flex flex-col transition-colors duration-200">

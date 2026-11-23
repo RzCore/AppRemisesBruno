@@ -618,3 +618,375 @@ export const verificarDni = async (req: Request, res: Response) => {
     });
   }
 };
+
+// Almacén en memoria de códigos OTP temporales de acceso para clientes
+const clienteOtpMap = new Map<string, { code: string; expiresAt: number; clienteId?: string; telefono?: string }>();
+
+/**
+ * Login exclusivo para clientes (por DNI, Teléfono o Email + PIN / Password)
+ */
+export const loginCliente = async (req: Request, res: Response) => {
+  try {
+    const { identificador, pin, password } = req.body;
+    if (!identificador) {
+      return res.status(400).json({ success: false, error: 'El DNI o teléfono es requerido' });
+    }
+
+    const rawId = String(identificador).trim();
+    const cleanDigits = rawId.replace(/\D/g, '');
+
+    // Buscar cliente por DNI, teléfono o email
+    const cliente = await prisma.cliente.findFirst({
+      where: {
+        OR: [
+          ...(cleanDigits.length >= 7 ? [{ dni: cleanDigits }] : []),
+          ...(cleanDigits.length >= 6 ? [{ telefono: cleanDigits }, { telefono: { contains: cleanDigits.slice(-8) } }] : []),
+          ...(rawId.includes('@') ? [{ email: rawId.toLowerCase() }] : []),
+        ],
+      },
+      include: {
+        user: true,
+        remiseria: {
+          select: {
+            id: true,
+            nombreFantasia: true,
+            telefono: true,
+            direccion: true,
+            valorKm: true,
+            bajadaBandera: true,
+          },
+        },
+      },
+    });
+
+    if (!cliente || !cliente.user) {
+      return res.status(404).json({
+        success: false,
+        code: 'CLIENTE_NO_ENCONTRADO',
+        error: 'No encontramos ninguna cuenta asociada a este DNI o teléfono. ¿Deseás registrarte?',
+      });
+    }
+
+    const claveIngresada = pin || password;
+    if (!claveIngresada) {
+      return res.status(400).json({
+        success: false,
+        error: 'Debe ingresar su PIN de acceso o solicitar código por WhatsApp',
+      });
+    }
+
+    const isMatch = await bcrypt.compare(String(claveIngresada), cliente.user.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: 'PIN o contraseña incorrecta. Podés ingresar solicitando un código por WhatsApp.',
+      });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET || 'secret';
+    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'refresh_secret';
+
+    const accessToken = jwt.sign(
+      { id: cliente.user.id, email: cliente.user.email, rol: cliente.user.rol },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: cliente.user.id, email: cliente.user.email, rol: cliente.user.rol },
+      jwtRefreshSecret,
+      { expiresIn: '7d' }
+    );
+
+    return res.json({
+      success: true,
+      message: '¡Bienvenido a Remises Bruno!',
+      token: accessToken,
+      refreshToken,
+      user: {
+        id: cliente.user.id,
+        email: cliente.user.email,
+        rol: cliente.user.rol,
+        cliente,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error en loginCliente:', error);
+    return res.status(500).json({ success: false, error: 'Error al procesar el ingreso de cliente' });
+  }
+};
+
+/**
+ * Solicitar código OTP de 4 dígitos por WhatsApp para login sin contraseña
+ */
+export const solicitarCodigoCliente = async (req: Request, res: Response) => {
+  try {
+    const { identificador } = req.body;
+    if (!identificador) {
+      return res.status(400).json({ success: false, error: 'DNI o teléfono requerido' });
+    }
+
+    const rawId = String(identificador).trim();
+    const cleanDigits = rawId.replace(/\D/g, '');
+
+    // Buscar cliente existente
+    const cliente = await prisma.cliente.findFirst({
+      where: {
+        OR: [
+          ...(cleanDigits.length >= 7 ? [{ dni: cleanDigits }] : []),
+          ...(cleanDigits.length >= 6 ? [{ telefono: cleanDigits }, { telefono: { contains: cleanDigits.slice(-8) } }] : []),
+        ],
+      },
+    });
+
+    let targetPhone = cliente?.telefono || cleanDigits;
+    if (!targetPhone || targetPhone.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'No se pudo identificar un número de teléfono válido para enviar el código por WhatsApp',
+      });
+    }
+
+    // Generar código de 4 dígitos
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    const cleanPhoneKey = targetPhone.replace(/\D/g, '');
+    clienteOtpMap.set(cleanPhoneKey, {
+      code,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      clienteId: cliente?.id,
+      telefono: targetPhone,
+    });
+    // También guardamos por DNI si existe
+    if (cliente?.dni) {
+      clienteOtpMap.set(cliente.dni, {
+        code,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        clienteId: cliente.id,
+        telefono: targetPhone,
+      });
+    }
+
+    const { whatsappService } = await import('../services/whatsappService');
+    const msg =
+      `🔒 *Remises Bruno - Código de Acceso*\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `Tu código para acceder a la app es: *${code}*\n\n` +
+      `⏱️ Es válido por 5 minutos. No lo compartas con nadie.`;
+
+    await whatsappService.enviarTexto(targetPhone, msg);
+
+    const ultimosDigitos = targetPhone.slice(-4);
+    return res.json({
+      success: true,
+      message: `Código enviado a tu WhatsApp terminado en ***${ultimosDigitos}`,
+      telefonoEnmascarado: `***${ultimosDigitos}`,
+    });
+  } catch (error: any) {
+    console.error('Error en solicitarCodigoCliente:', error);
+    return res.status(500).json({ success: false, error: 'Error al enviar código por WhatsApp' });
+  }
+};
+
+/**
+ * Verificar código OTP de WhatsApp e iniciar sesión
+ */
+export const verificarCodigoCliente = async (req: Request, res: Response) => {
+  try {
+    const { identificador, codigo } = req.body;
+    if (!identificador || !codigo) {
+      return res.status(400).json({ success: false, error: 'Identificador y código son requeridos' });
+    }
+
+    const rawId = String(identificador).trim();
+    const cleanDigits = rawId.replace(/\D/g, '');
+    const cleanCode = String(codigo).trim();
+
+    // Verificar en el mapa de OTPs
+    const entry = clienteOtpMap.get(cleanDigits) || (cleanDigits.length >= 8 ? clienteOtpMap.get(cleanDigits.slice(-8)) : undefined);
+    if (!entry) {
+      return res.status(400).json({ success: false, error: 'El código expiró o no fue solicitado' });
+    }
+
+    if (Date.now() > entry.expiresAt) {
+      clienteOtpMap.delete(cleanDigits);
+      return res.status(400).json({ success: false, error: 'El código ha expirado. Por favor solicitá uno nuevo.' });
+    }
+
+    if (entry.code !== cleanCode) {
+      return res.status(400).json({ success: false, error: 'Código incorrecto. Verificá los 4 dígitos.' });
+    }
+
+    // Código válido -> eliminarlo
+    clienteOtpMap.delete(cleanDigits);
+
+    // Buscar el cliente para loguearlo
+    let cliente = entry.clienteId
+      ? await prisma.cliente.findUnique({
+          where: { id: entry.clienteId },
+          include: { user: true, remiseria: true },
+        })
+      : await prisma.cliente.findFirst({
+          where: {
+            OR: [
+              ...(cleanDigits.length >= 7 ? [{ dni: cleanDigits }] : []),
+              ...(cleanDigits.length >= 6 ? [{ telefono: cleanDigits }, { telefono: { contains: cleanDigits.slice(-8) } }] : []),
+            ],
+          },
+          include: { user: true, remiseria: true },
+        });
+
+    if (!cliente || !cliente.user) {
+      return res.status(404).json({
+        success: false,
+        code: 'REGISTRO_PENDIENTE',
+        message: 'Código verificado, completá tu nombre para ingresar.',
+      });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET || 'secret';
+    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'refresh_secret';
+
+    const accessToken = jwt.sign(
+      { id: cliente.user.id, email: cliente.user.email, rol: cliente.user.rol },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: cliente.user.id, email: cliente.user.email, rol: cliente.user.rol },
+      jwtRefreshSecret,
+      { expiresIn: '7d' }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Ingreso exitoso',
+      token: accessToken,
+      refreshToken,
+      user: {
+        id: cliente.user.id,
+        email: cliente.user.email,
+        rol: cliente.user.rol,
+        cliente,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error en verificarCodigoCliente:', error);
+    return res.status(500).json({ success: false, error: 'Error al verificar código' });
+  }
+};
+
+/**
+ * Registro express de nuevo cliente (DNI, Nombre, Teléfono y PIN opcional)
+ */
+export const registroExpressCliente = async (req: Request, res: Response) => {
+  try {
+    const { dni, nombre, apellido, telefono, pin } = req.body;
+    if (!dni || !nombre || !telefono) {
+      return res.status(400).json({ success: false, error: 'DNI, Nombre y Teléfono son requeridos' });
+    }
+
+    const cleanDni = String(dni).replace(/\D/g, '').trim();
+    const cleanTel = String(telefono).replace(/\D/g, '').trim();
+    const cleanNom = String(nombre).trim();
+    const cleanApe = String(apellido || '').trim();
+
+    // Verificar si ya existe cliente con ese DNI
+    let clienteExistente = await prisma.cliente.findUnique({
+      where: { dni: cleanDni },
+      include: { user: true, remiseria: true },
+    });
+
+    const clave = pin && String(pin).length >= 4 ? String(pin) : '123456';
+    const passwordHash = await bcrypt.hash(clave, 10);
+    const jwtSecret = process.env.JWT_SECRET || 'secret';
+    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'refresh_secret';
+
+    if (clienteExistente) {
+      // Si ya existía, actualizar clave si envió pin
+      if (clienteExistente.user && pin) {
+        await prisma.user.update({
+          where: { id: clienteExistente.user.id },
+          data: { passwordHash },
+        });
+      }
+      const accessToken = jwt.sign(
+        { id: clienteExistente.user.id, email: clienteExistente.user.email, rol: clienteExistente.user.rol },
+        jwtSecret,
+        { expiresIn: '24h' }
+      );
+      const refreshToken = jwt.sign(
+        { id: clienteExistente.user.id, email: clienteExistente.user.email, rol: clienteExistente.user.rol },
+        jwtRefreshSecret,
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        success: true,
+        message: 'Cuenta vinculada exitosamente',
+        token: accessToken,
+        refreshToken,
+        user: {
+          id: clienteExistente.user.id,
+          email: clienteExistente.user.email,
+          rol: clienteExistente.user.rol,
+          cliente: clienteExistente,
+        },
+      });
+    }
+
+    const remiseriaActiva = await prisma.remiseria.findFirst({ where: { estado: true } });
+    const dummyEmail = `${cleanDni}@cliente.brunoremises.com.ar`;
+
+    const user = await prisma.user.create({
+      data: {
+        email: dummyEmail,
+        passwordHash,
+        rol: 'CLIENTE',
+      },
+    });
+
+    const nuevoCliente = await prisma.cliente.create({
+      data: {
+        nombre: cleanNom,
+        apellido: cleanApe,
+        dni: cleanDni,
+        telefono: cleanTel,
+        email: dummyEmail,
+        direccion: 'Bragado, Buenos Aires',
+        fechaNacimiento: new Date('1990-01-01'),
+        userId: user.id,
+        remiseriaId: remiseriaActiva?.id || null,
+      },
+      include: {
+        remiseria: true,
+      },
+    });
+
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, rol: user.rol },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+    const refreshToken = jwt.sign(
+      { id: user.id, email: user.email, rol: user.rol },
+      jwtRefreshSecret,
+      { expiresIn: '7d' }
+    );
+
+    return res.json({
+      success: true,
+      message: '¡Registro completado! Bienvenido a Remises Bruno',
+      token: accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        rol: user.rol,
+        cliente: nuevoCliente,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error en registroExpressCliente:', error);
+    return res.status(500).json({ success: false, error: 'Error al registrar cliente' });
+  }
+};

@@ -35,6 +35,26 @@ export function middleware(request: NextRequest) {
     subdomain = '';
   }
 
+  // --- SUBDOMINIO: CLIENTES (cliente.brunoremises.com.ar o clientes.brunoremises.com.ar) ---
+  if (subdomain === 'cliente' || subdomain === 'clientes') {
+    if (pathname === '/login' || pathname === '/registro' || pathname === '/register') {
+      url.pathname = '/cliente/login';
+      return NextResponse.rewrite(url);
+    }
+    if (pathname === '/') {
+      url.pathname = '/cliente/app';
+      return NextResponse.rewrite(url);
+    }
+    if (pathname.startsWith('/cliente/')) {
+      return NextResponse.next();
+    }
+    if (['/app', '/viajes', '/reserva', '/perfil', '/login'].includes(pathname)) {
+      url.pathname = `/cliente${pathname}`;
+      return NextResponse.rewrite(url);
+    }
+    return NextResponse.next();
+  }
+
   // Rutas de autenticación globales permitidas en cualquier subdominio
   const isAuthRoute =
     pathname.startsWith('/login') ||
@@ -48,22 +68,6 @@ export function middleware(request: NextRequest) {
   }
 
   // 3. Manejo por subdominio
-
-  // --- SUBDOMINIO: CLIENTES (clientes.brunoremises.com.ar) ---
-  if (subdomain === 'clientes') {
-    if (pathname === '/') {
-      url.pathname = '/cliente/app';
-      return NextResponse.rewrite(url);
-    }
-    if (pathname.startsWith('/cliente/')) {
-      return NextResponse.next();
-    }
-    if (['/app', '/viajes', '/reserva', '/perfil'].includes(pathname)) {
-      url.pathname = `/cliente${pathname}`;
-      return NextResponse.rewrite(url);
-    }
-    return NextResponse.next();
-  }
 
   // --- SUBDOMINIO: CHOFERES (choferes.brunoremises.com.ar) ---
   if (subdomain === 'choferes') {
