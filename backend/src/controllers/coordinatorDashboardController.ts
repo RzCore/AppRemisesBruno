@@ -641,6 +641,12 @@ export const coordinatorDashboardController = {
         }
       });
 
+      // Notificación automática por WhatsApp al pasajero según cambio de estado
+      try {
+        const { whatsappBotService } = await import('../services/whatsappBotService');
+        whatsappBotService.notificarCambioEstadoPasajero(updatedViaje, estado).catch(() => {});
+      } catch {}
+
       res.json({
         success: true,
         data: updatedViaje,

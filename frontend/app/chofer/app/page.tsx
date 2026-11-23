@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/AuthContext';
@@ -145,6 +145,7 @@ export default function ChoferApp() {
   const [montoFinalACobrar, setMontoFinalACobrar] = useState<number | null>(null);
   const [peajesInputChofer, setPeajesInputChofer] = useState('');
   const [observacionesPeajeChofer, setObservacionesPeajeChofer] = useState('');
+  const [mostrarPeajesManual, setMostrarPeajesManual] = useState(false);
 
   // Modal para agregar parada intermedia solicitada por el cliente
   const [isAddStopModalOpenChofer, setIsAddStopModalOpenChofer] = useState(false);
@@ -1685,6 +1686,7 @@ export default function ChoferApp() {
     setMontoFinalACobrar(precioSugerido);
     setPeajesInputChofer(viajeActual.montoPeajes ? String(viajeActual.montoPeajes) : '');
     setObservacionesPeajeChofer(viajeActual.observacionesPeaje || '');
+    setMostrarPeajesManual(false);
     if (viajeActual.metodoPago === 'CUENTA_CORRIENTE') {
       setMetodoPagoSeleccionado('CUENTA_CORRIENTE');
     } else {
@@ -1704,6 +1706,7 @@ export default function ChoferApp() {
       setModalFinalizarViaje(false);
       setPeajesInputChofer('');
       setObservacionesPeajeChofer('');
+      setMostrarPeajesManual(false);
       toast.success(`Viaje completado. ${metodoPagoSeleccionado === 'CUENTA_CORRIENTE' ? 'Imputado a Cuenta Corriente 🏛️' : metodoPagoSeleccionado === 'TRANSFERENCIA' ? 'Cobrado por Transferencia 💳' : 'Cobrado en Efectivo 💵'}`);
       setViajeParaCalificar(vTest);
       setModalCalificarPasajeroOpen(true);
@@ -1734,6 +1737,7 @@ export default function ChoferApp() {
         setModalFinalizarViaje(false);
         setPeajesInputChofer('');
         setObservacionesPeajeChofer('');
+        setMostrarPeajesManual(false);
         toast.success(`¡Viaje completado! Cobro en ${metodoPagoSeleccionado === 'EFECTIVO' ? 'Efectivo 💵' : 'Transferencia 💳'}`);
         // Abrir calificación del pasajero
         setViajeParaCalificar(viajeFin);
@@ -1949,6 +1953,44 @@ export default function ChoferApp() {
       : 'Pasajero');
   const clienteTelefonoActual =
     viajeActual?.clienteTelefono || viajeActual?.cliente?.telefono || null;
+
+  // Detección inteligente de viaje de larga distancia (fuera del ejido urbano local)
+  const esViajeLargaDistancia = useMemo(() => {
+    if (!viajeActual) return false;
+
+    const distGps = tripDistanceRef.current?.con || 0;
+    const distEstimada = Number(viajeActual.distanciaKm || viajeActual.distancia || 0);
+    const distConPasajero = Number(viajeActual.distanciaKmConPasajero || 0);
+    const maxDist = Math.max(distGps, distEstimada, distConPasajero);
+
+    // Mayor o igual a 18 km se considera fuera de la ciudad (interurbano/ruta con peajes)
+    if (maxDist >= 18) {
+      return true;
+    }
+
+    // Análisis semántico de origen, destino u observaciones buscando ciudades o rutas
+    const texto = `${viajeActual.origen || ''} ${viajeActual.destino || ''} ${viajeActual.observaciones || ''}`.toLowerCase();
+    const keywords = [
+      'capital', 'caba', 'buenos aires', 'la plata', 'chivilcoy', 'alberti', 'junin', 'junín',
+      '9 de julio', 'nueve de julio', 'lujan', 'luján', 'mercedes', 'ezeiza', 'aeroparque',
+      'retiro', 'san martin', 'san martín', 'moron', 'morón', 'haedo', 'ramos mejia',
+      'autopista', 'ruta', 'peaje', 'peajes', 'larga distancia', 'interurbano', 'provincia',
+      'olivera', 'suipacha', '25 de mayo', 'saladillo', 'lobos', 'rosario'
+    ];
+
+    if (keywords.some((kw) => texto.includes(kw))) {
+      return true;
+    }
+
+    // Si ya trae peajes registrados previamente
+    if (Number(viajeActual.montoPeajes || 0) > 0) {
+      return true;
+    }
+
+    return false;
+  }, [viajeActual, tripDistanceRef.current?.con]);
+
+  const debeMostrarPeajes = esViajeLargaDistancia || mostrarPeajesManual || (parseFloat(peajesInputChofer) > 0);
 
   return (
     <div className="p-3 sm:p-4 space-y-3 max-w-lg mx-auto pb-16 overflow-x-hidden">
@@ -3266,58 +3308,80 @@ export default function ChoferApp() {
               </div>
             </div>
 
-            {/* Registro de Peajes pagados por el Chofer */}
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base">🛣️</span>
-                  <span className="text-xs font-bold text-gray-800 dark:text-slate-200">
-                    Peajes abonados (Opcional)
-                  </span>
+            {/* Registro inteligente de Peajes: visible en larga distancia o desplegable en caso local */}
+            {debeMostrarPeajes ? (
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-2 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">🛣️</span>
+                    <span className="text-xs font-bold text-gray-800 dark:text-slate-200">
+                      Peajes abonados {esViajeLargaDistancia ? '(Larga distancia)' : '(Opcional)'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {esViajeLargaDistancia && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                        Auto detectado
+                      </span>
+                    )}
+                    {viajeActual.esArt && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
+                        Reembolsable ART
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {viajeActual.esArt && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
-                    Reembolsable ART
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-medium text-gray-500 dark:text-slate-400 block mb-1">
-                    Total Peajes ($)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">$</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-medium text-gray-500 dark:text-slate-400 block mb-1">
+                      Total Peajes ($)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">$</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={peajesInputChofer}
+                        onChange={(e) => setPeajesInputChofer(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full pl-7 pr-3 py-2 text-xs font-bold rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-medium text-gray-500 dark:text-slate-400 block mb-1">
+                      Detalle / Cabinas
+                    </label>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={peajesInputChofer}
-                      onChange={(e) => setPeajesInputChofer(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full pl-7 pr-3 py-2 text-xs font-bold rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      type="text"
+                      value={observacionesPeajeChofer}
+                      onChange={(e) => setObservacionesPeajeChofer(e.target.value)}
+                      placeholder="Ej: Riccheri, Olivera, Luján..."
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="text-[10px] font-medium text-gray-500 dark:text-slate-400 block mb-1">
-                    Detalle / Cabinas
-                  </label>
-                  <input
-                    type="text"
-                    value={observacionesPeajeChofer}
-                    onChange={(e) => setObservacionesPeajeChofer(e.target.value)}
-                    placeholder="Ej: Riccheri, Dellepiane..."
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
+                {parseFloat(peajesInputChofer) > 0 && (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    ✓ Se sumarán ${(parseFloat(peajesInputChofer) || 0).toLocaleString('es-AR')} a tu reintegro para este viaje.
+                  </p>
+                )}
               </div>
-              {parseFloat(peajesInputChofer) > 0 && (
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  ✓ Se sumarán ${(parseFloat(peajesInputChofer) || 0).toLocaleString('es-AR')} a tu reintegro para este viaje.
-                </p>
-              )}
-            </div>
+            ) : (
+              <div className="flex items-center justify-between px-1 py-1 text-xs bg-slate-50/60 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                <span className="text-[11px] text-gray-400 dark:text-slate-500 flex items-center gap-1.5 pl-1">
+                  <span>📍</span> Viaje local (sin peajes)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMostrarPeajesManual(true)}
+                  className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:underline flex items-center gap-1 transition-colors pr-1"
+                >
+                  <span>+</span> Ingresar peajes si corresponde
+                </button>
+              </div>
+            )}
 
             {/* Botones de acción */}
             <div className="flex gap-2 pt-2">

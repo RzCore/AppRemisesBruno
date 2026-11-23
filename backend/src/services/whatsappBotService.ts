@@ -2057,6 +2057,45 @@ export const whatsappBotService = {
     } else if (nuevoEstado === 'LLEGANDO') {
       const msg = `📍 *¡Tu remis está a 2 cuadras!*\n${choferNombre}${autoStr} está llegando. ¡Podés ir preparándote!`;
       await whatsappService.enviarTexto(telefono, msg).catch(() => {});
+    } else if (nuevoEstado === 'COMPLETADO') {
+      const cleanPhone = telefono.replace(/[^0-9]/g, '');
+      const obs = (viaje.observaciones || '').toLowerCase();
+      const email = (viaje.cliente?.email || viaje.clienteEmail || '').toLowerCase();
+
+      // Notificar si el viaje fue solicitado por WhatsApp o proviene de un canal WhatsApp
+      const esSolicitadoPorWhatsApp = Boolean(
+        obs.includes('whatsapp') ||
+        email.includes('whatsapp') ||
+        sesionesMap.has(cleanPhone)
+      );
+
+      if (esSolicitadoPorWhatsApp) {
+        const montoNumero = Number(viaje.precio || 0);
+        const montoFormateado = montoNumero.toLocaleString('es-AR');
+        const metodoPago = viaje.metodoPago === 'TRANSFERENCIA'
+          ? 'Transferencia bancaria 💳'
+          : viaje.metodoPago === 'CUENTA_CORRIENTE'
+            ? 'Cuenta Corriente 🏛️'
+            : 'Efectivo 💵';
+
+        const nombreCliente = viaje.clienteNombre || viaje.cliente?.nombre || 'Pasajero';
+        const peajes = Number(viaje.montoPeajes || 0);
+        const peajesTexto = peajes > 0 ? `\n🛣️ *Peajes incluidos:* $${peajes.toLocaleString('es-AR')}` : '';
+
+        const msgFinalizado =
+          `🏁 *¡VIAJE FINALIZADO!*\n` +
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `Hola *${nombreCliente}*, tu viaje ha finalizado con éxito.\n\n` +
+          `💵 *Monto abonado:* *$${montoFormateado}* (${metodoPago})${peajesTexto}\n` +
+          `📍 *Recorrido:* ${viaje.origen} ➔ ${viaje.destino}\n` +
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `✨ *¡Muchas gracias por elegir Remises Bruno!*\n` +
+          `Esperamos que hayas tenido un excelente viaje. Ante cualquier consulta estamos a tu disposición. ¡Hasta la próxima! 🚕🙌`;
+
+        await whatsappService.enviarTexto(telefono, msgFinalizado).catch((err) => {
+          console.warn('Aviso enviando WhatsApp fin de viaje:', err);
+        });
+      }
     }
   },
 };
