@@ -45,7 +45,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { DireccionFrecuente, ParadaIntermedia } from '@/types';
-import { clienteService, coordinadorDashboardService } from '@/lib/api';
+import { clienteService, coordinadorDashboardService, remiseriaService } from '@/lib/api';
 import { subscribeToPushNotifications } from '@/lib/pushNotifications';
 import Link from 'next/link';
 
@@ -225,6 +225,12 @@ export default function ClienteApp() {
   const [choferLiveCoords, setChoferLiveCoords] = useState<[number, number] | null>(null);
   const [isRequesting, setIsRequesting] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
+  const [estadoAgencia, setEstadoAgencia] = useState<{
+    abierta: boolean;
+    motivo?: string;
+    mensaje?: string;
+    reaperturaEstimada?: string;
+  }>({ abierta: true });
 
   // Modales
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
@@ -484,6 +490,33 @@ export default function ClienteApp() {
       const remId = user?.cliente?.remiseriaId || activeViajeRef.current?.remiseriaId;
       if (remId) {
         socket.emit('join_room', { remiseriaId: remId });
+      }
+    });
+
+    // Cargar estado operativo de la remisería
+    remiseriaService.getActiva().then((res) => {
+      if (res.success && res.data) {
+        if (res.data.estadoOperativo) {
+          setEstadoAgencia(res.data.estadoOperativo);
+        } else if (res.data.agenciaAbierta !== undefined) {
+          setEstadoAgencia({
+            abierta: res.data.agenciaAbierta,
+            mensaje: res.data.mensajeCierre || undefined
+          });
+        }
+      }
+    }).catch(() => {});
+
+    // Escuchar actualizaciones de apertura/cierre de la agencia en vivo
+    socket.on('agencia_estado_actualizado', (data: any) => {
+      if (data?.estadoOperativo) {
+        setEstadoAgencia(data.estadoOperativo);
+        if (!data.estadoOperativo.abierta) {
+          toast(data.estadoOperativo.mensaje || 'La agencia permanecerá cerrada por horario especial.', {
+            icon: '⛔',
+            duration: 6000
+          });
+        }
       }
     });
 
@@ -915,23 +948,84 @@ export default function ClienteApp() {
     }
   };
 
-  const usarUbicacionActual = async () => {
-    try {
-      const res = await clienteService.getUbicacionActual();
-      if (res.success && res.data) {
-        setIsOrigenSelected(true);
-        setOrigen(res.data.direccion);
-        setOrigenCoords({
-          lat: res.data.lat,
-          lon: res.data.lng
-        });
-        toast.success('Ubicación obtenida exitosamente');
-      } else {
-        toast.error('No se pudo obtener la ubicación');
-      }
-    } catch {
-      toast.error('Error al obtener ubicación actual');
+  const usarUbicacionActual = () => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      toast.error('Tu dispositivo o navegador no soporta geolocalización GPS');
+      return;
     }
+
+    const toastId = toast.loading('📍 Obteniendo tu ubicación GPS real...');
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          // Intentar geocodificación inversa con OpenStreetMap Nominatim para obtener calle y número
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`,
+            { headers: { 'Accept': 'application/json' } }
+          );
+          const data = await res.json();
+          let direccionFormateada = '';
+
+          if (data?.address) {
+            const road = data.address.road || data.address.pedestrian || data.address.street;
+            const houseNumber = data.address.house_number || '';
+            const city = data.address.city || data.address.town || data.address.village || 'Chivilcoy';
+            if (road) {
+              direccionFormateada = `${road} ${houseNumber}`.trim() + `, ${city}`;
+            } else if (data.display_name) {
+              direccionFormateada = data.display_name.split(',').slice(0, 3).join(',').trim();
+            }
+          }
+
+          if (!direccionFormateada) {
+            // Intentar con el endpoint del backend si Nominatim web falló
+            try {
+              const bRes = await clienteService.getUbicacionActual(latitude, longitude);
+              if (bRes.success && bRes.data?.direccion) {
+                direccionFormateada = bRes.data.direccion;
+              }
+            } catch (bErr) {
+              console.warn('Backend reverse geocode fallback:', bErr);
+            }
+          }
+
+          if (!direccionFormateada) {
+            direccionFormateada = `Ubicación GPS (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+          }
+
+          setOrigen(direccionFormateada);
+          setOrigenCoords({ lat: latitude, lon: longitude });
+          setIsOrigenSelected(true);
+          setOrigenSuggestions([]);
+          toast.success(`📍 Ubicación real obtenida: ${direccionFormateada}`, { id: toastId, duration: 4500 });
+        } catch (err) {
+          console.warn('Error en reverse geocoding:', err);
+          const fallbackDir = `Ubicación GPS (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+          setOrigen(fallbackDir);
+          setOrigenCoords({ lat: latitude, lon: longitude });
+          setIsOrigenSelected(true);
+          setOrigenSuggestions([]);
+          toast.success('📍 Ubicación GPS real obtenida', { id: toastId });
+        }
+      },
+      (error) => {
+        console.error('Error GPS:', error);
+        if (error.code === error.PERMISSION_DENIED) {
+          toast.error('Permiso de GPS denegado. Habilitá los permisos de ubicación en tu navegador o celular.', { id: toastId, duration: 5000 });
+        } else if (error.code === error.TIMEOUT) {
+          toast.error('Tiempo de espera agotado al consultar GPS. Por favor intentá nuevamente.', { id: toastId });
+        } else {
+          toast.error('No se pudo acceder a tu ubicación actual.', { id: toastId });
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
   };
 
   const calcularPrecio = async (metodoPagoParam?: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE') => {
@@ -986,6 +1080,12 @@ export default function ClienteApp() {
 
   const pedirAuto = async () => {
     if (!origen || !destino || !presupuesto) return;
+
+    if (!estadoAgencia.abierta) {
+      toast.error(estadoAgencia.mensaje || 'La agencia se encuentra momentáneamente cerrada.', { duration: 6000 });
+      return;
+    }
+
     setIsRequesting(true);
     setEstadoViaje('BUSCANDO');
     
@@ -1223,6 +1323,35 @@ export default function ClienteApp() {
       {/* CONTROLES SUPERIORES (Ingreso de dirección) */}
       {estadoViaje === 'IDLE' && (
         <div className="z-20 p-4 w-full max-w-lg mx-auto overflow-y-auto max-h-[calc(100vh-14rem)] no-scrollbar">
+          {/* Banner de Aviso: Agencia Cerrada por Horario Especial o Festividades */}
+          {!estadoAgencia.abierta && (
+            <div className="mb-3.5 bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-amber-500/15 border-2 border-amber-500/40 rounded-2xl p-4 text-amber-900 dark:text-amber-200 shadow-md">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0 mt-0.5 shadow-sm">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div className="space-y-1 flex-1">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                      Agencia Cerrada Temporalmente
+                    </h4>
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white shadow-xs">
+                      Cerrado
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-slate-800 dark:text-slate-200 font-medium">
+                    {estadoAgencia.mensaje || 'La agencia permanecerá cerrada por festividades.'}
+                  </p>
+                  {estadoAgencia.reaperturaEstimada && (
+                    <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                      🚗 Reapertura estimada: {estadoAgencia.reaperturaEstimada}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-800 transition-colors">
             <div className="p-4 space-y-3.5">
               
@@ -1248,17 +1377,39 @@ export default function ClienteApp() {
                     <button 
                       type="button"
                       onClick={usarUbicacionActual}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-primary-600 dark:text-primary-400 hover:text-primary-800 transition-colors"
-                      title="Usar mi ubicación actual"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-primary-600 dark:text-primary-400 hover:text-primary-800 transition-colors p-1"
+                      title="Usar mi ubicación GPS real"
                     >
                       <Navigation className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
+                {/* Acceso rápido destacado para usar ubicación GPS real */}
+                {!isOrigenSelected && !origen.trim() && (
+                  <div className="pl-7 pt-1.5">
+                    <button
+                      type="button"
+                      onClick={usarUbicacionActual}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 rounded-xl text-xs font-bold transition-all shadow-2xs active:scale-95"
+                    >
+                      <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
+                      <span>📍 Usar mi ubicación actual (GPS real)</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* Sugerencias Origen */}
                 {origenSuggestions.length > 0 && (
                   <div className="absolute left-7 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={usarUbicacionActual}
+                      className="w-full text-left p-2.5 text-xs bg-emerald-50/70 hover:bg-emerald-100/90 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/50 border-b border-emerald-100 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold flex items-center gap-2 transition-colors"
+                    >
+                      <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>📍 Usar mi ubicación GPS actual en vivo</span>
+                    </button>
                     {origenSuggestions.map((s, idx) => (
                       <button
                         type="button"
@@ -1671,10 +1822,19 @@ export default function ClienteApp() {
 
               <button 
                 onClick={pedirAuto}
-                disabled={isRequesting}
-                className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl py-4 shadow-lg shadow-primary-500/25 active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm"
+                disabled={isRequesting || !estadoAgencia.abierta}
+                className={`w-full font-bold rounded-xl py-4 shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-sm ${
+                  !estadoAgencia.abierta
+                    ? 'bg-slate-400 dark:bg-slate-700 text-white cursor-not-allowed shadow-none'
+                    : 'bg-primary-600 hover:bg-primary-700 text-white shadow-primary-500/25'
+                }`}
               >
-                {isRequesting ? (
+                {!estadoAgencia.abierta ? (
+                  <>
+                    <Clock className="w-4 h-4" />
+                    <span>AGENCIA CERRADA POR HORARIO ESPECIAL</span>
+                  </>
+                ) : isRequesting ? (
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                 ) : (
                   <>

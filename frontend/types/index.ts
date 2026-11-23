@@ -40,6 +40,15 @@ export interface Remiseria {
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;
   comisionPorcentaje?: number;
+  agenciaAbierta?: boolean;
+  mensajeCierre?: string;
+  cierreAutomaticoFiestas?: boolean;
+  estadoOperativo?: {
+    abierta: boolean;
+    motivo: string;
+    mensaje: string;
+    reaperturaEstimada?: string;
+  };
   createdAt: string;
   updatedAt: string;
   duenios?: RemiseriaDuenio[];
@@ -402,6 +411,9 @@ export interface UpdateRemiseriaData {
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;
   comisionPorcentaje?: number;
+  agenciaAbierta?: boolean;
+  mensajeCierre?: string;
+  cierreAutomaticoFiestas?: boolean;
 }
 
 export interface CreateDuenioData {

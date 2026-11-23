@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
-import { clienteService, coordinadorDashboardService } from '@/lib/api';
+import { clienteService, coordinadorDashboardService, remiseriaService } from '@/lib/api';
 import { 
   Calendar, 
   MapPin, 
@@ -12,7 +12,8 @@ import {
   ArrowLeft, 
   Loader2, 
   Navigation, 
-  Repeat 
+  Repeat,
+  AlertTriangle
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -53,6 +54,28 @@ export default function NuevaReserva() {
     diasSemana: [],
     observaciones: ''
   });
+
+  const [estadoAgencia, setEstadoAgencia] = useState<{
+    abierta: boolean;
+    motivo?: string;
+    mensaje?: string;
+    reaperturaEstimada?: string;
+  }>({ abierta: true });
+
+  useEffect(() => {
+    remiseriaService.getActiva().then((res) => {
+      if (res.success && res.data) {
+        if (res.data.estadoOperativo) {
+          setEstadoAgencia(res.data.estadoOperativo);
+        } else if (res.data.agenciaAbierta !== undefined) {
+          setEstadoAgencia({
+            abierta: res.data.agenciaAbierta,
+            mensaje: res.data.mensajeCierre || undefined
+          });
+        }
+      }
+    }).catch(err => console.warn('Error obteniendo estado de remiseria:', err));
+  }, []);
 
   useEffect(() => {
     if (isOrigenSelected || !formData.origen || formData.origen.length < 3) {
@@ -123,40 +146,121 @@ export default function NuevaReserva() {
     }));
   };
 
-  const obtenerUbicacionActual = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          try {
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-            );
-            const data = await response.json();
-            const direccion = data.display_name || `${latitude}, ${longitude}`;
-            
-            setUbicacionActual({ lat: latitude, lng: longitude, direccion });
-            setFormData(prev => ({ ...prev, origen: direccion }));
-            setOrigenCoords({ lat: latitude, lon: longitude });
-            setIsOrigenSelected(true);
-            setOrigenSuggestions([]);
-          } catch (error) {
-            console.error('Error al obtener dirección:', error);
-            const direccion = `${latitude}, ${longitude}`;
-            setUbicacionActual({ lat: latitude, lng: longitude, direccion });
-            setFormData(prev => ({ ...prev, origen: direccion }));
-            setOrigenCoords({ lat: latitude, lon: longitude });
-            setIsOrigenSelected(true);
-          }
-        },
-        (error) => {
-          console.error('Error de geolocalización:', error);
-          toast.error('No se pudo obtener tu ubicación actual');
-        }
-      );
-    } else {
-      toast.error('Geolocalización no soportada por el navegador');
+  const evaluarCierreEnFecha = (dateToCheck: Date): { cerrada: boolean; mensaje: string; reapertura?: string } => {
+    const month = dateToCheck.getMonth() + 1;
+    const day = dateToCheck.getDate();
+    const timeDec = dateToCheck.getHours() + dateToCheck.getMinutes() / 60;
+
+    // NAVIDAD: 24/12 desde las 18:00 hs hasta el 25/12 a las 19:00 hs
+    const isNavidadEve = (month === 12 && day === 24 && timeDec >= 18);
+    const isNavidadDay = (month === 12 && day === 25 && timeDec < 19);
+    if (isNavidadEve || isNavidadDay) {
+      return {
+        cerrada: true,
+        mensaje: '🎄 Por vísperas y celebración de Navidad, la central permanecerá cerrada desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs.',
+        reapertura: '25/12 a las 19:00 hs'
+      };
     }
+
+    // AÑO NUEVO: 31/12 desde las 18:00 hs hasta el 01/01 a las 19:00 hs
+    const isNewYearEve = (month === 12 && day === 31 && timeDec >= 18);
+    const isNewYearDay = (month === 1 && day === 1 && timeDec < 19);
+    if (isNewYearEve || isNewYearDay) {
+      return {
+        cerrada: true,
+        mensaje: '🎆 Por vísperas y celebración de Fin de Año, la central permanecerá cerrada desde el 31/12 a las 18:00 hs hasta el 01/01 a las 19:00 hs.',
+        reapertura: '01/01 a las 19:00 hs'
+      };
+    }
+
+    // Cierre manual vigente
+    if (!estadoAgencia.abierta) {
+      return {
+        cerrada: true,
+        mensaje: estadoAgencia.mensaje || 'La agencia se encuentra momentáneamente en pausa.',
+        reapertura: estadoAgencia.reaperturaEstimada
+      };
+    }
+
+    return { cerrada: false, mensaje: '' };
+  };
+
+  const obtenerUbicacionActual = () => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      toast.error('Geolocalización no soportada por el dispositivo o navegador');
+      return;
+    }
+
+    const toastId = toast.loading('📍 Obteniendo tu ubicación GPS real...');
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`,
+            { headers: { 'Accept': 'application/json' } }
+          );
+          const data = await res.json();
+          let direccionFormateada = '';
+
+          if (data?.address) {
+            const road = data.address.road || data.address.pedestrian || data.address.street;
+            const houseNumber = data.address.house_number || '';
+            const city = data.address.city || data.address.town || data.address.village || 'Chivilcoy';
+            if (road) {
+              direccionFormateada = `${road} ${houseNumber}`.trim() + `, ${city}`;
+            } else if (data.display_name) {
+              direccionFormateada = data.display_name.split(',').slice(0, 3).join(',').trim();
+            }
+          }
+
+          if (!direccionFormateada) {
+            try {
+              const bRes = await clienteService.getUbicacionActual(latitude, longitude);
+              if (bRes.success && bRes.data?.direccion) {
+                direccionFormateada = bRes.data.direccion;
+              }
+            } catch (bErr) {
+              console.warn('Backend reverse geocode fallback:', bErr);
+            }
+          }
+
+          if (!direccionFormateada) {
+            direccionFormateada = `Ubicación GPS (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+          }
+
+          setUbicacionActual({ lat: latitude, lng: longitude, direccion: direccionFormateada });
+          setFormData(prev => ({ ...prev, origen: direccionFormateada }));
+          setOrigenCoords({ lat: latitude, lon: longitude });
+          setIsOrigenSelected(true);
+          setOrigenSuggestions([]);
+          toast.success(`📍 Ubicación real obtenida: ${direccionFormateada}`, { id: toastId, duration: 4000 });
+        } catch (error) {
+          console.error('Error al obtener dirección:', error);
+          const fallbackDir = `Ubicación GPS (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+          setUbicacionActual({ lat: latitude, lng: longitude, direccion: fallbackDir });
+          setFormData(prev => ({ ...prev, origen: fallbackDir }));
+          setOrigenCoords({ lat: latitude, lon: longitude });
+          setIsOrigenSelected(true);
+          setOrigenSuggestions([]);
+          toast.success('📍 Ubicación GPS obtenida', { id: toastId });
+        }
+      },
+      (error) => {
+        console.error('Error de geolocalización:', error);
+        if (error.code === error.PERMISSION_DENIED) {
+          toast.error('Permiso de GPS denegado. Habilitá la ubicación en tu navegador o celular.', { id: toastId });
+        } else {
+          toast.error('No se pudo obtener tu ubicación actual', { id: toastId });
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
   };
 
   const validarFormulario = () => {
@@ -180,6 +284,13 @@ export default function NuevaReserva() {
     const fechaHora = new Date(`${formData.fechaInicio}T${formData.horaInicio}`);
     if (fechaHora <= new Date()) {
       toast.error('La fecha y hora deben ser futuras');
+      return false;
+    }
+
+    // Validar si cae en horario de fiestas o cierre de la agencia
+    const checkCierre = evaluarCierreEnFecha(fechaHora);
+    if (checkCierre.cerrada) {
+      toast.error(`⚠️ La agencia permanecerá cerrada en el horario solicitado: ${checkCierre.mensaje}`, { duration: 6000 });
       return false;
     }
 
@@ -262,6 +373,33 @@ export default function NuevaReserva() {
 
       {/* Contenido principal */}
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Banner de Aviso de Horario Especial o Pausa */}
+        {!estadoAgencia.abierta && (
+          <div className="mb-6 bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-amber-500/15 border-2 border-amber-500/40 rounded-2xl p-4 text-amber-900 dark:text-amber-200 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0 mt-0.5">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div className="space-y-1 flex-1">
+                <h4 className="text-sm font-bold flex items-center gap-2">
+                  <span>ATENCIÓN: HORARIO ESPECIAL / CENTRAL EN PAUSA</span>
+                </h4>
+                <p className="text-xs leading-relaxed text-slate-800 dark:text-slate-200 font-medium">
+                  {estadoAgencia.mensaje || 'La agencia permanecerá cerrada por festividades o receso programado.'}
+                </p>
+                {estadoAgencia.reaperturaEstimada && (
+                  <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                    🚗 Reapertura estimada: {estadoAgencia.reaperturaEstimada}
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Podés programar reservas únicamente para fechas y horarios en los que la agencia ya se encuentre operativa.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm p-6 border border-gray-200 dark:border-slate-800 transition-colors">
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Crear Nueva Reserva</h2>

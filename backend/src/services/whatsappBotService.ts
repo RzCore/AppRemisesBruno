@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { whatsappService } from './whatsappService';
 import { pushNotificationService } from './pushNotificationService';
 import { transcriptionService } from './transcriptionService';
+import { checkAgenciaEstado } from './agencyScheduleService';
 import crypto from 'crypto';
 
 // ==============================================================================
@@ -960,6 +961,16 @@ export const whatsappBotService = {
           }
         } else {
           // Audio normal en IDLE pidiendo auto
+          const estadoAgencia = checkAgenciaEstado(remiseria);
+          if (!estadoAgencia.abierta) {
+            resetSesion(cleanFrom);
+            const msgCerrado = `⛔ *AGENCIA CERRADA*\n\nHola, *${nombreMostrado}*.\nEn este momento nuestra central se encuentra cerrada.\n\n📢 *Aviso:* ${estadoAgencia.mensaje}\n\n${estadoAgencia.reaperturaEstimada ? `🚗 *Apertura prevista:* ${estadoAgencia.reaperturaEstimada}\n\n` : ''}Si tenés una urgencia podés comunicarte con nuestro operador de guardia o consultar tus reservas agendadas.`;
+            return await whatsappService.enviarBotones(cleanFrom, msgCerrado, [
+              { id: 'BTN_OPERADOR', title: '📞 Operador Guardia' },
+              { id: 'BTN_ESTADO', title: '📍 Mis Reservas' },
+            ]);
+          }
+
           sesion.esReserva = false;
           sesion.estado = 'CONFIRMANDO_AUDIO_ORIGEN';
           return await whatsappService.enviarBotones(
@@ -1053,6 +1064,17 @@ export const whatsappBotService = {
           textoLower.includes('viaje') ||
           textoLower.includes('ahora')
         ) {
+          // Validar estado de la agencia antes de iniciar el pedido
+          const estadoAgencia = checkAgenciaEstado(remiseria);
+          if (!estadoAgencia.abierta) {
+            resetSesion(cleanFrom);
+            const msgCerrado = `⛔ *AGENCIA CERRADA*\n\nHola, *${nombreMostrado}*.\nEn este momento nuestra central se encuentra cerrada.\n\n📢 *Aviso:* ${estadoAgencia.mensaje}\n\n${estadoAgencia.reaperturaEstimada ? `🚗 *Apertura prevista:* ${estadoAgencia.reaperturaEstimada}\n\n` : ''}Si tenés una urgencia podés consultar al operador de guardia o verificar tus viajes anteriores.`;
+            return await whatsappService.enviarBotones(cleanFrom, msgCerrado, [
+              { id: 'BTN_OPERADOR', title: '📞 Operador Guardia' },
+              { id: 'BTN_ESTADO', title: '📍 Mis Viajes' },
+            ]);
+          }
+
           sesion.esReserva = false;
           sesion.estado = 'ESPERANDO_ORIGEN';
           return await whatsappService.enviarTexto(
@@ -1076,6 +1098,16 @@ export const whatsappBotService = {
           return await this.consultarEstadoViaje(cleanFrom, cliente?.id);
         }
 
+        // Validar si la agencia está cerrada al saludar
+        const estadoAgencia = checkAgenciaEstado(remiseria);
+        if (!estadoAgencia.abierta) {
+          const mensajeCerrado = `👋 ¡Hola, *${nombreMostrado}*!\n\n⛔ *En este momento nuestra central se encuentra cerrada.*\n\n📢 *Aviso:* ${estadoAgencia.mensaje}\n\n${estadoAgencia.reaperturaEstimada ? `🚗 *Apertura prevista:* ${estadoAgencia.reaperturaEstimada}\n\n` : ''}Podés consultar tus viajes agendados o comunicarte con nuestro operador de guardia.`;
+          return await whatsappService.enviarBotones(cleanFrom, mensajeCerrado, [
+            { id: 'BTN_OPERADOR', title: '📞 Operador Guardia' },
+            { id: 'BTN_ESTADO', title: '📍 Mis Reservas' },
+          ]);
+        }
+
         // Saludo de bienvenida y menú principal interactivo
         const mensajeBienvenida = `👋 ¡Hola, *${nombreMostrado}*! Bienvenido a *Remises Bruno*.\n¿Cómo querés viajar hoy?`;
         return await whatsappService.enviarBotones(cleanFrom, mensajeBienvenida, [
@@ -1096,6 +1128,15 @@ export const whatsappBotService = {
         const parseResult = parsearFechaHoraReserva(texto);
         if ('error' in parseResult) {
           return await whatsappService.enviarTexto(cleanFrom, parseResult.error);
+        }
+
+        // Validar si la agencia está cerrada en la fecha y hora seleccionada para la reserva
+        const estadoAgenciaReserva = checkAgenciaEstado(remiseria, parseResult.fecha);
+        if (!estadoAgenciaReserva.abierta) {
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            `⚠️ En el horario elegido nuestra central permanecerá cerrada.\n\n📢 *Motivo:* ${estadoAgenciaReserva.mensaje}\n\nPor favor escribí otra fecha u horario para tu reserva (ej: *Mañana 08:30*, *Lunes 09:00*):`
+          );
         }
 
         sesion.fechaHoraReserva = parseResult.fecha;
@@ -1518,15 +1559,30 @@ export const whatsappBotService = {
     remiseriaId: string
   ) {
     try {
+      const fechaInicio = sesion.fechaHoraReserva || new Date();
+      const horaInicio = sesion.horaInicioStr || '08:00';
+      const fechaTexto = sesion.fechaHoraTexto || 'Fecha programada';
+
+      // Validar si la agencia está cerrada en la fecha y hora seleccionada
+      const remiseriaData = await prisma.remiseria.findUnique({
+        where: { id: remiseriaId },
+        select: { agenciaAbierta: true, mensajeCierre: true, cierreAutomaticoFiestas: true }
+      });
+      const estadoAgenciaReserva = checkAgenciaEstado(remiseriaData, fechaInicio);
+      if (!estadoAgenciaReserva.abierta) {
+        resetSesion(cleanFrom);
+        return await whatsappService.enviarTexto(
+          cleanFrom,
+          `⛔ *NO FUE POSIBLE AGENDAR LA RESERVA*\n\nNuestra central permanecerá cerrada en la fecha y hora solicitada (${fechaTexto}).\n\n📢 *Motivo:* ${estadoAgenciaReserva.mensaje}\n\n${estadoAgenciaReserva.reaperturaEstimada ? `🚗 *Apertura prevista:* ${estadoAgenciaReserva.reaperturaEstimada}\n\n` : ''}Por favor escribinos para coordinar otro horario.`
+        );
+      }
+
       const trackingToken = crypto.randomBytes(16).toString('hex');
       const codigoPin = Math.floor(1000 + Math.random() * 9000).toString();
       const origen = sesion.origen || 'Origen solicitado por WhatsApp';
       const destino = sesion.destino || 'Destino a convenir';
       const precio = sesion.precioEstimado || 3500;
       const clienteNombre = sesion.nombre || 'Pasajero WhatsApp';
-      const fechaInicio = sesion.fechaHoraReserva || new Date();
-      const horaInicio = sesion.horaInicioStr || '08:00';
-      const fechaTexto = sesion.fechaHoraTexto || 'Fecha programada';
 
       const origenDetallado =
         sesion.origenLat && sesion.origenLon
@@ -1629,6 +1685,21 @@ export const whatsappBotService = {
     remiseriaId: string
   ) {
     try {
+      // Validar si la agencia está cerrada al momento del pedido
+      const remiseriaData = await prisma.remiseria.findUnique({
+        where: { id: remiseriaId },
+        select: { agenciaAbierta: true, mensajeCierre: true, cierreAutomaticoFiestas: true }
+      });
+      const estadoAgencia = checkAgenciaEstado(remiseriaData);
+      if (!estadoAgencia.abierta) {
+        resetSesion(cleanFrom);
+        const msgCerrado = `⛔ *AGENCIA CERRADA*\n\nNuestra central se encuentra momentáneamente cerrada.\n\n📢 *Aviso:* ${estadoAgencia.mensaje}\n\n${estadoAgencia.reaperturaEstimada ? `🚗 *Apertura prevista:* ${estadoAgencia.reaperturaEstimada}\n\n` : ''}Disculpá las molestias ocasionadas.`;
+        return await whatsappService.enviarBotones(cleanFrom, msgCerrado, [
+          { id: 'BTN_OPERADOR', title: '📞 Operador Guardia' },
+          { id: 'BTN_ESTADO', title: '📍 Mis Reservas' },
+        ]);
+      }
+
       const trackingToken = crypto.randomBytes(16).toString('hex');
       const codigoPin = Math.floor(1000 + Math.random() * 9000).toString();
       const origen = sesion.origen || 'Origen solicitado por WhatsApp';

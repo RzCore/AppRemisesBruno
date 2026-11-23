@@ -1910,9 +1910,12 @@ export const clienteService = {
   },
 
   // Obtener ubicación actual
-  getUbicacionActual: async (): Promise<ApiResponse<{ lat: number; lng: number; direccion: string }>> => {
+  getUbicacionActual: async (lat?: number, lng?: number): Promise<ApiResponse<{ lat: number; lng: number; direccion: string }>> => {
     try {
-      const response = await api.get('/cliente/ubicacion-actual');
+      const url = (lat !== undefined && lng !== undefined)
+        ? `/cliente/ubicacion-actual?lat=${lat}&lng=${lng}`
+        : '/cliente/ubicacion-actual';
+      const response = await api.get(url);
       return handleApiResponse<{ lat: number; lng: number; direccion: string }>(response);
     } catch (error: any) {
       return {

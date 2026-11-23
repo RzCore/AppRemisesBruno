@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { CreateRemiseriaRequest, UpdateRemiseriaRequest, AuthenticatedRequest, ApiResponse } from '../types';
+import { checkAgenciaEstado } from '../services/agencyScheduleService';
 
 export const getRemiseriaActiva = async (req: Request, res: Response) => {
   try {
@@ -21,6 +22,9 @@ export const getRemiseriaActiva = async (req: Request, res: Response) => {
         valorHoraEspera: true,
         comisionPorcentaje: true,
         comisionDuenioAuto: true,
+        agenciaAbierta: true,
+        mensajeCierre: true,
+        cierreAutomaticoFiestas: true,
       }
     });
 
@@ -31,9 +35,14 @@ export const getRemiseriaActiva = async (req: Request, res: Response) => {
       });
     }
 
+    const estadoOperativo = checkAgenciaEstado(remiseria);
+
     res.json({
       success: true,
-      data: remiseria
+      data: {
+        ...remiseria,
+        estadoOperativo
+      }
     });
   } catch (error) {
     console.error('Error al obtener remisería activa:', error);
@@ -338,7 +347,25 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
   try {
     const { id } = req.params;
     const { rol, id: userId } = req.user!;
-    const { nombreFantasia, razonSocial, cuit, direccion, telefono, estado, duenioIds, valorKm, bajadaBandera, valorHoraEspera, comisionDuenioAuto, comisionPorcentaje, latitud, longitud }: UpdateRemiseriaRequest = req.body;
+    const { 
+      nombreFantasia, 
+      razonSocial, 
+      cuit, 
+      direccion, 
+      telefono, 
+      estado, 
+      duenioIds, 
+      valorKm, 
+      bajadaBandera, 
+      valorHoraEspera, 
+      comisionDuenioAuto, 
+      comisionPorcentaje, 
+      latitud, 
+      longitud,
+      agenciaAbierta,
+      mensajeCierre,
+      cierreAutomaticoFiestas
+    }: UpdateRemiseriaRequest = req.body;
 
     // Verificar acceso
     if (rol === 'DUENIO') {
@@ -409,11 +436,31 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
     if (valorHoraEspera !== undefined) updateData.valorHoraEspera = valorHoraEspera;
     if (comisionDuenioAuto !== undefined) updateData.comisionDuenioAuto = comisionDuenioAuto;
     if (comisionPorcentaje !== undefined) updateData.comisionPorcentaje = comisionPorcentaje;
+    if (agenciaAbierta !== undefined) updateData.agenciaAbierta = Boolean(agenciaAbierta);
+    if (mensajeCierre !== undefined) updateData.mensajeCierre = mensajeCierre;
+    if (cierreAutomaticoFiestas !== undefined) updateData.cierreAutomaticoFiestas = Boolean(cierreAutomaticoFiestas);
 
     const remiseria = await prisma.remiseria.update({
       where: { id },
       data: updateData
     });
+
+    // Notificar en tiempo real a clientes, coordinadores y choferes el cambio de estado de la agencia
+    try {
+      const { getIO } = await import('../lib/socket');
+      const io = getIO();
+      if (io) {
+        io.emit('agencia_estado_actualizado', {
+          remiseriaId: remiseria.id,
+          agenciaAbierta: remiseria.agenciaAbierta,
+          mensajeCierre: remiseria.mensajeCierre,
+          cierreAutomaticoFiestas: remiseria.cierreAutomaticoFiestas,
+          estadoOperativo: checkAgenciaEstado(remiseria)
+        });
+      }
+    } catch (sErr) {
+      console.warn('Socket aviso estado agencia:', sErr);
+    }
 
     // Solo admin puede modificar dueños asociados
     if (duenioIds !== undefined && rol === 'ADMIN') {

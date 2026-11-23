@@ -78,6 +78,9 @@ model Remiseria {
   valorHoraEspera Float  @default(12000)
   tarifaEspecialActiva String?   @default("NORMAL")
   porcentajeRecargoTarifa Float  @default(0.0)
+  agenciaAbierta        Boolean  @default(true)
+  mensajeCierre         String?  @default("La agencia se encuentra momentáneamente cerrada. Disculpe las molestias.")
+  cierreAutomaticoFiestas Boolean @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

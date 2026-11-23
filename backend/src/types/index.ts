@@ -87,6 +87,9 @@ export interface UpdateRemiseriaRequest {
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;
   comisionPorcentaje?: number;
+  agenciaAbierta?: boolean;
+  mensajeCierre?: string;
+  cierreAutomaticoFiestas?: boolean;
 }
 
 export interface CreateDuenioRequest {

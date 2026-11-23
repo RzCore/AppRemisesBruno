@@ -9,7 +9,8 @@ import { Remiseria, UpdateRemiseriaData } from '@/types';
 import { 
   Settings, Building, DollarSign, Phone, MapPin, 
   ShieldCheck, Save, Loader2, Calculator, Info,
-  CheckCircle2, Sparkles
+  CheckCircle2, Sparkles, Clock, AlertTriangle, Power,
+  Calendar, MessageCircle
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -24,6 +25,7 @@ export default function ConfiguracionPage() {
     register,
     handleSubmit,
     watch,
+    setValue,
     reset,
     formState: { errors, isDirty },
   } = useForm<UpdateRemiseriaData>();
@@ -32,6 +34,7 @@ export default function ConfiguracionPage() {
   const watchedBajada = watch('bajadaBandera', 3500);
   const watchedKm = watch('valorKm', 1200);
   const watchedComision = watch('comisionPorcentaje', 30);
+  const watchedAgenciaAbierta = watch('agenciaAbierta', true);
 
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
@@ -63,6 +66,9 @@ export default function ConfiguracionPage() {
           valorHoraEspera: miRemiseria.valorHoraEspera || 10000,
           comisionPorcentaje: miRemiseria.comisionPorcentaje || 30.0,
           comisionDuenioAuto: miRemiseria.comisionDuenioAuto || 20.0,
+          agenciaAbierta: miRemiseria.agenciaAbierta !== false,
+          mensajeCierre: miRemiseria.mensajeCierre || 'La agencia permanecerá cerrada por festividades desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!',
+          cierreAutomaticoFiestas: miRemiseria.cierreAutomaticoFiestas !== false,
         });
       } else {
         toast.error('No se encontró una remisería asociada a tu cuenta');
@@ -91,6 +97,9 @@ export default function ConfiguracionPage() {
         valorHoraEspera: Number(data.valorHoraEspera),
         comisionPorcentaje: Number(data.comisionPorcentaje),
         comisionDuenioAuto: Number(data.comisionDuenioAuto),
+        agenciaAbierta: data.agenciaAbierta,
+        mensajeCierre: data.mensajeCierre?.trim(),
+        cierreAutomaticoFiestas: data.cierreAutomaticoFiestas,
       };
 
       const response = await remiseriaService.update(remiseria.id, payload);
@@ -382,6 +391,139 @@ export default function ConfiguracionPage() {
                     <span className="absolute right-3 top-2.5 text-slate-400 text-sm font-bold">%</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">Si el chofer no es propietario</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SECCIÓN 3: Estado Operativo y Horarios Especiales / Fiestas */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-6">
+            <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-indigo-600" />
+                  Horarios de Atención y Estado de la Central
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Controlá si la remisería está abierta para recibir viajes o marcá el cierre temporal y el mensaje que responderá el Bot de WhatsApp y mostrará la App de Clientes.
+                </p>
+              </div>
+
+              {/* Badge en vivo */}
+              <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-xs ${
+                watchedAgenciaAbierta
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${watchedAgenciaAbierta ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+                {watchedAgenciaAbierta ? 'Agencia Abierta' : 'Agencia Cerrada'}
+              </div>
+            </div>
+
+            {/* Toggle de Apertura / Cierre Manual */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Power className={`w-4 h-4 ${watchedAgenciaAbierta ? 'text-emerald-600' : 'text-rose-600'}`} />
+                    Apertura Operativa de la Central
+                  </label>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {watchedAgenciaAbierta
+                      ? 'La agencia está recibiendo viajes normalmente por la Web y por WhatsApp.'
+                      : 'La agencia está en pausa. Se bloquearán nuevos pedidos y se notificará el motivo a los pasajeros.'}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    {...register('agenciaAbierta')}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+            </div>
+
+            {/* Mensaje de Cierre Personalizado */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <MessageCircle className="w-4 h-4 text-emerald-600" />
+                  Mensaje de Cierre (para la App y el Bot de WhatsApp)
+                </label>
+                <span className="text-[11px] text-slate-400">Se enviará automáticamente a los clientes</span>
+              </div>
+              <textarea
+                rows={3}
+                {...register('mensajeCierre')}
+                placeholder="Ej: La agencia permanecerá cerrada por festividades desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!"
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 leading-relaxed"
+              />
+              {/* Plantillas Rápidas */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] font-semibold text-slate-400 mr-1">Plantillas rápidas:</span>
+                <button
+                  type="button"
+                  onClick={() => setValue('mensajeCierre', '🎄 Por vísperas y celebración de Navidad, la agencia permanecerá cerrada desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!')}
+                  className="px-2 py-1 text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg border border-indigo-200 transition-colors"
+                >
+                  🎄 Navidad (24/12 18hs a 25/12 19hs)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValue('mensajeCierre', '🎆 Por vísperas y celebración de Fin de Año, la agencia permanecerá cerrada desde el 31/12 a las 18:00 hs hasta el 01/01 a las 19:00 hs. ¡Feliz Año Nuevo!')}
+                  className="px-2 py-1 text-[11px] font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg border border-purple-200 transition-colors"
+                >
+                  🎆 Fin de Año (31/12 18hs a 01/01 19hs)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValue('mensajeCierre', '🌧️ Por razones climáticas adversas y anegamiento en calles, el servicio se encuentra momentáneamente pausado. Retomamos a la brevedad.')}
+                  className="px-2 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 transition-colors"
+                >
+                  🌧️ Temporal
+                </button>
+              </div>
+            </div>
+
+            {/* Regla de Fiestas de Fin de Año (24/12 y 31/12) */}
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/80 rounded-2xl p-4.5 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0 mt-0.5 shadow-sm">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-900">
+                      Régimen Automático de Fiestas (24/12 y 31/12)
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      El sistema cerrará y reabrirá automáticamente la atención según el horario festivo acordado:
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                  <input
+                    type="checkbox"
+                    {...register('cierreAutomaticoFiestas')}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
+                <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 shadow-xs">
+                  <span className="font-bold text-slate-900 block mb-1">🎄 Navidad:</span>
+                  <p className="text-slate-600">Cierra el <strong>24/12 a las 18:00 hs</strong></p>
+                  <p className="text-slate-600">Reabre el <strong>25/12 a las 19:00 hs</strong></p>
+                </div>
+                <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 shadow-xs">
+                  <span className="font-bold text-slate-900 block mb-1">🎆 Año Nuevo:</span>
+                  <p className="text-slate-600">Cierra el <strong>31/12 a las 18:00 hs</strong></p>
+                  <p className="text-slate-600">Reabre el <strong>01/01 a las 19:00 hs</strong></p>
                 </div>
               </div>
             </div>

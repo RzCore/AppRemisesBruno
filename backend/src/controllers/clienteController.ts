@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
+import { checkAgenciaEstado } from '../services/agencyScheduleService';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
 interface RouteCacheEntry {
@@ -559,6 +560,17 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       });
     }
 
+    // Validación de horario de atención y estado de apertura de la agencia
+    const estadoAgencia = checkAgenciaEstado(remiseria);
+    if (!estadoAgencia.abierta) {
+      return res.status(400).json({
+        success: false,
+        error: estadoAgencia.mensaje,
+        motivoCierre: estadoAgencia.motivo,
+        reaperturaEstimada: estadoAgencia.reaperturaEstimada
+      });
+    }
+
     // Manejo de método de pago y validación de cuenta corriente
     let metodoPagoFinal: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE' = 'EFECTIVO';
     if (metodoPago === 'TRANSFERENCIA') {
@@ -860,6 +872,17 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(400).json({
         success: false,
         error: 'No hay ninguna remisería registrada en el sistema'
+      });
+    }
+
+    // Validación de horario de atención y estado de apertura de la agencia
+    const estadoAgencia = checkAgenciaEstado(remiseria);
+    if (!estadoAgencia.abierta) {
+      return res.status(400).json({
+        success: false,
+        error: estadoAgencia.mensaje,
+        motivoCierre: estadoAgencia.motivo,
+        reaperturaEstimada: estadoAgencia.reaperturaEstimada
       });
     }
 
@@ -1583,15 +1606,46 @@ export const cancelarReserva = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
-// Obtener ubicación actual (simulado)
+// Obtener ubicación actual (con soporte a coordenadas reales y geocodificación inversa)
 export const getUbicacionActual = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Por ahora retornamos una ubicación simulada
-    // En producción, esto se obtendría del GPS del dispositivo
+    const latParam = req.query.lat as string | undefined;
+    const lngParam = req.query.lng as string | undefined;
+
+    const remiseria = await prisma.remiseria.findFirst({
+      where: { estado: true },
+      select: { latitud: true, longitud: true, direccion: true }
+    });
+
+    let lat = latParam ? parseFloat(latParam) : (remiseria?.latitud || -34.8957);
+    let lng = lngParam ? parseFloat(lngParam) : (remiseria?.longitud || -60.0189);
+    let direccion = remiseria?.direccion || 'Chivilcoy, Buenos Aires';
+
+    if (latParam && lngParam && !isNaN(lat) && !isNaN(lng)) {
+      try {
+        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`, {
+          headers: { 'User-Agent': 'AppRemises/1.0 (cliente@app.com)' }
+        });
+        const geoData = await geoRes.json() as any;
+        if (geoData?.address) {
+          const road = geoData.address.road || geoData.address.pedestrian || geoData.address.street;
+          const houseNumber = geoData.address.house_number || '';
+          const city = geoData.address.city || geoData.address.town || geoData.address.village || 'Chivilcoy';
+          if (road) {
+            direccion = `${road} ${houseNumber}`.trim() + `, ${city}`;
+          } else if (geoData.display_name) {
+            direccion = geoData.display_name;
+          }
+        }
+      } catch (geoErr) {
+        console.warn('Reverse geocode fallback:', geoErr);
+      }
+    }
+
     const ubicacion = {
-      lat: -34.8957, // Chivilcoy, Buenos Aires
-      lng: -60.0189,
-      direccion: 'Chivilcoy, Buenos Aires (simulada)'
+      lat,
+      lng,
+      direccion
     };
 
     res.json({

@@ -23,8 +23,16 @@ import {
   UserCheck,
   Settings,
   ChevronRight,
+  Power,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Send
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { TELEFONOS_FIJOS } from '@/lib/constants/telefonos';
@@ -47,6 +55,13 @@ export default function DuenioDashboard() {
   const [semanalData, setSemanalData] = useState<any>(null);
   const [mensualData, setMensualData] = useState<any>(null);
 
+  // Control Operativo de la Central (Abierta / Cerrada / Horarios Especiales)
+  const [agenciaAbierta, setAgenciaAbierta] = useState<boolean>(true);
+  const [mensajeCierre, setMensajeCierre] = useState<string>('');
+  const [cierreAutomaticoFiestas, setCierreAutomaticoFiestas] = useState<boolean>(true);
+  const [isGuardandoEstado, setIsGuardandoEstado] = useState<boolean>(false);
+  const [mostrarConfigCierre, setMostrarConfigCierre] = useState<boolean>(false);
+
   const loadData = useCallback(async (isManualRefresh = false) => {
     try {
       if (isManualRefresh) setRefreshing(true);
@@ -60,6 +75,12 @@ export default function DuenioDashboard() {
           r.duenios?.some(d => d.duenioId === user?.duenio?.id)
         );
         setRemiserias(userRems);
+
+        if (userRems[0]) {
+          setAgenciaAbierta(userRems[0].agenciaAbierta !== false);
+          setMensajeCierre(userRems[0].mensajeCierre || '');
+          setCierreAutomaticoFiestas(userRems[0].cierreAutomaticoFiestas !== false);
+        }
       }
 
       const targetId = selectedRemiseriaId !== 'todas' ? selectedRemiseriaId : undefined;
@@ -100,6 +121,70 @@ export default function DuenioDashboard() {
     }
     loadData();
   }, [user, router, loadData]);
+
+  // Cambiar estado rápido Abierta / Cerrada
+  const handleCambiarEstadoAgencia = async (nuevoEstado: boolean) => {
+    const rem = remiserias[0];
+    if (!rem?.id) {
+      toast.error('No se encontró la remisería a configurar');
+      return;
+    }
+
+    setIsGuardandoEstado(true);
+    try {
+      const payload: Partial<Remiseria> = {
+        agenciaAbierta: nuevoEstado,
+        mensajeCierre: mensajeCierre.trim() || undefined,
+        cierreAutomaticoFiestas
+      };
+
+      const res = await remiseriaService.update(rem.id, payload);
+      if (res.success) {
+        setAgenciaAbierta(nuevoEstado);
+        toast.success(
+          nuevoEstado 
+            ? '✅ ¡Central ABIERTA! Se habilitaron los pedidos en la App y el Bot.' 
+            : '⛔ Central PAUSADA / CERRADA. Se notificará a los clientes.',
+          { duration: 5000 }
+        );
+      } else {
+        toast.error(res.message || 'Error al actualizar estado de la central');
+      }
+    } catch (err) {
+      console.error('Error al actualizar estado:', err);
+      toast.error('Error de conexión al actualizar estado');
+    } finally {
+      setIsGuardandoEstado(false);
+    }
+  };
+
+  // Guardar mensaje personalizado y cierre por fiestas
+  const handleGuardarConfiguracionCierre = async () => {
+    const rem = remiserias[0];
+    if (!rem?.id) return;
+
+    setIsGuardandoEstado(true);
+    try {
+      const payload: Partial<Remiseria> = {
+        agenciaAbierta,
+        mensajeCierre: mensajeCierre.trim(),
+        cierreAutomaticoFiestas
+      };
+
+      const res = await remiseriaService.update(rem.id, payload);
+      if (res.success) {
+        toast.success('💾 Mensaje de cierre y horarios guardados y sincronizados con la App y el Bot.', { duration: 4500 });
+        setMostrarConfigCierre(false);
+      } else {
+        toast.error(res.message || 'Error al guardar configuración');
+      }
+    } catch (err) {
+      console.error('Error al guardar mensaje:', err);
+      toast.error('Error al guardar mensaje');
+    } finally {
+      setIsGuardandoEstado(false);
+    }
+  };
 
   // Cálculos de métricas según período seleccionado
   const getPeriodMetrics = () => {
@@ -193,6 +278,162 @@ export default function DuenioDashboard() {
           <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
           <span className="hidden sm:inline">Actualizar</span>
         </button>
+      </div>
+
+      {/* WIDGET DESTACADO: CONTROL OPERATIVO DE LA CENTRAL (ABIERTA / CERRADA / MENSAJE BOT Y APP) */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-indigo-600" />
+              <h3 className="text-sm font-bold text-slate-900">Estado de Atención de la Central</h3>
+              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold flex items-center gap-1 shadow-2xs ${
+                agenciaAbierta 
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+              }`}>
+                {agenciaAbierta ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <XCircle className="w-3.5 h-3.5 text-rose-600" />}
+                {agenciaAbierta ? 'CENTRAL ABIERTA' : 'CENTRAL CERRADA / EN PAUSA'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              {agenciaAbierta 
+                ? 'El sistema y el Bot de WhatsApp están recibiendo viajes normalmente.' 
+                : 'Nuevos pedidos bloqueados en la App y el Bot responde con el aviso de cierre configurado.'}
+            </p>
+          </div>
+
+          {/* Toggle rápido de Apertura / Cierre */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleCambiarEstadoAgencia(true)}
+              disabled={isGuardandoEstado || agenciaAbierta}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                agenciaAbierta 
+                  ? 'bg-emerald-600 text-white shadow-sm' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Abierta</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCambiarEstadoAgencia(false)}
+              disabled={isGuardandoEstado || !agenciaAbierta}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                !agenciaAbierta 
+                  ? 'bg-rose-600 text-white shadow-sm' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>Marcar Cerrado</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Cierre automático de Fiestas y botón de configuración de mensaje */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs text-slate-600">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 font-semibold text-[11px]">
+              🎄 Régimen de Fiestas Activo
+            </span>
+            <span className="text-[11px] text-slate-500 hidden sm:inline">
+              Cierra 24/12 18hs y reabre 25/12 19hs • Cierra 31/12 18hs y reabre 01/01 19hs
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setMostrarConfigCierre(!mostrarConfigCierre)}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-primary-600 hover:text-primary-800 transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>{mostrarConfigCierre ? 'Ocultar mensaje de cierre' : 'Editar mensaje para el Bot y la App'}</span>
+            {mostrarConfigCierre ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {/* Panel Desplegable: Editor de Mensaje de Cierre y Plantillas de Fiestas */}
+        {mostrarConfigCierre && (
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3.5 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <MessageSquare className="w-3.5 h-3.5 text-primary-600" />
+                <span>Mensaje de aviso que responderá el Bot y mostrará la App al cliente:</span>
+              </label>
+              <span className="text-[11px] text-slate-400">Visible a todos los pasajeros</span>
+            </div>
+
+            <textarea
+              rows={3}
+              value={mensajeCierre}
+              onChange={(e) => setMensajeCierre(e.target.value)}
+              placeholder="Ej: La central permanecerá cerrada por festividades desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!"
+              className="w-full text-xs p-3 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 leading-relaxed shadow-2xs"
+            />
+
+            {/* Plantillas de 1-Click */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-500 block">Plantillas rápidas con 1 clic:</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMensajeCierre('🎄 Por vísperas y celebración de Navidad, la agencia permanecerá cerrada desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-200 transition-colors"
+                >
+                  🎄 Navidad (24/12 18hs a 25/12 19hs)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMensajeCierre('🎆 Por vísperas y celebración de Fin de Año, la agencia permanecerá cerrada desde el 31/12 a las 18:00 hs hasta el 01/01 a las 19:00 hs. ¡Feliz Año Nuevo!')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-purple-50 hover:bg-purple-100 text-purple-800 rounded-lg border border-purple-200 transition-colors"
+                >
+                  🎆 Fin de Año (31/12 18hs a 01/01 19hs)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMensajeCierre('🌧️ Por razones climáticas adversas y anegamiento de calles, el servicio se encuentra momentáneamente pausado por seguridad. Retomamos a la brevedad.')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg border border-blue-200 transition-colors"
+                >
+                  🌧️ Temporal / Clima
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMensajeCierre('La agencia se encuentra momentáneamente cerrada. Disculpe las molestias.')}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg border border-slate-300 transition-colors"
+                >
+                  🛑 Pausa Momentánea
+                </button>
+              </div>
+            </div>
+
+            {/* Checkbox Cierre automático fiestas */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={cierreAutomaticoFiestas}
+                  onChange={(e) => setCierreAutomaticoFiestas(e.target.checked)}
+                  className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 w-4 h-4"
+                />
+                <span>Habilitar cierre y reapertura automática en Navidad y Año Nuevo</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={handleGuardarConfiguracionCierre}
+                disabled={isGuardandoEstado}
+                className="px-3.5 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Guardar y Sincronizar en Vivo</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* TARJETA FINANCIERA HERO (Estilo Fintech / Billetera móvil ejecutiva) */}
