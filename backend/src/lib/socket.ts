@@ -284,6 +284,16 @@ export const initSocket = (server: HttpServer): Server => {
       }
     });
 
+    // Reanudar respuestas automáticas del bot de WhatsApp para un cliente
+    socket.on('reanudar_bot_whatsapp', async ({ telefono }: { telefono: string }) => {
+      try {
+        const { whatsappBotService } = await import('../services/whatsappBotService');
+        await whatsappBotService.reanudarBotParaCliente(telefono);
+      } catch (err) {
+        console.warn('Error al reanudar bot por socket:', err);
+      }
+    });
+
     // Desconexión
     socket.on('disconnect', () => {
       console.log(`🔌 Cliente desconectado: ${socket.id}`);

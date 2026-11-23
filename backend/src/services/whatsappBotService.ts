@@ -46,8 +46,8 @@ interface SesionClienteWhatsApp {
 // Almacenamiento en memoria de sesiones activas (expiran a los 30 minutos de inactividad)
 const sesionesMap = new Map<string, SesionClienteWhatsApp>();
 
-// Almacenamiento en memoria de pausas para atención humana directa con el coordinador (30 min)
-const pausasHumanasMap = new Map<string, { hasta: Date; nombre?: string }>();
+// Almacenamiento en memoria de pausas para atención humana directa con el coordinador (10 min con cronómetro)
+const pausasHumanasMap = new Map<string, { hasta: Date; nombre?: string; timerId?: NodeJS.Timeout }>();
 
 function getSesion(telefono: string): SesionClienteWhatsApp {
   const cleanTel = whatsappService.formatearNumero(telefono);
@@ -920,6 +920,7 @@ export const whatsappBotService = {
         const txt = (texto || '').trim().toLowerCase();
         // Si el usuario solicita reactivar el bot explícitamente
         if (txt === 'bot' || txt === 'menu' || txt === 'menú' || txt === 'reiniciar' || txt === 'activar bot') {
+          if (pausaActual.timerId) clearTimeout(pausaActual.timerId);
           pausasHumanasMap.delete(cleanFrom);
           resetSesion(cleanFrom);
           const saludoReanudado = `🤖 *Asistente automático reactivado*\n\n¡Hola de nuevo! El bot está listo para tomar tus viajes y reservas. ¿Cómo querés viajar hoy?`;
@@ -932,7 +933,8 @@ export const whatsappBotService = {
         // El bot está pausado: no responde nada para permitir diálogo fluido con el operador humano
         return;
       } else {
-        // Pausa expirada tras 30 minutos
+        // Pausa expirada tras 10 minutos
+        if (pausaActual.timerId) clearTimeout(pausaActual.timerId);
         pausasHumanasMap.delete(cleanFrom);
       }
     }
@@ -1092,9 +1094,39 @@ export const whatsappBotService = {
     );
 
     if (esSolicitudOperador) {
-      // Activar pausa del bot por 30 minutos para permitir diálogo humano con el operador
-      const hasta = new Date(Date.now() + 30 * 60 * 1000);
-      pausasHumanasMap.set(cleanFrom, { hasta, nombre: nombreMostrado });
+      // Activar pausa del bot por 10 minutos para permitir diálogo humano con el operador
+      const MINUTOS_PAUSA = 10;
+      const hasta = new Date(Date.now() + MINUTOS_PAUSA * 60 * 1000);
+
+      // Limpiar timer previo si existía para este teléfono
+      const pausaPrevia = pausasHumanasMap.get(cleanFrom);
+      if (pausaPrevia?.timerId) {
+        clearTimeout(pausaPrevia.timerId);
+      }
+
+      // Cronómetro automático de 10 minutos para reconectar el bot y saludar al cliente
+      const timerId = setTimeout(async () => {
+        const p = pausasHumanasMap.get(cleanFrom);
+        if (p) {
+          pausasHumanasMap.delete(cleanFrom);
+          try {
+            const msgReconexionAuto =
+              `🤖 *Asistente automático reconectado*\n\n` +
+              `Hola, *${nombreMostrado}*. Han pasado los 10 minutos de atención con la central y el bot se ha vuelto a conectar automáticamente.\n\n` +
+              `¿En qué te podemos ayudar?`;
+
+            await whatsappService.enviarBotones(cleanFrom, msgReconexionAuto, [
+              { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+              { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+              { id: 'BTN_ESTADO', title: '📍 Estado / Ayuda' },
+            ]);
+          } catch (e) {
+            console.warn('Aviso enviando mensaje de reconexión automática tras 10 min:', e);
+          }
+        }
+      }, MINUTOS_PAUSA * 60 * 1000);
+
+      pausasHumanasMap.set(cleanFrom, { hasta, nombre: nombreMostrado, timerId });
 
       // Notificar al coordinador en tiempo real por WebSocket
       try {
@@ -1105,7 +1137,7 @@ export const whatsappBotService = {
           nombre: nombreMostrado,
           mensaje: texto || 'El pasajero solicitó contactarse con el operador/coordinador.',
           timestamp: new Date().toISOString(),
-          expiraEnMinutos: 30,
+          expiraEnMinutos: MINUTOS_PAUSA,
         });
       } catch (wsErr) {
         console.warn('Aviso socket al emitir solicitud_atencion_humana:', wsErr);
@@ -1115,8 +1147,9 @@ export const whatsappBotService = {
         `👤 *TRANSFERENCIA CON EL COORDINADOR*\n` +
         `━━━━━━━━━━━━━━━━━━━\n` +
         `Hola, *${nombreMostrado}*. Un operador de *Remises Bruno* se pondrá en contacto con vos por este chat a la brevedad.\n\n` +
-        `⏸️ *El bot ha sido pausado por 30 minutos* para que puedas conversar directamente con la central sin interrupciones automáticas.\n\n` +
-        `💡 _Si necesitás volver a activar el bot en cualquier momento, solo escribí_ *MENU* _o_ *BOT*.\n` +
+        `⏸️ *El bot ha sido pausado por 10 minutos* para que puedas conversar directamente con la central sin interrupciones automáticas.\n` +
+        `⏱️ _Pasados los 10 minutos, el asistente automático se reconectará por sí solo._\n\n` +
+        `💡 _Si necesitás volver a activar el bot antes, escribí_ *MENU* _o_ *BOT*.\n` +
         `📞 _Líneas directas de guardia:_ 2346-427637 / 2346-433000.`;
 
       return await whatsappService.enviarTexto(cleanFrom, msgDerivacion);
@@ -2168,20 +2201,58 @@ export const whatsappBotService = {
   /**
    * Pausa las respuestas automáticas del bot para un número específico por N minutos
    */
-  pausarBotParaCliente(telefono: string, minutos: number = 30, nombre?: string) {
+  pausarBotParaCliente(telefono: string, minutos: number = 10, nombre?: string) {
     const cleanTel = whatsappService.formatearNumero(telefono);
+    const previa = pausasHumanasMap.get(cleanTel);
+    if (previa?.timerId) clearTimeout(previa.timerId);
+
+    const timerId = setTimeout(async () => {
+      const p = pausasHumanasMap.get(cleanTel);
+      if (p) {
+        pausasHumanasMap.delete(cleanTel);
+        try {
+          const msg = `🤖 *Asistente automático reconectado*\n\nHan pasado los 10 minutos y el bot se ha vuelto a conectar. ¿Cómo querés viajar hoy?`;
+          await whatsappService.enviarBotones(cleanTel, msg, [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+            { id: 'BTN_ESTADO', title: '📍 Estado / Ayuda' },
+          ]);
+        } catch {}
+      }
+    }, minutos * 60 * 1000);
+
     pausasHumanasMap.set(cleanTel, {
       hasta: new Date(Date.now() + minutos * 60 * 1000),
       nombre,
+      timerId,
     });
   },
 
   /**
-   * Reanuda las respuestas automáticas del bot para un número
+   * Reanuda las respuestas automáticas del bot para un número y le avisa al cliente
    */
-  reanudarBotParaCliente(telefono: string) {
+  async reanudarBotParaCliente(telefono: string, notificarCliente: boolean = true) {
     const cleanTel = whatsappService.formatearNumero(telefono);
+    const p = pausasHumanasMap.get(cleanTel);
+    if (p?.timerId) clearTimeout(p.timerId);
     pausasHumanasMap.delete(cleanTel);
+
+    if (notificarCliente) {
+      try {
+        const msgReconexion =
+          `🤖 *Asistente automático reactivado*\n\n` +
+          `El operador ha finalizado la atención y el bot se encuentra nuevamente disponible para tus viajes y reservas.\n\n` +
+          `¿En qué te podemos ayudar?`;
+
+        await whatsappService.enviarBotones(cleanTel, msgReconexion, [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+          { id: 'BTN_ESTADO', title: '📍 Estado / Ayuda' },
+        ]);
+      } catch (err) {
+        console.warn('Aviso notificando reanudación manual de bot:', err);
+      }
+    }
   },
 
   /**

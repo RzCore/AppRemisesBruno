@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { coordinadorDashboardService, clienteAuthService, choferService, vehiculoService, artEmpresaService } from '@/lib/api';
@@ -33,6 +33,8 @@ import {
   Zap,
   Sparkles,
   ArrowRight,
+  MessageSquare,
+  Send,
   Download,
   Eye,
   RotateCcw,
@@ -122,6 +124,15 @@ export default function CoordinadorDashboard() {
   // 1. Alarma Acústica y Visual en Central para Nuevos Pedidos
   const [sonidoAlarmaHabilitado, setSonidoAlarmaHabilitado] = useState(true);
   const [alertaNuevoViajeBanner, setAlertaNuevoViajeBanner] = useState<any>(null);
+
+  // Solicitudes activas de atención humana en WhatsApp (con cronómetro de 10 min)
+  const [solicitudesAtencion, setSolicitudesAtencion] = useState<Array<{
+    telefono: string;
+    nombre: string;
+    mensaje?: string;
+    expiraAt: number;
+  }>>([]);
+  const socketRef = useRef<Socket | null>(null);
 
   // 2. Carga Ultrarrápida Express (< 5s - Atajo F2)
   const [isExpressModalOpen, setIsExpressModalOpen] = useState(false);
@@ -494,6 +505,7 @@ export default function CoordinadorDashboard() {
       transports: ['websocket'],
       withCredentials: true,
     });
+    socketRef.current = socket;
 
     socket.on('connect', () => {
       socket.emit('join_room', { remiseriaId: remId });
@@ -622,7 +634,20 @@ export default function CoordinadorDashboard() {
       fetchData();
     });
 
-    socket.on('solicitud_atencion_humana', (data: { telefono: string; nombre: string; mensaje?: string }) => {
+    socket.on('solicitud_atencion_humana', (data: { telefono: string; nombre: string; mensaje?: string; expiraEnMinutos?: number }) => {
+      const expiraMin = data.expiraEnMinutos || 10;
+      const expiraAt = Date.now() + expiraMin * 60 * 1000;
+
+      setSolicitudesAtencion((prev) => [
+        ...prev.filter((s) => s.telefono !== data.telefono),
+        {
+          telefono: data.telefono,
+          nombre: data.nombre,
+          mensaje: data.mensaje,
+          expiraAt,
+        },
+      ]);
+
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
@@ -670,8 +695,19 @@ export default function CoordinadorDashboard() {
               Abrir WhatsApp Web
             </a>
             <button
+              onClick={() => {
+                socketRef.current?.emit('reanudar_bot_whatsapp', { telefono: data.telefono });
+                setSolicitudesAtencion((prev) => prev.filter((s) => s.telefono !== data.telefono));
+                toast.dismiss(t.id);
+                toast.success('Bot reactivado para este cliente');
+              }}
+              className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 text-xs rounded-lg font-semibold"
+            >
+              Reconectar Bot
+            </button>
+            <button
               onClick={() => toast.dismiss(t.id)}
-              className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 text-xs rounded-lg"
+              className="px-2.5 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 text-xs rounded-lg"
             >
               Cerrar
             </button>
@@ -684,9 +720,20 @@ export default function CoordinadorDashboard() {
     });
 
     return () => {
+      socketRef.current = null;
       socket.disconnect();
     };
   }, [user?.coordinador?.remiseriaId, (user as any)?.remiseriaId]);
+
+  // Actualizador por segundo del cronómetro de 10 minutos para solicitudes de WhatsApp
+  const [, setTickCronometro] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTickCronometro((t) => t + 1);
+      setSolicitudesAtencion((prev) => prev.filter((s) => s.expiraAt > Date.now()));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -1594,6 +1641,74 @@ export default function CoordinadorDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Banner de Solicitud de Atención Humana en WhatsApp con Cronómetro de 10 minutos */}
+      {solicitudesAtencion.length > 0 && solicitudesAtencion.map((sol) => {
+        const segsRestantes = Math.max(0, Math.floor((sol.expiraAt - Date.now()) / 1000));
+        const minutos = Math.floor(segsRestantes / 60);
+        const segundos = segsRestantes % 60;
+        const tiempoStr = `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`;
+
+        return (
+          <div
+            key={sol.telefono}
+            className="bg-gradient-to-r from-emerald-700 via-teal-700 to-emerald-800 text-white p-3 sm:p-4 shadow-lg shrink-0 border-b-2 border-emerald-950 animate-in slide-in-from-top-3 duration-300"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <span className="p-2 bg-white/20 rounded-full shrink-0 animate-pulse">
+                  <MessageSquare className="h-5 w-5 text-white" />
+                </span>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-black text-sm">
+                      💬 ATENCIÓN HUMANA EN WHATSAPP
+                    </p>
+                    <span className="font-mono bg-black/35 text-emerald-200 px-2.5 py-0.5 rounded-full text-xs font-black border border-emerald-300/40 tracking-wider">
+                      ⏱️ {tiempoStr} restantes para reconectar bot
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-100 mt-0.5">
+                    <strong>Pasajero:</strong> {sol.nombre} ({sol.telefono})
+                    {sol.mensaje && ` • "${sol.mensaje}"`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+                <a
+                  href={`https://wa.me/${sol.telefono.replace(/\D/g, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-white text-emerald-950 hover:bg-emerald-50 px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all hover:scale-105 cursor-pointer flex items-center space-x-1"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span>Abrir WhatsApp Web</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    socketRef.current?.emit('reanudar_bot_whatsapp', { telefono: sol.telefono });
+                    setSolicitudesAtencion((prev) => prev.filter((s) => s.telefono !== sol.telefono));
+                    toast.success(`Bot reconectado para ${sol.nombre}`);
+                  }}
+                  className="bg-emerald-900/80 hover:bg-emerald-950 text-emerald-200 border border-emerald-400/40 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                  title="Reconectar bot inmediatamente"
+                >
+                  Reconectar Bot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSolicitudesAtencion((prev) => prev.filter((s) => s.telefono !== sol.telefono))}
+                  className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10"
+                  title="Ocultar aviso"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
 
       {/* Banner de Notificación y Alerta Visual de Nuevo Pedido Entrante */}
       {alertaNuevoViajeBanner && (
