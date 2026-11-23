@@ -11,6 +11,8 @@ import crypto from 'crypto';
 
 type EstadoConversacion =
   | 'IDLE'
+  | 'ESPERANDO_DNI_REGISTRO'
+  | 'ESPERANDO_NOMBRE_REGISTRO'
   | 'ESPERANDO_FECHA_HORA_RESERVA'
   | 'ESPERANDO_ORIGEN'
   | 'CONFIRMANDO_AUDIO_ORIGEN'
@@ -21,6 +23,8 @@ type EstadoConversacion =
 interface SesionClienteWhatsApp {
   telefono: string;
   estado: EstadoConversacion;
+  dniTemporal?: string;
+  nombreTemporal?: string;
   esReserva?: boolean;
   fechaHoraReserva?: Date;
   fechaHoraTexto?: string;
@@ -836,6 +840,52 @@ function parsearFechaHoraReserva(input: string): { fecha: Date; fechaTexto: stri
 }
 
 // ==============================================================================
+// REGISTRO Y VINCULACIÓN SEGURA DE CLIENTES DESDE WHATSAPP
+// ==============================================================================
+
+async function crearClienteDesdeWhatsApp(
+  telefono: string,
+  dni: string,
+  nombre: string,
+  apellido: string,
+  remiseriaId: string
+) {
+  const bcrypt = await import('bcryptjs');
+  const hashedPassword = await bcrypt.default.hash('123456', 10);
+  const emailDummy = `cliente_${dni.replace(/\D/g, '') || Date.now()}_${Date.now()}@remisesbruno.com.ar`;
+
+  const user = await prisma.user.create({
+    data: {
+      email: emailDummy,
+      passwordHash: hashedPassword,
+      rol: 'CLIENTE',
+      activo: true,
+    },
+  });
+
+  const cliente = await prisma.cliente.create({
+    data: {
+      userId: user.id,
+      nombre: nombre.trim() || 'Pasajero',
+      apellido: (apellido || '').trim(),
+      dni: dni.trim(),
+      telefono,
+      email: emailDummy,
+      direccion: 'Chivilcoy, Buenos Aires',
+      fechaNacimiento: new Date('1990-01-01'),
+      remiseriaId: remiseriaId || null,
+      activo: true,
+    },
+    include: {
+      remiseria: true,
+      user: true,
+    },
+  });
+
+  return cliente;
+}
+
+// ==============================================================================
 // SERVICIO PRINCIPAL DEL BOT DE WHATSAPP
 // ==============================================================================
 
@@ -873,9 +923,6 @@ export const whatsappBotService = {
       },
     });
 
-    const nombreMostrado = cliente?.nombre || senderName || 'Pasajero';
-    sesion.nombre = nombreMostrado;
-
     // Obtener remisería principal
     let remiseria = cliente?.remiseria;
     if (!remiseria) {
@@ -884,6 +931,107 @@ export const whatsappBotService = {
     const remiseriaId = remiseria?.id || '';
     const bajadaBandera = remiseria?.bajadaBandera || 3500;
     const valorKm = remiseria?.valorKm || 800;
+
+    // ==============================================================================
+    // VALIDACIÓN DE SEGURIDAD PARA PRIMER CONTACTO (SOLICITUD DE DNI Y VINCULACIÓN)
+    // ==============================================================================
+    if (!cliente) {
+      if (sesion.estado === 'ESPERANDO_DNI_REGISTRO') {
+        const dniLimpio = (texto || '').replace(/\D/g, '').trim();
+        if (dniLimpio.length < 7 || dniLimpio.length > 9) {
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            '⚠️ Por favor ingresá un número de *DNI válido* (de 7 u 8 dígitos, sin puntos ni letras):'
+          );
+        }
+
+        // 1. Verificar si ya existe una cuenta con este DNI (ej: cuenta creada previamente en la App)
+        const clientePorDni = await prisma.cliente.findUnique({
+          where: { dni: dniLimpio },
+          include: { remiseria: true, user: true },
+        });
+
+        if (clientePorDni) {
+          // Vincular este número de teléfono de WhatsApp a su cuenta de cliente existente
+          cliente = await prisma.cliente.update({
+            where: { id: clientePorDni.id },
+            data: { telefono: cleanFrom },
+            include: { remiseria: true, user: true },
+          });
+
+          sesion.nombre = cliente.nombre;
+          sesion.estado = 'IDLE';
+
+          const saludoApp = `👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n🛡️ Verificamos tu cuenta de la App con tu DNI.\n\n¿Cómo querés viajar hoy?`;
+          return await whatsappService.enviarBotones(cleanFrom, saludoApp, [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+            { id: 'BTN_ESTADO', title: '📍 Mis Viajes' },
+          ]);
+        }
+
+        // 2. Si no existe en la app, verificar nombre oficial o solicitar Nombre y Apellido
+        let nombreDetectado = senderName || '';
+        let apellidoDetectado = '';
+        try {
+          const { identityVerificationService } = await import('./identityVerificationService');
+          const identidad = await identityVerificationService.verificarPorDni(dniLimpio);
+          if (identidad?.nombre && identidad.nombre.trim().length > 1) {
+            nombreDetectado = identidad.nombre.trim();
+            apellidoDetectado = identidad.apellido?.trim() || '';
+          }
+        } catch {}
+
+        if (nombreDetectado && nombreDetectado.toLowerCase() !== 'pasajero' && nombreDetectado.length > 2) {
+          cliente = await crearClienteDesdeWhatsApp(cleanFrom, dniLimpio, nombreDetectado, apellidoDetectado, remiseriaId);
+          sesion.nombre = cliente.nombre;
+          sesion.estado = 'IDLE';
+
+          const saludoNuevo = `✅ *Identidad registrada con éxito.*\n\n👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n¿Cómo querés viajar hoy?`;
+          return await whatsappService.enviarBotones(cleanFrom, saludoNuevo, [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+            { id: 'BTN_ESTADO', title: '📍 Mis Viajes' },
+          ]);
+        } else {
+          sesion.dniTemporal = dniLimpio;
+          sesion.estado = 'ESPERANDO_NOMBRE_REGISTRO';
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            `✅ DNI recibido: *${dniLimpio}*.\n\n✍️ Por favor escribí tu *Nombre y Apellido* para registrarte como pasajero en nuestra central:`
+          );
+        }
+      }
+
+      if (sesion.estado === 'ESPERANDO_NOMBRE_REGISTRO') {
+        const nombreInput = (texto || senderName || 'Pasajero').trim();
+        const partes = nombreInput.split(' ');
+        const nombre = partes[0] || 'Pasajero';
+        const apellido = partes.slice(1).join(' ') || '';
+        const dniFinal = sesion.dniTemporal || '11111111';
+
+        cliente = await crearClienteDesdeWhatsApp(cleanFrom, dniFinal, nombre, apellido, remiseriaId);
+        sesion.nombre = cliente.nombre;
+        sesion.estado = 'IDLE';
+
+        const saludoNuevo = `✅ *¡Registro completado exitosamente!*\n\n👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n¿Cómo querés viajar hoy?`;
+        return await whatsappService.enviarBotones(cleanFrom, saludoNuevo, [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+          { id: 'BTN_ESTADO', title: '📍 Mis Viajes' },
+        ]);
+      }
+
+      // Si es el primer mensaje de este número de teléfono:
+      sesion.estado = 'ESPERANDO_DNI_REGISTRO';
+      return await whatsappService.enviarTexto(
+        cleanFrom,
+        `👋 ¡Hola! Bienvenido a *Remises Bruno*.\n\n🛡️ *Por razones de seguridad de nuestros pasajeros y conductores*, solicitamos tu número de *DNI* (sin puntos ni espacios) antes de iniciar tu primer viaje:`
+      );
+    }
+
+    const nombreMostrado = cliente?.nombre || senderName || 'Pasajero';
+    sesion.nombre = nombreMostrado;
 
     // 2. Comandos globales directos (reiniciar, cancelar, estado, operador)
     const textoLower = (texto || '').trim().toLowerCase();
@@ -1109,7 +1257,7 @@ export const whatsappBotService = {
         }
 
         // Saludo de bienvenida y menú principal interactivo
-        const mensajeBienvenida = `👋 ¡Hola, *${nombreMostrado}*! Bienvenido a *Remises Bruno*.\n¿Cómo querés viajar hoy?`;
+        const mensajeBienvenida = `👋 ¡Hola, *${nombreMostrado}*! Gracias por comunicarte con *Remises Bruno*.\n\n¿Cómo querés viajar hoy?`;
         return await whatsappService.enviarBotones(cleanFrom, mensajeBienvenida, [
           { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
           { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },

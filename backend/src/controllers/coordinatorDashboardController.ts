@@ -463,7 +463,8 @@ export const coordinatorDashboardController = {
                   id: true,
                   patente: true,
                   marca: true,
-                  modelo: true
+                  modelo: true,
+                  color: true
                 }
               }
             }
@@ -473,7 +474,8 @@ export const coordinatorDashboardController = {
               id: true,
               patente: true,
               marca: true,
-              modelo: true
+              modelo: true,
+              color: true
             }
           }
         }
@@ -502,6 +504,14 @@ export const coordinatorDashboardController = {
         });
       }
 
+      const vehAsignado = updatedViaje.vehiculo || updatedViaje.chofer?.vehiculo;
+      const nombreChoferAsignado = `${chofer.nombre} ${chofer.apellido}`.trim();
+      const marcaAsignada = vehAsignado?.marca || 'Vehículo';
+      const modeloAsignado = vehAsignado?.modelo || '';
+      const colorAsignado = vehAsignado?.color || 'Color a confirmar';
+      const patenteAsignada = vehAsignado?.patente || 'En trámite';
+      const autoDescAsignado = `${marcaAsignada} ${modeloAsignado} - Color ${colorAsignado} (Patente ${patenteAsignada})`.trim();
+
       try {
         const { getIO } = await import('../lib/socket');
         const io = getIO();
@@ -513,11 +523,42 @@ export const coordinatorDashboardController = {
           io.to(coordinador.remiseriaId).emit('viaje_estado_actualizado', {
             viajeId: updatedViaje.id,
             estado: 'ACEPTADO',
+            mensaje: `¡Tu viaje fue aceptado por ${nombreChoferAsignado}! Auto: ${autoDescAsignado}`,
+            choferNombre: nombreChoferAsignado,
+            vehiculo: {
+              marca: marcaAsignada,
+              modelo: modeloAsignado,
+              color: colorAsignado,
+              patente: patenteAsignada,
+            },
             viaje: updatedViaje
           });
         }
       } catch (sErr) {
         console.warn('Socket asignarViaje warning:', sErr);
+      }
+
+      // Notificación inmediata al cliente por WhatsApp
+      const telCli = updatedViaje.clienteTelefono || updatedViaje.cliente?.telefono;
+      if (telCli) {
+        try {
+          const { whatsappService } = await import('../services/whatsappService');
+          const msgWhatsApp =
+            `🚕 *¡TU VIAJE FUE ACEPTADO!*\n` +
+            `━━━━━━━━━━━━━━━━━━━\n` +
+            `👤 *Chofer:* ${nombreChoferAsignado}\n` +
+            `🚗 *Auto:* ${marcaAsignada} ${modeloAsignado}\n` +
+            `🎨 *Color:* ${colorAsignado}\n` +
+            `🔢 *Patente:* *${patenteAsignada}*\n` +
+            `━━━━━━━━━━━━━━━━━━━\n` +
+            `📍 *Origen:* ${updatedViaje.origen}\n` +
+            `${updatedViaje.codigoPin ? `🔒 *PIN de seguridad:* *${updatedViaje.codigoPin}*\n\n` : '\n'}` +
+            `El conductor ya se encuentra en camino hacia tu ubicación. Te avisaremos en cuanto esté en la puerta.`;
+
+          await whatsappService.enviarTexto(telCli, msgWhatsApp);
+        } catch (waErr) {
+          console.warn('Aviso envío WhatsApp viaje asignado coordinatorDashboardController:', waErr);
+        }
       }
 
       // Notificación Push nativa al chofer asignado (para cuando tiene la app cerrada o bloqueada)

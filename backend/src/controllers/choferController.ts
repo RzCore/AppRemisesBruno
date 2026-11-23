@@ -1783,6 +1783,14 @@ export const choferController = {
         },
       });
 
+      const veh = viajeActualizado.vehiculo || viajeActualizado.chofer?.vehiculo;
+      const nombreChofer = `${chofer.nombre} ${chofer.apellido}`.trim();
+      const marcaAuto = veh?.marca || 'Vehículo';
+      const modeloAuto = veh?.modelo || '';
+      const colorAuto = veh?.color || 'Color a confirmar';
+      const patenteAuto = veh?.patente || 'En trámite';
+      const autoDescripcion = `${marcaAuto} ${modeloAuto} - Color ${colorAuto} (Patente ${patenteAuto})`.trim();
+
       try {
         const { getIO, invalidarChoferCache } = await import('../lib/socket');
         invalidarChoferCache(chofer.id);
@@ -1795,17 +1803,23 @@ export const choferController = {
           io.to(viaje.remiseriaId).emit('viaje_estado_actualizado', {
             viajeId: viajeActualizado.id,
             estado: 'ACEPTADO',
-            mensaje: '¡Un chofer aceptó tu viaje y está en camino!',
+            mensaje: `¡Tu viaje fue aceptado por ${nombreChofer}! Auto: ${autoDescripcion}`,
+            choferNombre: nombreChofer,
+            vehiculo: {
+              marca: marcaAuto,
+              modelo: modeloAuto,
+              color: colorAuto,
+              patente: patenteAuto,
+            },
             viaje: viajeActualizado,
           });
-          const veh = viajeActualizado.vehiculo || viajeActualizado.chofer?.vehiculo;
           const baseLat = viajeActualizado.remiseria?.latitud ?? -34.901138;
           const baseLng = viajeActualizado.remiseria?.longitud ?? -60.013778;
           io.to(viaje.remiseriaId).emit('vehiculo_movido', {
             id: veh?.id || chofer.id,
             choferId: chofer.id,
-            patente: veh?.patente || 'Auto Propio',
-            chofer: `${chofer.nombre} ${chofer.apellido}`.trim(),
+            patente: patenteAuto,
+            chofer: nombreChofer,
             estado: 'en_viaje',
             ubicacion: {
               lat: Number(veh?.latitud ?? baseLat),
@@ -1814,7 +1828,32 @@ export const choferController = {
             ultimaActualizacion: new Date().toISOString(),
           });
         }
-      } catch {}
+      } catch (wsErr) {
+        console.warn('Aviso socket al aceptar viaje:', wsErr);
+      }
+
+      // Notificación inmediata al cliente por WhatsApp
+      const telefonoCliente = viajeActualizado.clienteTelefono || viajeActualizado.cliente?.telefono;
+      if (telefonoCliente) {
+        try {
+          const { whatsappService } = await import('../services/whatsappService');
+          const msgWhatsApp =
+            `🚕 *¡TU VIAJE FUE ACEPTADO!*\n` +
+            `━━━━━━━━━━━━━━━━━━━\n` +
+            `👤 *Chofer:* ${nombreChofer}\n` +
+            `🚗 *Auto:* ${marcaAuto} ${modeloAuto}\n` +
+            `🎨 *Color:* ${colorAuto}\n` +
+            `🔢 *Patente:* *${patenteAuto}*\n` +
+            `━━━━━━━━━━━━━━━━━━━\n` +
+            `📍 *Origen:* ${viajeActualizado.origen}\n` +
+            `${viajeActualizado.codigoPin ? `🔒 *PIN de seguridad:* *${viajeActualizado.codigoPin}*\n\n` : '\n'}` +
+            `El chofer ya va en camino hacia tu ubicación. Te avisaremos en cuanto llegue a la puerta.`;
+
+          await whatsappService.enviarTexto(telefonoCliente, msgWhatsApp);
+        } catch (waErr) {
+          console.warn('Aviso envío WhatsApp viaje aceptado choferController:', waErr);
+        }
+      }
 
       res.json({
         success: true,

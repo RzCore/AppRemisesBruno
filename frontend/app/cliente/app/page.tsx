@@ -520,7 +520,7 @@ export default function ClienteApp() {
       }
     });
 
-    socket.on('viaje_estado_actualizado', (data: { viajeId: string; estado: string; mensaje?: string; viaje?: any }) => {
+    socket.on('viaje_estado_actualizado', (data: { viajeId: string; estado: string; mensaje?: string; choferNombre?: string; vehiculo?: any; viaje?: any }) => {
       if (activeViajeRef.current && data.viajeId === activeViajeRef.current.id) {
         if (data.estado === 'ACEPTADO') {
           previousEstadoRef.current = 'ACEPTADO';
@@ -533,7 +533,38 @@ export default function ClienteApp() {
           if (typeof vLat === 'number' && typeof vLon === 'number') {
             setChoferLiveCoords([vLat, vLon]);
           }
-          toast.success(data.mensaje || '¡Tu viaje fue aceptado! El auto ya está en camino a buscarte.');
+
+          const choferNombre = data.choferNombre || (updatedViaje.chofer ? `${updatedViaje.chofer.nombre} ${updatedViaje.chofer.apellido || ''}`.trim() : 'Conductor');
+          const vehiculoObj = data.vehiculo || updatedViaje.vehiculo || updatedViaje.chofer?.vehiculo;
+          const marcaAuto = vehiculoObj?.marca || 'Vehículo';
+          const modeloAuto = vehiculoObj?.modelo || '';
+          const colorAuto = vehiculoObj?.color || '';
+          const patenteAuto = vehiculoObj?.patente || '';
+          const colorStr = colorAuto ? ` - Color ${colorAuto}` : '';
+          const patenteStr = patenteAuto ? ` (Patente ${patenteAuto})` : '';
+          const msjAviso = `🚕 ¡Viaje aceptado por ${choferNombre}! Auto: ${marcaAuto} ${modeloAuto}${colorStr}${patenteStr}`;
+
+          toast.success(data.mensaje || msjAviso, {
+            duration: 8000,
+            icon: '🚗',
+            style: {
+              background: '#065f46',
+              color: '#ffffff',
+              fontWeight: 'bold',
+              borderRadius: '16px',
+              padding: '14px',
+              fontSize: '13px'
+            }
+          });
+
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`¡Viaje aceptado por ${choferNombre}!`, {
+                body: `${marcaAuto} ${modeloAuto}${colorStr} - Patente: ${patenteAuto || 'Asignada'}`,
+                icon: '/favicon.ico',
+              });
+            } catch {}
+          }
         } else if (data.estado === 'EN_CAMINO') {
           previousEstadoRef.current = 'EN_CAMINO';
           notificarLlegadaChofer(data.viaje || activeViajeRef.current);
@@ -1950,7 +1981,7 @@ export default function ClienteApp() {
                       : 'Conductor asignado'}
                   </h4>
                   {(activeViaje.vehiculo || activeViaje.chofer?.vehiculo) ? (
-                    <div className="flex gap-2 items-center text-xs text-gray-500 dark:text-slate-400 mt-1">
+                    <div className="flex flex-wrap gap-1.5 items-center text-xs text-gray-500 dark:text-slate-400 mt-1">
                       <span className="font-bold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-1.5 py-0.5 rounded">
                         {(activeViaje.vehiculo || activeViaje.chofer?.vehiculo).patente}
                       </span>
@@ -1958,6 +1989,11 @@ export default function ClienteApp() {
                         • {(activeViaje.vehiculo || activeViaje.chofer?.vehiculo).marca}{' '}
                         {(activeViaje.vehiculo || activeViaje.chofer?.vehiculo).modelo}
                       </span>
+                      {(activeViaje.vehiculo || activeViaje.chofer?.vehiculo).color && (
+                        <span className="bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-medium px-1.5 py-0.5 rounded text-[11px]">
+                          Color {(activeViaje.vehiculo || activeViaje.chofer?.vehiculo).color}
+                        </span>
+                      )}
                     </div>
                   ) : (
                     <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">Auto de la agencia</p>
