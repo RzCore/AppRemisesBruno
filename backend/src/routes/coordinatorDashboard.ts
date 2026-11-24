@@ -73,11 +73,16 @@ router.get('/auditoria/cancelaciones', coordinatorDashboardController.getAuditor
 router.get('/tarifas', coordinatorDashboardController.getConfiguracionTarifas);
 router.patch('/tarifas', coordinatorDashboardController.updateConfiguracionTarifas);
 
+// Estado de Atención de la Central (Apertura / Pausa por tormenta o emergencia)
+router.get('/estado-atencion', coordinatorDashboardController.getEstadoAtencionCentral);
+router.patch('/estado-atencion', coordinatorDashboardController.updateEstadoAtencionCentral);
+
 // Liquidaciones y Cierre de Caja
 router.get('/liquidaciones/resumen-coordinador', liquidacionController.getResumenCoordinador);
 router.get('/liquidaciones/duenio/historial', liquidacionController.getHistorialDuenio);
 router.get('/liquidaciones/chofer/historial', liquidacionController.getHistorialChofer);
 router.get('/liquidaciones/pendientes/:choferId', liquidacionController.getPendientes);
 router.post('/liquidaciones/crear', liquidacionController.crear);
+router.patch('/liquidaciones/:id/recepcion', liquidacionController.marcarRecepcionDuenio);
 
 export default router;

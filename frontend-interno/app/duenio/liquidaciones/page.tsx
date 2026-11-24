@@ -20,7 +20,11 @@ import {
   Square,
   CheckCircle,
   TrendingUp,
-  X
+  X,
+  Banknote,
+  CreditCard,
+  UserCheck,
+  Edit2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -39,6 +43,13 @@ export default function HistorialLiquidacionesPage() {
   // Filtros Tab 1: Choferes
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<'all' | 'propietario' | 'comisionista'>('all');
+  const [filterRecepcion, setFilterRecepcion] = useState<'all' | 'pendiente' | 'recibido'>('all');
+
+  // Modal de Confirmación de Recepción de Dinero
+  const [recepcionModalLiq, setRecepcionModalLiq] = useState<any | null>(null);
+  const [metodoEntrega, setMetodoEntrega] = useState<'COORDINADOR' | 'CHOFER_MANO' | 'TRANSFERENCIA'>('COORDINADOR');
+  const [notasRecepcion, setNotasRecepcion] = useState('');
+  const [submittingRecepcion, setSubmittingRecepcion] = useState(false);
 
   // Filtros Tab 2: Liquidación a Propietarios de Autos
   const [selectedPropietario, setSelectedPropietario] = useState<string>('');
@@ -148,9 +159,14 @@ export default function HistorialLiquidacionesPage() {
         (filterTipo === 'propietario' && liq.chofer?.esPropietario) ||
         (filterTipo === 'comisionista' && !liq.chofer?.esPropietario);
 
-      return matchesSearch && matchesTipo;
+      const matchesRecepcion =
+        filterRecepcion === 'all' ||
+        (filterRecepcion === 'recibido' && Boolean(liq.dineroRecibido)) ||
+        (filterRecepcion === 'pendiente' && !liq.dineroRecibido);
+
+      return matchesSearch && matchesTipo && matchesRecepcion;
     });
-  }, [liquidaciones, searchTerm, filterTipo]);
+  }, [liquidaciones, searchTerm, filterTipo, filterRecepcion]);
 
   // Totales Tab 1 (Choferes)
   const totalRecaudadoChoferes = filteredLiquidaciones.reduce((sum, l) => sum + l.totalRecaudado, 0);
@@ -215,6 +231,60 @@ export default function HistorialLiquidacionesPage() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const openRecepcionModal = (liq: any) => {
+    setRecepcionModalLiq(liq);
+    setMetodoEntrega(liq.metodoEntregaDuenio || 'COORDINADOR');
+    setNotasRecepcion(liq.notasRecepcion || '');
+  };
+
+  const handleConfirmarRecepcion = async (recibido: boolean) => {
+    if (!recepcionModalLiq) return;
+    try {
+      setSubmittingRecepcion(true);
+      const res = await coordinadorDashboardService.marcarRecepcionLiquidacion(recepcionModalLiq.id, {
+        dineroRecibido: recibido,
+        metodoEntregaDuenio: recibido ? metodoEntrega : undefined,
+        notasRecepcion: recibido ? notasRecepcion : undefined
+      });
+      if (res.success) {
+        toast.success(recibido ? 'Recepción de dinero confirmada' : 'Liquidación marcada como pendiente');
+        setLiquidaciones((prev) =>
+          prev.map((item) =>
+            item.id === recepcionModalLiq.id
+              ? {
+                  ...item,
+                  dineroRecibido: recibido,
+                  metodoEntregaDuenio: recibido ? metodoEntrega : null,
+                  fechaRecepcionDuenio: recibido ? new Date().toISOString() : null,
+                  notasRecepcion: recibido ? (notasRecepcion.trim() || null) : null
+                }
+              : item
+          )
+        );
+        setRecepcionModalLiq(null);
+      } else {
+        toast.error(res.message || 'No se pudo actualizar la recepción');
+      }
+    } catch (error) {
+      toast.error('Error al actualizar recepción');
+    } finally {
+      setSubmittingRecepcion(false);
+    }
+  };
+
+  const getMetodoEntregaLabel = (metodo?: string) => {
+    switch (metodo) {
+      case 'COORDINADOR':
+        return 'Por Coordinador';
+      case 'CHOFER_MANO':
+        return 'Chofer en mano';
+      case 'TRANSFERENCIA':
+        return 'Transferencia';
+      default:
+        return 'Recibido';
+    }
   };
 
   if (!user) return null;
@@ -340,6 +410,15 @@ export default function HistorialLiquidacionesPage() {
                 <option value="propietario">Chofer Propietario (Auto Propio)</option>
                 <option value="comisionista">Chofer con Auto Asignado</option>
               </select>
+              <select
+                value={filterRecepcion}
+                onChange={(e) => setFilterRecepcion(e.target.value as any)}
+                className="w-full sm:max-w-[190px] px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 text-xs sm:text-sm bg-white cursor-pointer text-slate-700"
+              >
+                <option value="all">Todos los cobros</option>
+                <option value="pendiente">Pendiente de recibir</option>
+                <option value="recibido">Dinero recibido</option>
+              </select>
             </div>
 
             {loading ? (
@@ -425,6 +504,34 @@ export default function HistorialLiquidacionesPage() {
                             <span className="truncate max-w-[140px] italic">"{liq.observaciones}"</span>
                           )}
                         </div>
+
+                        {/* Estado de Recepción por el Dueño */}
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                          {liq.dineroRecibido ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Recibido • {getMetodoEntregaLabel(liq.metodoEntregaDuenio)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold">
+                              <Clock className="w-3.5 h-3.5" />
+                              Pendiente de entrega
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openRecepcionModal(liq)}
+                            className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${
+                              liq.dineroRecibido
+                                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                            }`}
+                          >
+                            {liq.dineroRecibido ? 'Editar' : 'Marcar Recibido'}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -458,6 +565,9 @@ export default function HistorialLiquidacionesPage() {
                         </th>
                         <th className="px-5 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
                           Notas
+                        </th>
+                        <th className="px-5 py-3.5 text-center font-semibold text-slate-500 uppercase tracking-wider">
+                          Recepción Dueño
                         </th>
                       </tr>
                     </thead>
@@ -514,6 +624,36 @@ export default function HistorialLiquidacionesPage() {
                             </td>
                             <td className="px-5 py-3.5 text-[11px] text-slate-500 max-w-[180px] truncate">
                               {liq.observaciones || <span className="text-slate-300 italic">-</span>}
+                            </td>
+                            <td className="px-5 py-3.5 whitespace-nowrap text-center">
+                              {liq.dineroRecibido ? (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <span
+                                    title={liq.notasRecepcion || undefined}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold"
+                                  >
+                                    <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                                    {getMetodoEntregaLabel(liq.metodoEntregaDuenio)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openRecepcionModal(liq)}
+                                    title="Editar recepción"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => openRecepcionModal(liq)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-xs active:scale-95 transition-all"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  Marcar Recibido
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1057,6 +1197,169 @@ export default function HistorialLiquidacionesPage() {
                 <div className="border-t border-slate-400 pt-2">
                   <p className="font-bold text-slate-900">Remises Bruno</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Firma y Sello de Administración</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA CONFIRMAR RECEPCIÓN DE DINERO POR EL DUEÑO */}
+      {recepcionModalLiq && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in print:hidden">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
+                  Control de Caja
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-1">
+                  {recepcionModalLiq.dineroRecibido ? 'Editar Recepción de Dinero' : 'Confirmar Dinero Recibido'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecepcionModalLiq(null)}
+                className="w-9 h-9 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 sm:p-6 space-y-4">
+              {/* Resumen de la liquidación */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between text-xs">
+                <div>
+                  <p className="font-bold text-slate-900 text-sm">
+                    {recepcionModalLiq.chofer?.nombre} {recepcionModalLiq.chofer?.apellido}
+                  </p>
+                  <p className="text-slate-500 mt-0.5">
+                    {new Date(recepcionModalLiq.fecha).toLocaleDateString('es-AR')} • Comisión Agencia: ${recepcionModalLiq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Recaudado</span>
+                  <span className="text-sm font-black text-slate-900">
+                    ${recepcionModalLiq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Opciones de cómo recibió el dinero */}
+              <div className="space-y-2.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  ¿Cómo recibiste el dinero?
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setMetodoEntrega('COORDINADOR')}
+                  className={`w-full text-left p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 ${
+                    metodoEntrega === 'COORDINADOR'
+                      ? 'bg-emerald-50/70 border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metodoEntrega === 'COORDINADOR' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-xs sm:text-sm font-bold text-slate-900 block">
+                      Entregado por el Coordinador
+                    </span>
+                    <span className="text-[11px] text-slate-500 block">
+                      Le pagaron al coordinador y él te entregó el dinero.
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMetodoEntrega('CHOFER_MANO')}
+                  className={`w-full text-left p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 ${
+                    metodoEntrega === 'CHOFER_MANO'
+                      ? 'bg-emerald-50/70 border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metodoEntrega === 'CHOFER_MANO' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    <Banknote className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-xs sm:text-sm font-bold text-slate-900 block">
+                      Chofer en mano (Efectivo)
+                    </span>
+                    <span className="text-[11px] text-slate-500 block">
+                      El chofer te entregó el dinero directamente en efectivo.
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMetodoEntrega('TRANSFERENCIA')}
+                  className={`w-full text-left p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 ${
+                    metodoEntrega === 'TRANSFERENCIA'
+                      ? 'bg-emerald-50/70 border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metodoEntrega === 'TRANSFERENCIA' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    <CreditCard className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-xs sm:text-sm font-bold text-slate-900 block">
+                      Transferencia
+                    </span>
+                    <span className="text-[11px] text-slate-500 block">
+                      El chofer o coordinador transfirió el dinero a tu cuenta.
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Nota / Comprobante (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={notasRecepcion}
+                  onChange={(e) => setNotasRecepcion(e.target.value)}
+                  placeholder="Ej: Recibido en base, alias MercadoPago..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2">
+                {recepcionModalLiq.dineroRecibido && (
+                  <button
+                    type="button"
+                    disabled={submittingRecepcion}
+                    onClick={() => handleConfirmarRecepcion(false)}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    Marcar Pendiente
+                  </button>
+                )}
+                <div className="flex items-center gap-2 ml-auto w-full sm:w-auto justify-end">
+                  <button
+                    type="button"
+                    disabled={submittingRecepcion}
+                    onClick={() => setRecepcionModalLiq(null)}
+                    className="px-4 py-2.5 rounded-xl text-slate-500 hover:bg-slate-100 text-xs font-semibold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submittingRecepcion}
+                    onClick={() => handleConfirmarRecepcion(true)}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    {submittingRecepcion ? 'Guardando...' : 'Confirmar Recibido'}
+                  </button>
                 </div>
               </div>
             </div>

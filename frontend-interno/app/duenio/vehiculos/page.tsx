@@ -44,6 +44,7 @@ export default function VehiculosPage() {
   const [createStep, setCreateStep] = useState<number>(1);
   const [tipoPropietario, setTipoPropietario] = useState<'AGENCIA' | 'TERCERO' | 'CHOFER'>('AGENCIA');
   const [showEditModal, setShowEditModal] = useState(false);
+  const [editStep, setEditStep] = useState<number>(1);
   const [editingVehiculo, setEditingVehiculo] = useState<Vehiculo | null>(null);
   const [formData, setFormData] = useState<CreateVehiculoData>({
     patente: '',
@@ -219,6 +220,25 @@ export default function VehiculosPage() {
 
   const openEditModal = (vehiculo: Vehiculo) => {
     setEditingVehiculo(vehiculo);
+    const propNormalized = vehiculo.propietario?.trim().toLowerCase() || '';
+    const isChoferProp =
+      propNormalized === 'chofer' ||
+      Boolean(
+        vehiculo.choferes?.some(
+          (c) =>
+            c.esPropietario &&
+            `${c.nombre} ${c.apellido}`.trim().toLowerCase() === propNormalized
+        )
+      );
+
+    if (propNormalized === 'agencia') {
+      setTipoPropietario('AGENCIA');
+    } else if (isChoferProp) {
+      setTipoPropietario('CHOFER');
+    } else {
+      setTipoPropietario('TERCERO');
+    }
+
     setFormData({
       patente: vehiculo.patente,
       marca: vehiculo.marca,
@@ -228,13 +248,14 @@ export default function VehiculosPage() {
       tipo: vehiculo.tipo,
       capacidad: vehiculo.capacidad,
       propietario: vehiculo.propietario,
-      vtoVtv: vehiculo.vtoVtv || '',
-      vtoMatafuego: vehiculo.vtoMatafuego || '',
-      vtoSeguro: vehiculo.vtoSeguro || '',
+      vtoVtv: vehiculo.vtoVtv ? vehiculo.vtoVtv.split('T')[0] : '',
+      vtoMatafuego: vehiculo.vtoMatafuego ? vehiculo.vtoMatafuego.split('T')[0] : '',
+      vtoSeguro: vehiculo.vtoSeguro ? vehiculo.vtoSeguro.split('T')[0] : '',
       observaciones: vehiculo.observaciones || '',
       remiseriaId: vehiculo.remiseriaId,
       choferId: vehiculo.choferes && vehiculo.choferes[0]?.id ? vehiculo.choferes[0].id : undefined
     });
+    setEditStep(1);
     setShowEditModal(true);
   };
 
@@ -246,27 +267,41 @@ export default function VehiculosPage() {
     setShowCreateModal(true);
   };
 
-  const handleNextStep = () => {
-    if (createStep === 1) {
+  const validateVehiculoStep = (step: number): boolean => {
+    if (step === 1) {
       if (!formData.patente?.trim() || !formData.marca?.trim() || !formData.modelo?.trim() || !formData.tipo?.trim()) {
         toast.error('Completá la patente, tipo, marca y modelo del vehículo');
-        return;
+        return false;
       }
-    } else if (createStep === 2) {
+    } else if (step === 2) {
       if (tipoPropietario === 'TERCERO' && !formData.propietario?.trim()) {
         toast.error('Por favor ingresá el nombre completo del dueño del vehículo');
-        return;
+        return false;
       }
       if (!formData.propietario?.trim()) {
         toast.error('Indicá a quién pertenece el vehículo (titular / propietario)');
-        return;
+        return false;
       }
     }
+    return true;
+  };
+
+  const handleNextStep = () => {
+    if (!validateVehiculoStep(createStep)) return;
     setCreateStep(prev => Math.min(prev + 1, 4));
   };
 
   const handlePrevStep = () => {
     setCreateStep(prev => Math.max(prev - 1, 1));
+  };
+
+  const handleEditNextStep = () => {
+    if (!validateVehiculoStep(editStep)) return;
+    setEditStep(prev => Math.min(prev + 1, 4));
+  };
+
+  const handleEditPrevStep = () => {
+    setEditStep(prev => Math.max(prev - 1, 1));
   };
 
   const resetForm = () => {
@@ -584,940 +619,750 @@ export default function VehiculosPage() {
           </div>
         </div>
 
-      {/* Create Modal por Pasos (Wizard Stepper) */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs overflow-y-auto h-full w-full z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
-          <div className="relative bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[92vh]">
-            
-            {/* Header del Modal */}
-            <div className="p-5 sm:p-6 pb-4 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-primary-600 bg-primary-50 px-2 py-0.5 rounded-md">
-                    Paso {createStep} de 4
-                  </span>
-                  <span className="text-xs font-semibold text-slate-400">
-                    {createStep === 1 && '• Datos del Rodado'}
-                    {createStep === 2 && '• Propietario / Titular'}
-                    {createStep === 3 && '• Vencimientos'}
-                    {createStep === 4 && '• Confirmación'}
-                  </span>
-                </div>
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 mt-1">Alta de Vehículo</h3>
-              </div>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="w-9 h-9 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+      {/* Modal de Creación / Edición por Pasos (Wizard Stepper) */}
+      {(() => {
+        const isEdit = showEditModal && !!editingVehiculo;
+        const isOpen = showCreateModal || isEdit;
+        if (!isOpen) return null;
 
-            {/* Stepper visual interactivo */}
-            <div className="px-5 sm:px-6 pt-3 pb-2 bg-slate-50/70 border-b border-slate-100">
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { step: 1, label: 'Rodado', icon: Car },
-                  { step: 2, label: 'Titular', icon: User },
-                  { step: 3, label: 'Papeles', icon: Calendar },
-                  { step: 4, label: 'Resumen', icon: CheckCircle }
-                ].map((s) => {
-                  const Icon = s.icon;
-                  const isCompleted = createStep > s.step;
-                  const isCurrent = createStep === s.step;
-                  return (
-                    <div
-                      key={s.step}
-                      className={`flex flex-col items-center text-center pb-1 border-b-2 transition-all ${
-                        isCurrent
-                          ? 'border-primary-600 text-primary-600 font-bold'
-                          : isCompleted
-                          ? 'border-emerald-500 text-emerald-600 font-semibold'
-                          : 'border-transparent text-slate-400 font-medium'
-                      }`}
-                    >
-                      <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs mb-1 transition-all ${
+        const currentStep = isEdit ? editStep : createStep;
+        const closeModal = () => {
+          if (isEdit) {
+            setShowEditModal(false);
+            setEditingVehiculo(null);
+          } else {
+            setShowCreateModal(false);
+          }
+        };
+        const onNext = isEdit ? handleEditNextStep : handleNextStep;
+        const onPrev = isEdit ? handleEditPrevStep : handlePrevStep;
+        const onSubmit = isEdit ? handleEdit : handleCreate;
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs overflow-y-auto h-full w-full z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+            <div className="relative bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[92vh]">
+
+              {/* Header del Modal */}
+              <div className="p-5 sm:p-6 pb-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-primary-600 bg-primary-50 px-2 py-0.5 rounded-md">
+                      Paso {currentStep} de 4
+                    </span>
+                    <span className="text-xs font-semibold text-slate-400">
+                      {currentStep === 1 && '• Datos del Rodado'}
+                      {currentStep === 2 && '• Propietario / Titular'}
+                      {currentStep === 3 && '• Vencimientos'}
+                      {currentStep === 4 && '• Confirmación'}
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold text-slate-900 mt-1">
+                    {isEdit ? 'Editar Vehículo' : 'Alta de Vehículo'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="w-9 h-9 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Stepper visual interactivo */}
+              <div className="px-5 sm:px-6 pt-3 pb-2 bg-slate-50/70 border-b border-slate-100">
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { step: 1, label: 'Rodado', icon: Car },
+                    { step: 2, label: 'Titular', icon: User },
+                    { step: 3, label: 'Papeles', icon: Calendar },
+                    { step: 4, label: 'Resumen', icon: CheckCircle }
+                  ].map((s) => {
+                    const isCompleted = currentStep > s.step;
+                    const isCurrent = currentStep === s.step;
+                    return (
+                      <button
+                        type="button"
+                        key={s.step}
+                        onClick={() => {
+                          if (!isEdit) return;
+                          if (s.step <= currentStep || validateVehiculoStep(currentStep)) {
+                            setEditStep(s.step);
+                          }
+                        }}
+                        className={`flex flex-col items-center text-center pb-1 border-b-2 transition-all ${
+                          isEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
+                        } ${
                           isCurrent
-                            ? 'bg-primary-600 text-white shadow-xs'
+                            ? 'border-primary-600 text-primary-600 font-bold'
                             : isCompleted
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-slate-200 text-slate-500'
+                            ? 'border-emerald-500 text-emerald-600 font-semibold'
+                            : 'border-transparent text-slate-400 font-medium'
                         }`}
                       >
-                        {isCompleted ? <Check className="w-3.5 h-3.5" /> : s.step}
-                      </div>
-                      <span className="text-[10px] hidden sm:inline">{s.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Formulario */}
-            <form onSubmit={handleCreate} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
-              
-              {/* PASO 1: DATOS DEL VEHÍCULO */}
-              {createStep === 1 && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Patente / Dominio *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.patente}
-                        onChange={(e) => setFormData({ ...formData, patente: e.target.value.toUpperCase() })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider focus:ring-2 focus:ring-primary-500"
-                        placeholder="ej. AF123CD"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Tipo de Carrocería *
-                      </label>
-                      <select
-                        required
-                        value={formData.tipo}
-                        onChange={(e) => setFormData({ ...formData, tipo: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm bg-white focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">Seleccionar tipo</option>
-                        <option value="Auto">Auto / Sedán</option>
-                        <option value="Camioneta">Camioneta</option>
-                        <option value="SUV">SUV</option>
-                        <option value="Van">Van / Minibús</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Marca *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.marca}
-                        onChange={(e) => setFormData({ ...formData, marca: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:ring-2 focus:ring-primary-500"
-                        placeholder="ej. Toyota, Fiat, Renault"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Modelo *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.modelo}
-                        onChange={(e) => setFormData({ ...formData, modelo: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:ring-2 focus:ring-primary-500"
-                        placeholder="ej. Cronos, Etios, Kangoo"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Año *
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="1990"
-                        max={new Date().getFullYear() + 1}
-                        value={formData.anio}
-                        onChange={(e) => setFormData({ ...formData, anio: parseInt(e.target.value) || 2020 })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Color *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.color}
-                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:ring-2 focus:ring-primary-500"
-                        placeholder="ej. Blanco"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Pasajeros *
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        max="20"
-                        value={formData.capacidad}
-                        onChange={(e) => setFormData({ ...formData, capacidad: parseInt(e.target.value) || 4 })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* PASO 2: PROPIETARIO / TITULAR */}
-              {createStep === 2 && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      ¿A quién pertenece el vehículo?
-                    </label>
-                    <p className="text-xs text-slate-500 mb-3">
-                      Seleccioná la titularidad para calcular comisiones y liquidaciones correspondientes.
-                    </p>
-
-                    <div className="space-y-2.5">
-                      {/* Opción 1: Agencia */}
-                      <div
-                        onClick={() => {
-                          setTipoPropietario('AGENCIA');
-                          setFormData({ ...formData, propietario: 'Agencia' });
-                        }}
-                        className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
-                          tipoPropietario === 'AGENCIA'
-                            ? 'bg-indigo-50/70 border-indigo-600 shadow-xs'
-                            : 'bg-white border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">🏢</span>
-                          <div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-900 block">
-                              Propiedad de la Agencia (Remises Bruno)
-                            </span>
-                            <span className="text-[11px] text-slate-500 block">
-                              Vehículo propio de la empresa remisería.
-                            </span>
-                          </div>
-                        </div>
-                        {tipoPropietario === 'AGENCIA' && (
-                          <Check className="w-5 h-5 text-indigo-600 shrink-0" />
-                        )}
-                      </div>
-
-                      {/* Opción 2: Dueño de Vehículo (Tercero ajeno / Inversor) */}
-                      <div
-                        onClick={() => {
-                          setTipoPropietario('TERCERO');
-                          if (formData.propietario === 'Agencia' || formData.propietario === 'Chofer') {
-                            setFormData({ ...formData, propietario: '' });
-                          }
-                        }}
-                        className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
-                          tipoPropietario === 'TERCERO'
-                            ? 'bg-blue-50/70 border-blue-600 shadow-xs ring-2 ring-blue-500/20'
-                            : 'bg-white border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">🚗</span>
-                          <div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-900 block">
-                              Dueño de Vehículo (Persona externa / Inversor)
-                            </span>
-                            <span className="text-[11px] text-slate-500 block">
-                              Persona ajena que pone a trabajar su auto en la agencia (50% de ganancia en liquidación).
-                            </span>
-                          </div>
-                        </div>
-                        {tipoPropietario === 'TERCERO' && (
-                          <Check className="w-5 h-5 text-blue-600 shrink-0" />
-                        )}
-                      </div>
-
-                      {/* Opción 3: Chofer */}
-                      <div
-                        onClick={() => {
-                          setTipoPropietario('CHOFER');
-                          if (formData.propietario === 'Agencia') {
-                            setFormData({ ...formData, propietario: 'Chofer' });
-                          }
-                        }}
-                        className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
-                          tipoPropietario === 'CHOFER'
-                            ? 'bg-emerald-50/70 border-emerald-600 shadow-xs'
-                            : 'bg-white border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">👤</span>
-                          <div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-900 block">
-                              Vehículo Propio del Chofer
-                            </span>
-                            <span className="text-[11px] text-slate-500 block">
-                              El chofer conduce su propio auto (retiene el 80% y paga 20% a la agencia).
-                            </span>
-                          </div>
-                        </div>
-                        {tipoPropietario === 'CHOFER' && (
-                          <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Selector de Chofer si seleccionó CHOFER */}
-                  {tipoPropietario === 'CHOFER' && (
-                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                      <div>
-                        <label className="block text-xs font-bold text-emerald-950 mb-1">
-                          Chofer Propietario de la Unidad *
-                        </label>
-                        <select
-                          required
-                          value={formData.choferId || ''}
-                          onChange={(e) => {
-                            const cId = e.target.value;
-                            const choferObj = choferes.find((c) => c.id === cId);
-                            setFormData({
-                              ...formData,
-                              choferId: cId || undefined,
-                              propietario: choferObj ? `${choferObj.nombre} ${choferObj.apellido}` : 'Chofer'
-                            });
-                          }}
-                          className="w-full px-3.5 py-2.5 bg-white border border-emerald-300 rounded-xl text-xs sm:text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs mb-1 transition-all ${
+                            isCurrent
+                              ? 'bg-primary-600 text-white shadow-xs'
+                              : isCompleted
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-slate-200 text-slate-500'
+                          }`}
                         >
-                          <option value="">-- Seleccionar Chofer Registrado --</option>
-                          {choferes.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              Móvil #{c.numeroChofer} - {c.nombre} {c.apellido} (Licencia hasta: {new Date(c.vtoLicencia).toLocaleDateString()})
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-[11px] text-emerald-800 mt-1">
-                          El chofer quedará vinculado a esta unidad y se le notificará automáticamente en su app cuando los papeles del auto o su carnet estén por vencer.
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                          {isCompleted ? <Check className="w-3.5 h-3.5" /> : s.step}
+                        </div>
+                        <span className="text-[10px] hidden sm:inline">{s.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-                  {/* Asignar chofer opcional si es de Agencia o Tercero */}
-                  {tipoPropietario !== 'CHOFER' && (
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700">
-                        Chofer asignado al rodado (opcional)
-                      </label>
-                      <select
-                        value={formData.choferId || ''}
-                        onChange={(e) => {
-                          const cId = e.target.value;
-                          setFormData({
-                            ...formData,
-                            choferId: cId || undefined
-                          });
-                        }}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">-- Sin chofer asignado por ahora --</option>
-                        {choferes.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            Móvil #{c.numeroChofer} - {c.nombre} {c.apellido}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+              {/* Formulario */}
+              <form onSubmit={onSubmit} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
 
-                  {/* Campo de ingreso del Dueño Tercero si seleccionó TERCERO */}
-                  {tipoPropietario === 'TERCERO' && (
-                    <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                {/* PASO 1: DATOS DEL VEHÍCULO */}
+                {currentStep === 1 && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-bold text-blue-950 mb-1">
-                          Nombre completo del Dueño del Vehículo *
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Patente / Dominio *
                         </label>
                         <input
                           type="text"
                           required
-                          autoFocus
-                          value={formData.propietario === 'Agencia' || formData.propietario === 'Chofer' ? '' : formData.propietario}
-                          onChange={(e) => setFormData({ ...formData, propietario: e.target.value })}
-                          className="w-full px-3.5 py-2.5 bg-white border border-blue-300 rounded-xl text-xs sm:text-sm uppercase font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 shadow-xs"
-                          placeholder="Ej: Carlos Gómez, María Benítez, etc."
+                          value={formData.patente}
+                          onChange={(e) => setFormData({ ...formData, patente: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider focus:ring-2 focus:ring-primary-500"
+                          placeholder="ej. AF123CD"
                         />
-                        <p className="text-[11px] text-blue-700 mt-1">
-                          Con este nombre podrás seleccionarlo y generar su reporte de liquidación en PDF.
-                        </p>
                       </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Tipo de Carrocería *
+                        </label>
+                        <select
+                          required
+                          value={formData.tipo}
+                          onChange={(e) => setFormData({ ...formData, tipo: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm bg-white focus:ring-2 focus:ring-primary-500"
+                        >
+                          <option value="">Seleccionar tipo</option>
+                          <option value="Auto">Auto / Sedán</option>
+                          <option value="Camioneta">Camioneta</option>
+                          <option value="SUV">SUV</option>
+                          <option value="Van">Van / Minibús</option>
+                        </select>
+                      </div>
+                    </div>
 
-                      {/* Sugerencias de dueños ya registrados en otros autos */}
-                      {(() => {
-                        const duenos = Array.from(
-                          new Set(
-                            vehiculos
-                              .map((v) => v.propietario?.trim())
-                              .filter((p) => p && p.toLowerCase() !== 'agencia' && p.toLowerCase() !== 'chofer')
-                          )
-                        );
-                        if (duenos.length === 0) return null;
-                        return (
-                          <div>
-                            <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block mb-1.5">
-                              O seleccioná un dueño ya registrado:
-                            </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {duenos.map((d) => (
-                                <button
-                                  key={d}
-                                  type="button"
-                                  onClick={() => setFormData({ ...formData, propietario: d })}
-                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                                    formData.propietario.toLowerCase() === d.toLowerCase()
-                                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                                      : 'bg-white text-blue-800 border-blue-200 hover:bg-blue-100'
-                                  }`}
-                                >
-                                  {d}
-                                </button>
-                              ))}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Marca *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.marca}
+                          onChange={(e) => setFormData({ ...formData, marca: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:ring-2 focus:ring-primary-500"
+                          placeholder="ej. Toyota, Fiat, Renault"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Modelo *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.modelo}
+                          onChange={(e) => setFormData({ ...formData, modelo: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:ring-2 focus:ring-primary-500"
+                          placeholder="ej. Cronos, Etios, Kangoo"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Año *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min="1900"
+                          max={new Date().getFullYear() + 1}
+                          value={formData.anio}
+                          onChange={(e) => setFormData({ ...formData, anio: parseInt(e.target.value) || 2020 })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Color *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.color}
+                          onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:ring-2 focus:ring-primary-500"
+                          placeholder="ej. Blanco"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Pasajeros *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min="1"
+                          max="20"
+                          value={formData.capacidad}
+                          onChange={(e) => setFormData({ ...formData, capacidad: parseInt(e.target.value) || 4 })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* PASO 2: PROPIETARIO / TITULAR */}
+                {currentStep === 2 && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                        ¿A quién pertenece el vehículo?
+                      </label>
+                      <p className="text-xs text-slate-500 mb-3">
+                        Seleccioná la titularidad para calcular comisiones y liquidaciones correspondientes.
+                      </p>
+
+                      <div className="space-y-2.5">
+                        {/* Opción 1: Agencia */}
+                        <div
+                          onClick={() => {
+                            setTipoPropietario('AGENCIA');
+                            setFormData({ ...formData, propietario: 'Agencia' });
+                          }}
+                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
+                            tipoPropietario === 'AGENCIA'
+                              ? 'bg-indigo-50/70 border-indigo-600 shadow-xs'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">🏢</span>
+                            <div>
+                              <span className="text-xs sm:text-sm font-bold text-slate-900 block">
+                                Propiedad de la Agencia (Remises Bruno)
+                              </span>
+                              <span className="text-[11px] text-slate-500 block">
+                                Vehículo propio de la empresa remisería.
+                              </span>
                             </div>
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* PASO 3: PAPELES Y VENCIMIENTOS */}
-              {createStep === 3 && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
-                  <div className="p-3 bg-amber-50/70 border border-amber-100 rounded-2xl flex items-center gap-3">
-                    <ShieldCheck className="w-6 h-6 text-amber-600 shrink-0" />
-                    <p className="text-xs text-amber-900">
-                      Cargá los vencimientos para recibir alertas automáticas cuando la VTV o seguro estén próximos a vencer.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Vencimiento VTV
-                      </label>
-                      <input
-                        type="date"
-                        value={formData.vtoVtv}
-                        onChange={(e) => setFormData({ ...formData, vtoVtv: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Vencimiento Seguro
-                      </label>
-                      <input
-                        type="date"
-                        value={formData.vtoSeguro}
-                        onChange={(e) => setFormData({ ...formData, vtoSeguro: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Venc. Matafuego
-                      </label>
-                      <input
-                        type="date"
-                        value={formData.vtoMatafuego}
-                        onChange={(e) => setFormData({ ...formData, vtoMatafuego: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Panel de Control y Evaluación de Documentación */}
-                  {(() => {
-                    const choferAsignado = choferes.find((c) => c.id === formData.choferId);
-                    const evaluacion = evaluarDocumentacionClient(choferAsignado, formData);
-
-                    return (
-                      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <ShieldAlert
-                              className={`w-4 h-4 ${
-                                evaluacion.tieneAlertas
-                                  ? evaluacion.tieneCriticas
-                                    ? 'text-red-500'
-                                    : 'text-amber-500'
-                                  : 'text-emerald-500'
-                              }`}
-                            />
-                            <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                              Control de Documentación y Alertas
-                            </span>
-                          </div>
-                          {evaluacion.tieneAlertas ? (
-                            <span
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                evaluacion.tieneCriticas
-                                  ? 'bg-red-100 text-red-700 border border-red-200'
-                                  : 'bg-amber-100 text-amber-700 border border-amber-200'
-                              }`}
-                            >
-                              {evaluacion.cantidadAlertas} {evaluacion.cantidadAlertas === 1 ? 'alerta' : 'alertas'}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-                              Documentación al día
-                            </span>
+                          {tipoPropietario === 'AGENCIA' && (
+                            <Check className="w-5 h-5 text-indigo-600 shrink-0" />
                           )}
                         </div>
 
-                        {/* Detalle de los 4 documentos */}
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          {/* Seguro */}
-                          <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
+                        {/* Opción 2: Dueño de Vehículo (Tercero ajeno / Inversor) */}
+                        <div
+                          onClick={() => {
+                            setTipoPropietario('TERCERO');
+                            if (formData.propietario === 'Agencia' || formData.propietario === 'Chofer') {
+                              setFormData({ ...formData, propietario: '' });
+                            }
+                          }}
+                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
+                            tipoPropietario === 'TERCERO'
+                              ? 'bg-blue-50/70 border-blue-600 shadow-xs ring-2 ring-blue-500/20'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">🚗</span>
                             <div>
-                              <p className="font-bold text-[11px] text-slate-800">🛡️ Seguro</p>
-                              <p className="text-[10px] text-slate-500">{evaluacion.items.seguro.fecha || 'Sin fecha'}</p>
+                              <span className="text-xs sm:text-sm font-bold text-slate-900 block">
+                                Dueño de Vehículo (Persona externa / Inversor)
+                              </span>
+                              <span className="text-[11px] text-slate-500 block">
+                                Persona ajena que pone a trabajar su auto en la agencia (50% de ganancia en liquidación).
+                              </span>
                             </div>
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                getDocumentoBadgeClasses(evaluacion.items.seguro.estado).badge
-                              }`}
-                            >
-                              {evaluacion.items.seguro.estado === 'VENCIDO'
-                                ? 'Vencido'
-                                : evaluacion.items.seguro.estado === 'PROXIMO_A_VENCER'
-                                ? `${evaluacion.items.seguro.diasRestantes}d`
-                                : evaluacion.items.seguro.estado === 'AL_DIA'
-                                ? 'Al día'
-                                : 'S/D'}
-                            </span>
                           </div>
-
-                          {/* VTV */}
-                          <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-[11px] text-slate-800">📋 VTV</p>
-                              <p className="text-[10px] text-slate-500">{evaluacion.items.vtv.fecha || 'Sin fecha'}</p>
-                            </div>
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                getDocumentoBadgeClasses(evaluacion.items.vtv.estado).badge
-                              }`}
-                            >
-                              {evaluacion.items.vtv.estado === 'VENCIDO'
-                                ? 'Vencida'
-                                : evaluacion.items.vtv.estado === 'PROXIMO_A_VENCER'
-                                ? `${evaluacion.items.vtv.diasRestantes}d`
-                                : evaluacion.items.vtv.estado === 'AL_DIA'
-                                ? 'Al día'
-                                : 'S/D'}
-                            </span>
-                          </div>
-
-                          {/* Matafuego */}
-                          <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-[11px] text-slate-800">🧯 Matafuego</p>
-                              <p className="text-[10px] text-slate-500">{evaluacion.items.matafuego.fecha || 'Sin fecha'}</p>
-                            </div>
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                getDocumentoBadgeClasses(evaluacion.items.matafuego.estado).badge
-                              }`}
-                            >
-                              {evaluacion.items.matafuego.estado === 'VENCIDO'
-                                ? 'Vencido'
-                                : evaluacion.items.matafuego.estado === 'PROXIMO_A_VENCER'
-                                ? `${evaluacion.items.matafuego.diasRestantes}d`
-                                : evaluacion.items.matafuego.estado === 'AL_DIA'
-                                ? 'Al día'
-                                : 'S/D'}
-                            </span>
-                          </div>
-
-                          {/* Carnet Chofer */}
-                          <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
-                            <div>
-                              <p className="font-bold text-[11px] text-slate-800">🪪 Carnet Chofer</p>
-                              <p className="text-[10px] text-slate-500">
-                                {choferAsignado ? evaluacion.items.licencia.fecha || 'Sin fecha' : 'Sin chofer'}
-                              </p>
-                            </div>
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                choferAsignado
-                                  ? getDocumentoBadgeClasses(evaluacion.items.licencia.estado).badge
-                                  : 'bg-slate-100 text-slate-400'
-                              }`}
-                            >
-                              {choferAsignado
-                                ? evaluacion.items.licencia.estado === 'VENCIDO'
-                                  ? 'Vencido'
-                                  : evaluacion.items.licencia.estado === 'PROXIMO_A_VENCER'
-                                  ? `${evaluacion.items.licencia.diasRestantes}d`
-                                  : evaluacion.items.licencia.estado === 'AL_DIA'
-                                  ? 'Al día'
-                                  : 'S/D'
-                                : '-'}
-                            </span>
-                          </div>
+                          {tipoPropietario === 'TERCERO' && (
+                            <Check className="w-5 h-5 text-blue-600 shrink-0" />
+                          )}
                         </div>
 
-                        {/* Aviso de notificación automática en la app */}
-                        {choferAsignado && evaluacion.tieneAlertas && (
-                          <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 flex items-center gap-2">
-                            <Bell className="w-4 h-4 text-blue-600 shrink-0" />
-                            <p className="text-[11px]">
-                              Al guardar, el chofer <strong>{choferAsignado.nombre} {choferAsignado.apellido}</strong> recibirá una notificación automática en su aplicación móvil avisándole sobre los documentos por vencer o vencidos.
-                            </p>
+                        {/* Opción 3: Chofer */}
+                        <div
+                          onClick={() => {
+                            setTipoPropietario('CHOFER');
+                            if (formData.propietario === 'Agencia') {
+                              setFormData({ ...formData, propietario: 'Chofer' });
+                            }
+                          }}
+                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
+                            tipoPropietario === 'CHOFER'
+                              ? 'bg-emerald-50/70 border-emerald-600 shadow-xs'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">👤</span>
+                            <div>
+                              <span className="text-xs sm:text-sm font-bold text-slate-900 block">
+                                Vehículo Propio del Chofer
+                              </span>
+                              <span className="text-[11px] text-slate-500 block">
+                                El chofer conduce su propio auto (retiene el 80% y paga 20% a la agencia).
+                              </span>
+                            </div>
                           </div>
-                        )}
+                          {tipoPropietario === 'CHOFER' && (
+                            <Check className="w-5 h-5 text-emerald-600 shrink-0" />
+                          )}
+                        </div>
                       </div>
-                    );
-                  })()}
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Observaciones / Notas (opcional)
-                    </label>
-                    <textarea
-                      value={formData.observaciones}
-                      onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                      rows={2}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
-                      placeholder="Estado del coche, detalles mecánicos, etc."
-                    />
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/60 flex items-center justify-between text-xs">
-                    <span className="text-slate-500">Base Asignada:</span>
-                    <strong className="text-slate-800 font-bold">{remiserias[0]?.nombreFantasia || 'Remises Bruno'}</strong>
-                  </div>
-                </div>
-              )}
-
-              {/* PASO 4: REVISIÓN Y CONFIRMACIÓN */}
-              {createStep === 4 && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
-                  <div className="p-4 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl shadow-sm space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Ficha del Vehículo</span>
-                      <span className="text-xs font-black px-2.5 py-0.5 rounded bg-white text-slate-900 uppercase">
-                        {formData.patente}
-                      </span>
-                    </div>
-                    <p className="text-lg font-black text-white">
-                      {formData.marca} {formData.modelo} ({formData.anio})
-                    </p>
-                    <p className="text-xs text-slate-300">
-                      Color: {formData.color} • Tipo: {formData.tipo} • Capacidad: {formData.capacidad} pasajeros
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Propietario / Titular</span>
-                      <span className="font-black text-slate-900 block mt-0.5">{formData.propietario}</span>
-                      <span className="text-[11px] text-slate-500">
-                        {formData.propietario === 'Agencia'
-                          ? 'Vehículo de Remisería'
-                          : formData.propietario === 'Chofer'
-                          ? 'Auto propio del Chofer'
-                          : 'Dueño externo de flota'}
-                      </span>
                     </div>
 
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Documentación</span>
-                      <span className="font-semibold text-slate-800 block mt-0.5">
-                        VTV: {formData.vtoVtv || 'No cargada'}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        Seguro: {formData.vtoSeguro || 'No cargado'}
-                      </span>
+                    {/* Selector de Chofer si seleccionó CHOFER */}
+                    {tipoPropietario === 'CHOFER' && (
+                      <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div>
+                          <label className="block text-xs font-bold text-emerald-950 mb-1">
+                            Chofer Propietario de la Unidad *
+                          </label>
+                          <select
+                            required
+                            value={formData.choferId || ''}
+                            onChange={(e) => {
+                              const cId = e.target.value;
+                              const choferObj = choferes.find((c) => c.id === cId);
+                              setFormData({
+                                ...formData,
+                                choferId: cId || undefined,
+                                propietario: choferObj ? `${choferObj.nombre} ${choferObj.apellido}` : 'Chofer'
+                              });
+                            }}
+                            className="w-full px-3.5 py-2.5 bg-white border border-emerald-300 rounded-xl text-xs sm:text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                          >
+                            <option value="">-- Seleccionar Chofer Registrado --</option>
+                            {choferes.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                Móvil #{c.numeroChofer} - {c.nombre} {c.apellido} (Licencia hasta: {new Date(c.vtoLicencia).toLocaleDateString()})
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-emerald-800 mt-1">
+                            El chofer quedará vinculado a esta unidad y se le notificará automáticamente en su app cuando los papeles del auto o su carnet estén por vencer.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Asignar chofer opcional si es de Agencia o Tercero */}
+                    {tipoPropietario !== 'CHOFER' && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-700">
+                          Chofer asignado al rodado (opcional)
+                        </label>
+                        <select
+                          value={formData.choferId || ''}
+                          onChange={(e) => {
+                            const cId = e.target.value;
+                            setFormData({
+                              ...formData,
+                              choferId: cId || undefined
+                            });
+                          }}
+                          className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-primary-500"
+                        >
+                          <option value="">-- Sin chofer asignado por ahora --</option>
+                          {choferes.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              Móvil #{c.numeroChofer} - {c.nombre} {c.apellido}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Campo de ingreso del Dueño Tercero si seleccionó TERCERO */}
+                    {tipoPropietario === 'TERCERO' && (
+                      <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div>
+                          <label className="block text-xs font-bold text-blue-950 mb-1">
+                            Nombre completo del Dueño del Vehículo *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            autoFocus
+                            value={formData.propietario === 'Agencia' || formData.propietario === 'Chofer' ? '' : formData.propietario}
+                            onChange={(e) => setFormData({ ...formData, propietario: e.target.value })}
+                            className="w-full px-3.5 py-2.5 bg-white border border-blue-300 rounded-xl text-xs sm:text-sm uppercase font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 shadow-xs"
+                            placeholder="Ej: Carlos Gómez, María Benítez, etc."
+                          />
+                          <p className="text-[11px] text-blue-700 mt-1">
+                            Con este nombre podrás seleccionarlo y generar su reporte de liquidación en PDF.
+                          </p>
+                        </div>
+
+                        {/* Sugerencias de dueños ya registrados en otros autos */}
+                        {(() => {
+                          const duenos = Array.from(
+                            new Set(
+                              vehiculos
+                                .map((v) => v.propietario?.trim())
+                                .filter((p) => p && p.toLowerCase() !== 'agencia' && p.toLowerCase() !== 'chofer')
+                            )
+                          );
+                          if (duenos.length === 0) return null;
+                          return (
+                            <div>
+                              <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block mb-1.5">
+                                O seleccioná un dueño ya registrado:
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {duenos.map((d) => (
+                                  <button
+                                    key={d}
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, propietario: d })}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                      formData.propietario.toLowerCase() === d.toLowerCase()
+                                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                        : 'bg-white text-blue-800 border-blue-200 hover:bg-blue-100'
+                                    }`}
+                                  >
+                                    {d}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* PASO 3: PAPELES Y VENCIMIENTOS */}
+                {currentStep === 3 && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
+                    <div className="p-3 bg-amber-50/70 border border-amber-100 rounded-2xl flex items-center gap-3">
+                      <ShieldCheck className="w-6 h-6 text-amber-600 shrink-0" />
+                      <p className="text-xs text-amber-900">
+                        Cargá los vencimientos para recibir alertas automáticas cuando la VTV o seguro estén próximos a vencer.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Vencimiento VTV
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.vtoVtv}
+                          onChange={(e) => setFormData({ ...formData, vtoVtv: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Vencimiento Seguro
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.vtoSeguro}
+                          onChange={(e) => setFormData({ ...formData, vtoSeguro: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Venc. Matafuego
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.vtoMatafuego}
+                          onChange={(e) => setFormData({ ...formData, vtoMatafuego: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Panel de Control y Evaluación de Documentación */}
+                    {(() => {
+                      const choferAsignado = choferes.find((c) => c.id === formData.choferId);
+                      const evaluacion = evaluarDocumentacionClient(choferAsignado, formData);
+
+                      return (
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <ShieldAlert
+                                className={`w-4 h-4 ${
+                                  evaluacion.tieneAlertas
+                                    ? evaluacion.tieneCriticas
+                                      ? 'text-red-500'
+                                      : 'text-amber-500'
+                                    : 'text-emerald-500'
+                                }`}
+                              />
+                              <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                                Control de Documentación y Alertas
+                              </span>
+                            </div>
+                            {evaluacion.tieneAlertas ? (
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  evaluacion.tieneCriticas
+                                    ? 'bg-red-100 text-red-700 border border-red-200'
+                                    : 'bg-amber-100 text-amber-700 border border-amber-200'
+                                }`}
+                              >
+                                {evaluacion.cantidadAlertas} {evaluacion.cantidadAlertas === 1 ? 'alerta' : 'alertas'}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                Documentación al día
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Detalle de los 4 documentos */}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            {/* Seguro */}
+                            <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
+                              <div>
+                                <p className="font-bold text-[11px] text-slate-800">🛡️ Seguro</p>
+                                <p className="text-[10px] text-slate-500">{evaluacion.items.seguro.fecha || 'Sin fecha'}</p>
+                              </div>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  getDocumentoBadgeClasses(evaluacion.items.seguro.estado).badge
+                                }`}
+                              >
+                                {evaluacion.items.seguro.estado === 'VENCIDO'
+                                  ? 'Vencido'
+                                  : evaluacion.items.seguro.estado === 'PROXIMO_A_VENCER'
+                                  ? `${evaluacion.items.seguro.diasRestantes}d`
+                                  : evaluacion.items.seguro.estado === 'AL_DIA'
+                                  ? 'Al día'
+                                  : 'S/D'}
+                              </span>
+                            </div>
+
+                            {/* VTV */}
+                            <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
+                              <div>
+                                <p className="font-bold text-[11px] text-slate-800">📋 VTV</p>
+                                <p className="text-[10px] text-slate-500">{evaluacion.items.vtv.fecha || 'Sin fecha'}</p>
+                              </div>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  getDocumentoBadgeClasses(evaluacion.items.vtv.estado).badge
+                                }`}
+                              >
+                                {evaluacion.items.vtv.estado === 'VENCIDO'
+                                  ? 'Vencida'
+                                  : evaluacion.items.vtv.estado === 'PROXIMO_A_VENCER'
+                                  ? `${evaluacion.items.vtv.diasRestantes}d`
+                                  : evaluacion.items.vtv.estado === 'AL_DIA'
+                                  ? 'Al día'
+                                  : 'S/D'}
+                              </span>
+                            </div>
+
+                            {/* Matafuego */}
+                            <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
+                              <div>
+                                <p className="font-bold text-[11px] text-slate-800">🧯 Matafuego</p>
+                                <p className="text-[10px] text-slate-500">{evaluacion.items.matafuego.fecha || 'Sin fecha'}</p>
+                              </div>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  getDocumentoBadgeClasses(evaluacion.items.matafuego.estado).badge
+                                }`}
+                              >
+                                {evaluacion.items.matafuego.estado === 'VENCIDO'
+                                  ? 'Vencido'
+                                  : evaluacion.items.matafuego.estado === 'PROXIMO_A_VENCER'
+                                  ? `${evaluacion.items.matafuego.diasRestantes}d`
+                                  : evaluacion.items.matafuego.estado === 'AL_DIA'
+                                  ? 'Al día'
+                                  : 'S/D'}
+                              </span>
+                            </div>
+
+                            {/* Carnet Chofer */}
+                            <div className="p-2 rounded-xl bg-white border border-slate-200/70 flex items-center justify-between">
+                              <div>
+                                <p className="font-bold text-[11px] text-slate-800">🪪 Carnet Chofer</p>
+                                <p className="text-[10px] text-slate-500">
+                                  {choferAsignado ? evaluacion.items.licencia.fecha || 'Sin fecha' : 'Sin chofer'}
+                                </p>
+                              </div>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  choferAsignado
+                                    ? getDocumentoBadgeClasses(evaluacion.items.licencia.estado).badge
+                                    : 'bg-slate-100 text-slate-400'
+                                }`}
+                              >
+                                {choferAsignado
+                                  ? evaluacion.items.licencia.estado === 'VENCIDO'
+                                    ? 'Vencido'
+                                    : evaluacion.items.licencia.estado === 'PROXIMO_A_VENCER'
+                                    ? `${evaluacion.items.licencia.diasRestantes}d`
+                                    : evaluacion.items.licencia.estado === 'AL_DIA'
+                                    ? 'Al día'
+                                    : 'S/D'
+                                  : '-'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Aviso de notificación automática en la app */}
+                          {choferAsignado && evaluacion.tieneAlertas && (
+                            <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 flex items-center gap-2">
+                              <Bell className="w-4 h-4 text-blue-600 shrink-0" />
+                              <p className="text-[11px]">
+                                Al guardar, el chofer <strong>{choferAsignado.nombre} {choferAsignado.apellido}</strong> recibirá una notificación automática en su aplicación móvil avisándole sobre los documentos por vencer o vencidos.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Observaciones / Notas (opcional)
+                      </label>
+                      <textarea
+                        value={formData.observaciones}
+                        onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
+                        rows={2}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                        placeholder="Estado del coche, detalles mecánicos, etc."
+                      />
+                    </div>
+
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/60 flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Base Asignada:</span>
+                      <strong className="text-slate-800 font-bold">{remiserias[0]?.nombreFantasia || 'Remises Bruno'}</strong>
                     </div>
                   </div>
+                )}
 
-                  {formData.observaciones && (
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 text-xs">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Notas</span>
-                      <p className="text-slate-700 italic mt-0.5">"{formData.observaciones}"</p>
+                {/* PASO 4: REVISIÓN Y CONFIRMACIÓN */}
+                {currentStep === 4 && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
+                    <div className="p-4 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl shadow-sm space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Ficha del Vehículo</span>
+                        <span className="text-xs font-black px-2.5 py-0.5 rounded bg-white text-slate-900 uppercase">
+                          {formData.patente}
+                        </span>
+                      </div>
+                      <p className="text-lg font-black text-white">
+                        {formData.marca} {formData.modelo} ({formData.anio})
+                      </p>
+                      <p className="text-xs text-slate-300">
+                        Color: {formData.color} • Tipo: {formData.tipo} • Capacidad: {formData.capacidad} pasajeros
+                      </p>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Propietario / Titular</span>
+                        <span className="font-black text-slate-900 block mt-0.5">{formData.propietario}</span>
+                        <span className="text-[11px] text-slate-500">
+                          {formData.propietario === 'Agencia'
+                            ? 'Vehículo de Remisería'
+                            : formData.propietario === 'Chofer'
+                            ? 'Auto propio del Chofer'
+                            : 'Dueño externo de flota'}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Documentación</span>
+                        <span className="font-semibold text-slate-800 block mt-0.5">
+                          VTV: {formData.vtoVtv || 'No cargada'}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          Seguro: {formData.vtoSeguro || 'No cargado'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {formData.observaciones && (
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 text-xs">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Notas</span>
+                        <p className="text-slate-700 italic mt-0.5">"{formData.observaciones}"</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Botones de Navegación del Modal */}
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+                  {currentStep > 1 ? (
+                    <button
+                      type="button"
+                      onClick={onPrev}
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      Atrás
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className="px-4 py-2.5 rounded-xl text-slate-500 hover:bg-slate-100 text-xs font-semibold transition-all"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+
+                  {currentStep < 4 ? (
+                    <button
+                      type="button"
+                      onClick={onNext}
+                      className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold shadow-md shadow-primary-500/20 active:scale-95 transition-all ml-auto"
+                    >
+                      Siguiente
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all ml-auto"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      {isEdit ? 'Confirmar y Actualizar Vehículo' : 'Confirmar y Crear Vehículo'}
+                    </button>
                   )}
                 </div>
-              )}
-
-              {/* Botones de Navegación del Modal */}
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
-                {createStep > 1 ? (
-                  <button
-                    type="button"
-                    onClick={handlePrevStep}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    Atrás
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2.5 rounded-xl text-slate-500 hover:bg-slate-100 text-xs font-semibold transition-all"
-                  >
-                    Cancelar
-                  </button>
-                )}
-
-                {createStep < 4 ? (
-                  <button
-                    type="button"
-                    onClick={handleNextStep}
-                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold shadow-md shadow-primary-500/20 active:scale-95 transition-all ml-auto"
-                  >
-                    Siguiente
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all ml-auto"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    Confirmar y Crear Vehículo
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Modal */}
-      {showEditModal && editingVehiculo && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-10 mx-auto p-6 border w-full max-w-4xl shadow-xl rounded-lg bg-white">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-semibold text-gray-900">Editar Vehículo</h3>
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              </form>
             </div>
-            <form onSubmit={handleEdit} className="space-y-6">
-              {/* Información del Vehículo */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                  <Truck className="w-5 h-5 mr-2" />
-                  Información del Vehículo
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Patente *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.patente}
-                      onChange={(e) => setFormData({ ...formData, patente: e.target.value.toUpperCase() })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Tipo *
-                    </label>
-                    <select
-                      required
-                      value={formData.tipo}
-                      onChange={(e) => setFormData({ ...formData, tipo: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="">Seleccionar tipo</option>
-                      <option value="Auto">Auto</option>
-                      <option value="Camioneta">Camioneta</option>
-                      <option value="SUV">SUV</option>
-                      <option value="Van">Van</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Marca *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.marca}
-                      onChange={(e) => setFormData({ ...formData, marca: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Modelo *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.modelo}
-                      onChange={(e) => setFormData({ ...formData, modelo: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Año *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="1900"
-                      max={new Date().getFullYear() + 1}
-                      value={formData.anio}
-                      onChange={(e) => setFormData({ ...formData, anio: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Color *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.color}
-                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Capacidad *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      max="20"
-                      value={formData.capacidad}
-                      onChange={(e) => setFormData({ ...formData, capacidad: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Información del Propietario */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                  <User className="w-5 h-5 mr-2" />
-                  Información del Propietario
-                </h4>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nombre del Propietario *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.propietario}
-                    onChange={(e) => setFormData({ ...formData, propietario: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-                  />
-                </div>
-              </div>
-
-              {/* Vencimientos */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                  <Calendar className="w-5 h-5 mr-2" />
-                  Vencimientos
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Vencimiento VTV
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.vtoVtv}
-                      onChange={(e) => setFormData({ ...formData, vtoVtv: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Vencimiento Matafuego
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.vtoMatafuego}
-                      onChange={(e) => setFormData({ ...formData, vtoMatafuego: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Vencimiento Seguro
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.vtoSeguro}
-                      onChange={(e) => setFormData({ ...formData, vtoSeguro: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Observaciones */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                  <FileText className="w-5 h-5 mr-2" />
-                  Observaciones
-                </h4>
-                <div>
-                  <textarea
-                    value={formData.observaciones}
-                    onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Comentarios adicionales sobre el vehículo..."
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors duration-200"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors duration-200 flex items-center"
-                >
-                  <Edit className="w-4 h-4 mr-2" />
-                  Actualizar Vehículo
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

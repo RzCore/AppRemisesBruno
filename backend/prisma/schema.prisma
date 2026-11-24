@@ -645,6 +645,10 @@ model Liquidacion {
   comisionAgencia     Float     @default(0.0)
   gananciaPropietario Float     @default(0.0)
   observaciones       String?
+  dineroRecibido      Boolean   @default(false)
+  metodoEntregaDuenio String?
+  fechaRecepcionDuenio DateTime?
+  notasRecepcion      String?
   createdAt           DateTime  @default(now())
 
   // Relación con los viajes asociados a este cierre

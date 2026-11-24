@@ -500,5 +500,90 @@ export const liquidacionController = {
         message: 'Error interno del servidor'
       });
     }
+  },
+
+  // Marcar recepción de dinero por parte del Dueño
+  async marcarRecepcionDuenio(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const { id: userId, rol } = req.user!;
+      const { dineroRecibido, metodoEntregaDuenio, notasRecepcion } = req.body;
+
+      if (rol !== 'DUENIO') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede confirmar la recepción del dinero'
+        });
+      }
+
+      const duenio = await prisma.duenio.findUnique({
+        where: { userId },
+        include: { remiserias: { select: { remiseriaId: true } } }
+      });
+
+      if (!duenio) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dueño no encontrado'
+        });
+      }
+
+      const remiseriaIds = duenio.remiserias.map(r => r.remiseriaId);
+
+      const liquidacion = await prisma.liquidacion.findUnique({
+        where: { id },
+        include: {
+          chofer: {
+            select: { remiseriaId: true }
+          }
+        }
+      });
+
+      if (!liquidacion) {
+        return res.status(404).json({
+          success: false,
+          message: 'Liquidación no encontrada'
+        });
+      }
+
+      if (!remiseriaIds.includes(liquidacion.chofer.remiseriaId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'No tienes permisos para modificar esta liquidación'
+        });
+      }
+
+      const recibido = Boolean(dineroRecibido);
+      const metodosValidos = ['COORDINADOR', 'CHOFER_MANO', 'TRANSFERENCIA'];
+
+      if (recibido && !metodosValidos.includes(metodoEntregaDuenio)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Debes seleccionar un método de entrega válido (Coordinador, Chofer en mano o Transferencia)'
+        });
+      }
+
+      const updated = await prisma.liquidacion.update({
+        where: { id },
+        data: {
+          dineroRecibido: recibido,
+          metodoEntregaDuenio: recibido ? metodoEntregaDuenio : null,
+          fechaRecepcionDuenio: recibido ? new Date() : null,
+          notasRecepcion: recibido ? (notasRecepcion?.trim() || null) : null
+        }
+      });
+
+      res.json({
+        success: true,
+        data: updated,
+        message: recibido ? 'Recepción de dinero confirmada' : 'Marca de recepción removida'
+      });
+    } catch (error) {
+      console.error('Error al actualizar recepción de liquidación:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error interno del servidor'
+      });
+    }
   }
 };

@@ -1633,6 +1633,25 @@ export const coordinadorDashboardService = {
     }
   },
 
+  marcarRecepcionLiquidacion: async (
+    liquidacionId: string,
+    payload: {
+      dineroRecibido: boolean;
+      metodoEntregaDuenio?: 'COORDINADOR' | 'CHOFER_MANO' | 'TRANSFERENCIA';
+      notasRecepcion?: string;
+    }
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.patch(`/coordinator-dashboard/liquidaciones/${liquidacionId}/recepcion`, payload);
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al registrar recepción del dinero',
+      };
+    }
+  },
+
   // Despacho Óptimo por Lotes (Batch Matching tipo Uber)
   getDespachoOptimo: async (): Promise<ApiResponse<any>> => {
     try {
@@ -1732,6 +1751,44 @@ export const coordinadorDashboardService = {
       return {
         success: false,
         message: error.response?.data?.message || 'Error al actualizar tarifas',
+      };
+    }
+  },
+
+  // 6. Estado de Atención de la Central (Abierta / Pausada por tormenta, calles intransitables, etc.)
+  getEstadoAtencionCentral: async (): Promise<
+    ApiResponse<{
+      remiseriaId: string;
+      nombreFantasia: string;
+      agenciaAbierta: boolean;
+      mensajeCierre: string;
+      cierreAutomaticoFiestas: boolean;
+      estadoOperativo?: any;
+    }>
+  > => {
+    try {
+      const response = await api.get('/coordinator-dashboard/estado-atencion');
+      return response.data;
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al consultar estado de la central',
+      };
+    }
+  },
+
+  updateEstadoAtencionCentral: async (data: {
+    agenciaAbierta?: boolean;
+    mensajeCierre?: string;
+    cierreAutomaticoFiestas?: boolean;
+  }): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.patch('/coordinator-dashboard/estado-atencion', data);
+      return response.data;
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al actualizar estado de la central',
       };
     }
   },
