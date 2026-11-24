@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { clienteAuthService } from '@/lib/api';
 import LogoBruno from '@/components/LogoBruno';
 import ThemeToggle from '@/components/ThemeToggle';
+import InstallAppButton from '@/components/InstallAppButton';
 import { toast } from 'react-hot-toast';
 import {
   User,
@@ -597,6 +598,9 @@ export default function ClienteLoginPage() {
           </div>
         )}
 
+        <div className="pt-2 flex justify-center">
+          <InstallAppButton />
+        </div>
       </div>
 
       {/* Footer Desarrollador - RzCore */}

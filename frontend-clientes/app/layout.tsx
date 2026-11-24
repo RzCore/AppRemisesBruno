@@ -22,6 +22,11 @@ export const metadata: Metadata = {
   title: 'Remises Bruno - Pedí tu Remís',
   description: 'Solicitá tu remís online y seguí tu viaje en tiempo real',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Remises Bruno',
+  },
   icons: {
     icon: '/LogoBruno.jpg',
     apple: '/apple-touch-icon.png',

@@ -21,6 +21,11 @@ export const metadata: Metadata = {
   title: 'Remises Bruno - Gestión y Flota',
   description: 'Plataforma interna para Choferes, Coordinación y Administración',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Bruno Flota',
+  },
   icons: {
     icon: '/LogoBruno.jpg',
     apple: '/apple-touch-icon.png',

@@ -10,6 +10,7 @@ import { LoginCredentials } from '@/types';
 import { Eye, EyeOff, User, Lock, Shield, Headphones, Car, Zap, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import LogoBruno from '@/components/LogoBruno';
+import InstallAppButton from '@/components/InstallAppButton';
 
 interface QuickAccount {
   id: 'ADMIN' | 'COORDINADOR' | 'CHOFER';
@@ -336,6 +337,10 @@ export default function InternoLoginPage() {
               )}
             </button>
           </form>
+
+          <div className="mt-5 pt-4 border-t border-gray-100 flex justify-center">
+            <InstallAppButton />
+          </div>
         </div>
       </div>
     </div>
