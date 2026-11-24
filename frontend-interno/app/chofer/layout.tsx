@@ -77,7 +77,7 @@ export default function ChoferLayout({
             <LogoBruno size={30} />
             {/* Contenedor dinámico para el estado EN LÍNEA / PAUSAR / DESCONECTARSE en el navbar */}
             <div id="chofer-navbar-status" className="flex-1 min-w-0">
-              {pathname !== '/chofer/app' && (
+              {pathname !== '/chofer/app' && pathname !== '/app' && pathname !== '/' && (
                 <div className="flex items-center gap-2">
                   <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${choferData?.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
                   <div className="min-w-0">
