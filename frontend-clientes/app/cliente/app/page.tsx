@@ -45,7 +45,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { DireccionFrecuente, ParadaIntermedia } from '@/types';
-import { clienteService, coordinadorDashboardService, remiseriaService } from '@/lib/api';
+import { clienteService, coordinadorDashboardService, remiseriaService, getSocketUrl } from '@/lib/api';
 import { subscribeToPushNotifications } from '@/lib/pushNotifications';
 import Link from 'next/link';
 
@@ -479,9 +479,9 @@ export default function ClienteApp() {
 
   // Conexión WebSocket para notificaciones inmediatas y chat en tiempo real
   useEffect(() => {
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
+    const socketUrl = getSocketUrl();
     const socket: Socket = io(socketUrl, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       withCredentials: true,
     });
     socketRef.current = socket;

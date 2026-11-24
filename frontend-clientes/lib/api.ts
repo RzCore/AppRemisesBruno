@@ -49,6 +49,9 @@ export const getSocketUrl = (): string => {
   if (process.env.NEXT_PUBLIC_SOCKET_URL) {
     return process.env.NEXT_PUBLIC_SOCKET_URL;
   }
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/?$/, '');
+  }
   if (typeof window !== 'undefined') {
     return `http://${window.location.hostname}:3001`;
   }

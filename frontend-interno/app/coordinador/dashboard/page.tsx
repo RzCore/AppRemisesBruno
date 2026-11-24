@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { io, Socket } from 'socket.io-client';
-import { coordinadorDashboardService, clienteAuthService, choferService, vehiculoService, artEmpresaService } from '@/lib/api';
+import { coordinadorDashboardService, clienteAuthService, choferService, vehiculoService, artEmpresaService, getSocketUrl } from '@/lib/api';
 import { ArtEmpresa } from '@/types';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import LogoBruno from '@/components/LogoBruno';
@@ -50,7 +50,8 @@ import {
   Sun,
   ShieldAlert,
   HelpCircle,
-  Check
+  Check,
+  Power
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -127,7 +128,19 @@ export default function CoordinadorDashboard() {
 
   // 1. Alarma Acústica y Visual en Central para Nuevos Pedidos
   const [sonidoAlarmaHabilitado, setSonidoAlarmaHabilitado] = useState(true);
+  const sonidoAlarmaRef = useRef(true);
   const [alertaNuevoViajeBanner, setAlertaNuevoViajeBanner] = useState<any>(null);
+  const viajesSinAsignarIdsRef = useRef<Set<string>>(new Set());
+  const primeraCargaSinAsignarRef = useRef(true);
+
+  // Estado de Atención de la Central (Abierta / Pausada por tormenta, calles intransitables, etc.)
+  const [agenciaAbierta, setAgenciaAbierta] = useState<boolean>(true);
+  const [mensajeCierre, setMensajeCierre] = useState<string>(
+    '⛈️ Por tormenta fuerte y calles temporalmente intransitables, el servicio se encuentra momentáneamente pausado por seguridad. Retomaremos a la brevedad.'
+  );
+  const [cierreAutomaticoFiestas, setCierreAutomaticoFiestas] = useState<boolean>(true);
+  const [isEstadoCentralModalOpen, setIsEstadoCentralModalOpen] = useState<boolean>(false);
+  const [isGuardandoEstadoCentral, setIsGuardandoEstadoCentral] = useState<boolean>(false);
 
   // Solicitudes activas de atención humana en WhatsApp (con cronómetro de 10 min)
   const [solicitudesAtencion, setSolicitudesAtencion] = useState<Array<{
@@ -306,42 +319,57 @@ export default function CoordinadorDashboard() {
 
   const fetchData = async () => {
     try {
-      // 1. Stats
-      const statsRes = await coordinadorDashboardService.getDashboardStats();
-      // 2. Viajes en curso
-      const enCursoRes = await coordinadorDashboardService.getViajesEnCurso();
-      // 3. Viajes sin asignar
-      const sinAsignarRes = await coordinadorDashboardService.getViajesSinAsignar();
-      // 4. Reservas
-      const reservasRes = await coordinadorDashboardService.getViajesReservados();
-      // 5. Historial (finalizados y anulados)
-      const historialRes = await coordinadorDashboardService.getViajesHistorial();
-      // 6. Drivers online
-      const choferesRes = await coordinadorDashboardService.getChoferesTiempoReal();
-      // 7. Todos los choferes y vehículos de la remisería para asignación manual
-      const [allChoferesRes, allVehiculosRes, allArtsRes] = await Promise.all([
+      // Ejecutar todas las consultas en paralelo y de forma resiliente (allSettled)
+      // para que un fallo/timeout aislado (ej. historial) nunca impida ver viajes sin asignar
+      const [
+        statsSettled,
+        enCursoSettled,
+        sinAsignarSettled,
+        reservasSettled,
+        historialSettled,
+        choferesSettled,
+        allChoferesSettled,
+        allVehiculosSettled,
+        allArtsSettled,
+      ] = await Promise.allSettled([
+        coordinadorDashboardService.getDashboardStats(),
+        coordinadorDashboardService.getViajesEnCurso(),
+        coordinadorDashboardService.getViajesSinAsignar(),
+        coordinadorDashboardService.getViajesReservados(),
+        coordinadorDashboardService.getViajesHistorial(),
+        coordinadorDashboardService.getChoferesTiempoReal(),
         choferService.getAll(),
         vehiculoService.getAll(),
-        artEmpresaService.getAll({ activas: true })
+        artEmpresaService.getAll({ activas: true }),
       ]);
 
-      if (allArtsRes.success && allArtsRes.data) {
+      const statsRes = statsSettled.status === 'fulfilled' ? statsSettled.value : null;
+      const enCursoRes = enCursoSettled.status === 'fulfilled' ? enCursoSettled.value : null;
+      const sinAsignarRes = sinAsignarSettled.status === 'fulfilled' ? sinAsignarSettled.value : null;
+      const reservasRes = reservasSettled.status === 'fulfilled' ? reservasSettled.value : null;
+      const historialRes = historialSettled.status === 'fulfilled' ? historialSettled.value : null;
+      const choferesRes = choferesSettled.status === 'fulfilled' ? choferesSettled.value : null;
+      const allChoferesRes = allChoferesSettled.status === 'fulfilled' ? allChoferesSettled.value : null;
+      const allVehiculosRes = allVehiculosSettled.status === 'fulfilled' ? allVehiculosSettled.value : null;
+      const allArtsRes = allArtsSettled.status === 'fulfilled' ? allArtsSettled.value : null;
+
+      if (allArtsRes?.success && allArtsRes.data) {
         setArtList(allArtsRes.data);
       }
 
-      if (allChoferesRes.success && allChoferesRes.data) {
+      if (allChoferesRes?.success && allChoferesRes.data) {
         setTodosLosChoferes(allChoferesRes.data.filter((c: any) => c.estado === 'ACTIVO'));
       }
-      if (allVehiculosRes.success && allVehiculosRes.data) {
+      if (allVehiculosRes?.success && allVehiculosRes.data) {
         setTodosLosVehiculos(allVehiculosRes.data.filter((v: any) => v.estado === 'ACTIVO'));
       }
 
-      if (statsRes.success && statsRes.data) {
+      if (statsRes?.success && statsRes.data) {
         setStats({
           viajesEnCurso: statsRes.data.viajesEnCurso || 0,
           viajesSinAsignar: statsRes.data.viajesSinAsignar || 0,
           viajesReservados: statsRes.data.reservasActivas || 0,
-          viajesHistorial: (statsRes.data.viajesFinalizados || 0) + (statsRes.data.viajesCancelados || 0) || (historialRes.data?.length || 0),
+          viajesHistorial: (statsRes.data.viajesFinalizados || 0) + (statsRes.data.viajesCancelados || 0) || (historialRes?.data?.length || 0),
           choferesDisponibles: statsRes.data.totalChoferes || 0,
           vehiculosDisponibles: statsRes.data.totalVehiculos || 0,
           tiempoPromedio: '12 min'
@@ -404,16 +432,28 @@ export default function CoordinadorDashboard() {
         };
       };
 
-      if (enCursoRes.success && enCursoRes.data) {
+      if (enCursoRes?.success && enCursoRes.data) {
         setViajesEnCurso(enCursoRes.data.map(mapViaje));
       }
-      if (sinAsignarRes.success && sinAsignarRes.data) {
-        setViajesSinAsignar(sinAsignarRes.data.map(mapViaje));
+      if (sinAsignarRes?.success && sinAsignarRes.data) {
+        const mappedSinAsignar = sinAsignarRes.data.map(mapViaje);
+        setViajesSinAsignar(mappedSinAsignar);
+
+        // Respaldo de alerta visual y sonora por polling si el WebSocket tuvo microcorte
+        const idsPrevios = viajesSinAsignarIdsRef.current;
+        const nuevosPendientes = sinAsignarRes.data.filter((v: any) => !idsPrevios.has(v.id));
+        viajesSinAsignarIdsRef.current = new Set(sinAsignarRes.data.map((v: any) => v.id));
+
+        if (!primeraCargaSinAsignarRef.current && nuevosPendientes.length > 0) {
+          reproducirAlarmaNuevoViaje();
+          setAlertaNuevoViajeBanner(nuevosPendientes[nuevosPendientes.length - 1]);
+        }
+        primeraCargaSinAsignarRef.current = false;
       }
-      if (historialRes.success && historialRes.data) {
+      if (historialRes?.success && historialRes.data) {
         setViajesHistorial(historialRes.data.map(mapViaje));
       }
-      if (reservasRes.success && reservasRes.data) {
+      if (reservasRes?.success && reservasRes.data) {
         setReservas(reservasRes.data.map((r: any) => {
           const formattedDate = new Date(r.fechaInicio).toLocaleDateString();
           const isArt = Boolean(r.isViajeArt || r.tipo === 'ART_PROGRAMADO');
@@ -435,7 +475,7 @@ export default function CoordinadorDashboard() {
           };
         }));
       }
-      if (choferesRes.success && choferesRes.data) {
+      if (choferesRes?.success && choferesRes.data) {
         setChoferesConectados(choferesRes.data);
       }
     } catch (error) {
@@ -447,7 +487,7 @@ export default function CoordinadorDashboard() {
 
   // Reproducción acústica agradable de timbre central para nuevos pedidos
   const reproducirAlarmaNuevoViaje = () => {
-    if (!sonidoAlarmaHabilitado) return;
+    if (!sonidoAlarmaRef.current) return;
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioContextClass) {
@@ -480,7 +520,9 @@ export default function CoordinadorDashboard() {
     try {
       const soundSaved = localStorage.getItem('coordinador_alarma_sonido');
       if (soundSaved !== null) {
-        setSonidoAlarmaHabilitado(soundSaved === 'true');
+        const enabled = soundSaved === 'true';
+        setSonidoAlarmaHabilitado(enabled);
+        sonidoAlarmaRef.current = enabled;
       }
     } catch {}
   }, []);
@@ -488,6 +530,7 @@ export default function CoordinadorDashboard() {
   const toggleSonidoAlarma = () => {
     const nextVal = !sonidoAlarmaHabilitado;
     setSonidoAlarmaHabilitado(nextVal);
+    sonidoAlarmaRef.current = nextVal;
     try {
       localStorage.setItem('coordinador_alarma_sonido', String(nextVal));
     } catch {}
@@ -504,9 +547,9 @@ export default function CoordinadorDashboard() {
     const remId = user?.coordinador?.remiseriaId || (user as any)?.remiseriaId;
     if (!remId) return;
 
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
+    const socketUrl = getSocketUrl();
     const socket: Socket = io(socketUrl, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       withCredentials: true,
     });
     socketRef.current = socket;
@@ -582,6 +625,9 @@ export default function CoordinadorDashboard() {
     });
 
     socket.on('nuevo_viaje_recibido', (viaje: any) => {
+      if (viaje?.id) {
+        viajesSinAsignarIdsRef.current.add(viaje.id);
+      }
       reproducirAlarmaNuevoViaje();
       if (viaje) {
         setAlertaNuevoViajeBanner(viaje);
@@ -600,6 +646,18 @@ export default function CoordinadorDashboard() {
 
     socket.on('parada_virtual_actualizada', () => {
       fetchData();
+    });
+
+    socket.on('agencia_estado_actualizado', (data: any) => {
+      if (data?.agenciaAbierta !== undefined) {
+        setAgenciaAbierta(Boolean(data.agenciaAbierta));
+      }
+      if (typeof data?.mensajeCierre === 'string') {
+        setMensajeCierre(data.mensajeCierre);
+      }
+      if (data?.cierreAutomaticoFiestas !== undefined) {
+        setCierreAutomaticoFiestas(Boolean(data.cierreAutomaticoFiestas));
+      }
     });
 
     // Notificación en vivo de Viaje ART asignado por el Dueño
@@ -739,8 +797,76 @@ export default function CoordinadorDashboard() {
     return () => clearInterval(timer);
   }, []);
 
+  const cargarEstadoCentral = async () => {
+    try {
+      const res = await coordinadorDashboardService.getEstadoAtencionCentral();
+      if (res.success && res.data) {
+        setAgenciaAbierta(res.data.agenciaAbierta !== false);
+        if (res.data.mensajeCierre) {
+          setMensajeCierre(res.data.mensajeCierre);
+        }
+        setCierreAutomaticoFiestas(res.data.cierreAutomaticoFiestas !== false);
+      }
+    } catch (err) {
+      console.warn('Error consultando estado de atención de la central:', err);
+    }
+  };
+
+  const handleCambiarEstadoCentral = async (nuevoEstado: boolean, mensajeOverride?: string) => {
+    setIsGuardandoEstadoCentral(true);
+    try {
+      const msgFinal = (mensajeOverride !== undefined ? mensajeOverride : mensajeCierre).trim();
+      const res = await coordinadorDashboardService.updateEstadoAtencionCentral({
+        agenciaAbierta: nuevoEstado,
+        mensajeCierre: msgFinal || undefined,
+        cierreAutomaticoFiestas,
+      });
+
+      if (res.success) {
+        setAgenciaAbierta(nuevoEstado);
+        if (mensajeOverride !== undefined) {
+          setMensajeCierre(mensajeOverride);
+        }
+        toast.success(
+          nuevoEstado
+            ? '✅ ¡Central ABIERTA! Se habilitaron nuevamente los pedidos en la App y el Bot de WhatsApp.'
+            : '⛔ Central en PAUSA / CERRADA. El Bot de WhatsApp y la App informarán el aviso a los pasajeros.',
+          { duration: 5000 }
+        );
+      } else {
+        toast.error(res.message || 'No se pudo actualizar el estado de la central');
+      }
+    } catch {
+      toast.error('Error de conexión al actualizar estado de la central');
+    } finally {
+      setIsGuardandoEstadoCentral(false);
+    }
+  };
+
+  const handleGuardarConfigCentral = async () => {
+    setIsGuardandoEstadoCentral(true);
+    try {
+      const res = await coordinadorDashboardService.updateEstadoAtencionCentral({
+        agenciaAbierta,
+        mensajeCierre: mensajeCierre.trim(),
+        cierreAutomaticoFiestas,
+      });
+      if (res.success) {
+        toast.success('💾 Estado y mensaje sincronizados con la App de Clientes y el Bot de WhatsApp.');
+        setIsEstadoCentralModalOpen(false);
+      } else {
+        toast.error(res.message || 'Error al guardar configuración de la central');
+      }
+    } catch {
+      toast.error('Error al guardar configuración de la central');
+    } finally {
+      setIsGuardandoEstadoCentral(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    cargarEstadoCentral();
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
@@ -1585,6 +1711,25 @@ export default function CoordinadorDashboard() {
             </div>
             
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              {/* Estado de Atención de la Central (Abierta / Pausada por tormenta o emergencia) */}
+              <button
+                type="button"
+                onClick={() => setIsEstadoCentralModalOpen(true)}
+                className={`px-3 py-1.5 sm:py-2 rounded-lg flex items-center space-x-1.5 text-xs sm:text-sm font-extrabold border shadow-sm transition-all cursor-pointer ${
+                  agenciaAbierta
+                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700 animate-pulse'
+                }`}
+                title="Configurar Estado de Atención de la Central (Pausa por tormenta, calles intransitables, etc.)"
+              >
+                <span
+                  className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                    agenciaAbierta ? 'bg-emerald-500 animate-pulse' : 'bg-white'
+                  }`}
+                />
+                <span>{agenciaAbierta ? 'Central Abierta' : '⛔ Central en Pausa'}</span>
+              </button>
+
               {/* Botón Despacho Express F2 */}
               <button 
                 type="button"
@@ -1667,6 +1812,46 @@ export default function CoordinadorDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Banner fijo cuando la Central está en Pausa / Cerrada (ej. tormenta o calles intransitables) */}
+      {!agenciaAbierta && (
+        <div className="bg-gradient-to-r from-rose-700 via-red-700 to-rose-800 text-white px-4 py-3 shadow-lg shrink-0 border-b-2 border-rose-950">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+            <div className="flex items-start sm:items-center gap-3">
+              <span className="p-2 bg-white/15 rounded-xl shrink-0">
+                <CloudRain className="h-5 w-5 text-rose-100" />
+              </span>
+              <div>
+                <p className="font-black text-xs sm:text-sm uppercase tracking-wide flex items-center gap-2">
+                  <span>⛔ CENTRAL EN PAUSA / CERRADA TEMPORALMENTE</span>
+                </p>
+                <p className="text-xs text-rose-100 mt-0.5">
+                  <strong>Aviso activo en Bot de WhatsApp y App:</strong> &ldquo;{mensajeCierre || 'La agencia se encuentra momentáneamente cerrada.'}&rdquo;
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+              <button
+                type="button"
+                disabled={isGuardandoEstadoCentral}
+                onClick={() => handleCambiarEstadoCentral(true)}
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-3.5 py-1.5 rounded-lg text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Reabrir Central Ahora</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEstadoCentralModalOpen(true)}
+                className="bg-white/15 hover:bg-white/25 text-white border border-white/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Editar aviso
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Banner de Solicitud de Atención Humana en WhatsApp con Cronómetro de 10 minutos */}
       {solicitudesAtencion.length > 0 && solicitudesAtencion.map((sol) => {
@@ -2960,6 +3145,25 @@ export default function CoordinadorDashboard() {
               </div>
               
               <div className="space-y-3">
+                {/* Control rápido de Estado de Atención de la Central */}
+                <button
+                  type="button"
+                  onClick={() => setIsEstadoCentralModalOpen(true)}
+                  className={`w-full px-4 py-2.5 rounded-xl flex items-center justify-between transition-all shadow-sm font-bold text-xs border cursor-pointer ${
+                    agenciaAbierta
+                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700'
+                  }`}
+                >
+                  <span className="flex items-center space-x-2">
+                    <Power className="h-4 w-4" />
+                    <span>{agenciaAbierta ? 'Central Abierta' : 'Central en Pausa'}</span>
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/10 font-extrabold">
+                    {agenciaAbierta ? 'Pausar / Clima' : 'Reabrir'}
+                  </span>
+                </button>
+
                 {/* Despacho Express F2 */}
                 <button
                   type="button"
@@ -4253,6 +4457,204 @@ export default function CoordinadorDashboard() {
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Re-solicitar Viaje</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Control Operativo: Estado de Atención de la Central (Tormentas / Calles Intransitables / Pausa) */}
+      {isEstadoCentralModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div
+              className={`p-5 text-white flex items-center justify-between ${
+                agenciaAbierta
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-700'
+                  : 'bg-gradient-to-r from-rose-600 to-red-800'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/15 rounded-2xl">
+                  {agenciaAbierta ? <CheckCircle2 className="h-6 w-6" /> : <CloudRain className="h-6 w-6" />}
+                </div>
+                <div>
+                  <h3 className="text-lg font-black">Estado de Atención de la Central</h3>
+                  <p className="text-xs text-white/85">
+                    {agenciaAbierta
+                      ? 'Actualmente ABIERTA • Recibiendo viajes en App y Bot de WhatsApp'
+                      : 'Actualmente EN PAUSA / CERRADA • Nuevos pedidos detenidos'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEstadoCentralModalOpen(false)}
+                className="p-1.5 rounded-full hover:bg-white/20 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-5 sm:p-6 space-y-5">
+              {/* Selector principal Abierta / Cerrada */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  disabled={isGuardandoEstadoCentral || agenciaAbierta}
+                  onClick={() => handleCambiarEstadoCentral(true)}
+                  className={`py-3 px-4 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                    agenciaAbierta
+                      ? 'bg-emerald-600 text-white border-emerald-700 shadow-md'
+                      : 'bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border-slate-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Central Abierta</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isGuardandoEstadoCentral || !agenciaAbierta}
+                  onClick={() => handleCambiarEstadoCentral(false)}
+                  className={`py-3 px-4 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                    !agenciaAbierta
+                      ? 'bg-rose-600 text-white border-rose-700 shadow-md'
+                      : 'bg-slate-50 hover:bg-rose-50 text-slate-700 hover:text-rose-800 border-slate-200'
+                  }`}
+                >
+                  <Power className="w-4 h-4" />
+                  <span>Pausar / Cerrar Central</span>
+                </button>
+              </div>
+
+              {/* Acción rápida de 1 clic para emergencia climática en madrugada */}
+              {agenciaAbierta && (
+                <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <CloudRain className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-extrabold text-sky-950">
+                        ⛈️ ¿Tormenta fuerte o calles anegadas?
+                      </p>
+                      <p className="text-[11px] text-sky-800 leading-snug">
+                        Pausá la recepción automática en 1 clic con el aviso climático listo para WhatsApp y la App.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isGuardandoEstadoCentral}
+                    onClick={() => {
+                      const msgTormenta =
+                        '⛈️ Por tormenta fuerte y calles temporalmente intransitables, el servicio se encuentra momentáneamente pausado por seguridad. Retomaremos apenas mejoren las condiciones.';
+                      handleCambiarEstadoCentral(false, msgTormenta);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shrink-0 shadow-sm transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    Pausar por Tormenta
+                  </button>
+                </div>
+              )}
+
+              {/* Editor de mensaje de aviso */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <MessageSquare className="w-4 h-4 text-blue-600" />
+                    <span>Mensaje para los pasajeros (Bot de WhatsApp y App):</span>
+                  </label>
+                </div>
+
+                <textarea
+                  rows={3}
+                  value={mensajeCierre}
+                  onChange={(e) => setMensajeCierre(e.target.value)}
+                  placeholder="Ej: Por tormenta fuerte y calles anegadas, el servicio se encuentra temporalmente pausado..."
+                  className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white font-medium text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 leading-relaxed"
+                />
+
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-bold text-slate-500 block">
+                    Plantillas rápidas para cargar en el mensaje:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMensajeCierre(
+                          '⛈️ Por tormenta fuerte y calles temporalmente intransitables, el servicio se encuentra momentáneamente pausado por seguridad. Retomaremos apenas mejoren las condiciones.'
+                        )
+                      }
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-sky-50 hover:bg-sky-100 text-sky-800 rounded-lg border border-sky-200 transition-colors cursor-pointer"
+                    >
+                      ⛈️ Tormenta / Calles Intransitables
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMensajeCierre(
+                          '🌧️ Por razones climáticas adversas y anegamiento de calles, el servicio se encuentra momentáneamente pausado. Retomamos a la brevedad.'
+                        )
+                      }
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+                    >
+                      🌧️ Lluvia / Anegamiento
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMensajeCierre(
+                          '🛑 En este momento todos nuestros móviles se encuentran afectados a servicios previos. Retomamos la toma de pedidos en breves minutos.'
+                        )
+                      }
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg border border-amber-200 transition-colors cursor-pointer"
+                    >
+                      🚕 Alta Demanda / Pausa Breve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMensajeCierre('La agencia se encuentra momentáneamente cerrada. Disculpe las molestias.')
+                      }
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-300 transition-colors cursor-pointer"
+                    >
+                      🛑 Cierre General
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sincronización y guardado */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cierreAutomaticoFiestas}
+                    onChange={(e) => setCierreAutomaticoFiestas(e.target.checked)}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  />
+                  <span>Cierre automático en Navidad y Año Nuevo</span>
+                </label>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEstadoCentralModalOpen(false)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGuardandoEstadoCentral}
+                    onClick={handleGuardarConfigCentral}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Guardar Mensaje</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

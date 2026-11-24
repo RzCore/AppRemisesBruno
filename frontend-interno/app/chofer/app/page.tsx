@@ -48,7 +48,7 @@ import {
   BellRing,
   Calendar,
 } from 'lucide-react';
-import { choferService, coordinadorDashboardService, pushService } from '@/lib/api';
+import { choferService, coordinadorDashboardService, pushService, getSocketUrl } from '@/lib/api';
 import {
   subscribeToPushNotifications,
   getCurrentPushSubscription,
@@ -782,15 +782,16 @@ export default function ChoferApp() {
 
   const socketRef = useRef<Socket | null>(null);
   const lastGpsEmitRef = useRef<number>(0);
+  const sincronizarEstadoRef = useRef<((forzarActivo?: boolean) => Promise<void>) | null>(null);
 
   // Conexión WebSocket para reporte de GPS y despacho en tiempo real
   useEffect(() => {
     const remiseriaId = user?.chofer?.remiseriaId;
     if (!remiseriaId) return;
 
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
+    const socketUrl = getSocketUrl();
     const socket = io(socketUrl, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       withCredentials: true,
     });
     socketRef.current = socket;
@@ -798,6 +799,13 @@ export default function ChoferApp() {
     socket.on('connect', () => {
       console.log('⚡ Chofer conectado a Sockets. Sala:', remiseriaId);
       socket.emit('join_room', { remiseriaId });
+    });
+
+    // Sincronización inmediata al entrar un nuevo pedido a la remisería
+    socket.on('nuevo_viaje_recibido', () => {
+      if (isActiveRef.current && !viajeActualRef.current) {
+        sincronizarEstadoRef.current?.(true);
+      }
     });
 
     // Alerta sonora y visual inmediata si el cliente cancela el viaje
@@ -1175,6 +1183,10 @@ export default function ChoferApp() {
     },
     [user, viajesRechazados]
   );
+
+  useEffect(() => {
+    sincronizarEstadoRef.current = sincronizarEstado;
+  }, [sincronizarEstado]);
 
   // Inicializar estado real desde el backend al entrar a la pantalla
   useEffect(() => {

@@ -1197,14 +1197,21 @@ export const choferController = {
 
       // Filtrar choferes realmente libres (online, sin viaje en curso y sin pausa)
       // Prioridad en la Tabla:
-      // 1) Choferes anotados en la Tabla (enParadaVirtual: true), ordenados por paradaVirtualIngreso ASC
-      // 2) Choferes con sesión activa en la app (heartbeat reciente) antes que choferes de prueba inactivos de la BD
+      // 1) Si hay choferes con sesión activa en la app (heartbeat reciente), trabajar solo con ellos
+      //    para evitar que choferes fantasma/inactivos (isOnline: true en BD pero sin app abierta)
+      //    retengan ofertas de viaje durante segundos en el limbo.
+      // 2) Choferes anotados en la Tabla (enParadaVirtual: true), ordenados por paradaVirtualIngreso ASC.
       const libresCandidatos = choferesOnlineRemiseria.filter(
         (c) => !choferesOcupadosSet.has(c.id) && !estaChoferEnPausa(c.observaciones)
       );
 
-      const enTablaExplicitos = libresCandidatos.filter((c) => c.enParadaVirtual);
-      const baseTabla = enTablaExplicitos.length > 0 ? enTablaExplicitos : libresCandidatos;
+      const libresConAppAbierta = libresCandidatos.filter(
+        (c) => ahoraHeartbeatMs - (choferHeartbeatMap.get(c.id) || 0) <= HEARTBEAT_ACTIVO_MS
+      );
+      const universoLibres = libresConAppAbierta.length > 0 ? libresConAppAbierta : libresCandidatos;
+
+      const enTablaExplicitos = universoLibres.filter((c) => c.enParadaVirtual);
+      const baseTabla = enTablaExplicitos.length > 0 ? enTablaExplicitos : universoLibres;
 
       const tablaChoferesLibres = baseTabla.sort((a, b) => {
         const aActivo = ahoraHeartbeatMs - (choferHeartbeatMap.get(a.id) || 0) <= HEARTBEAT_ACTIVO_MS ? 1 : 0;
