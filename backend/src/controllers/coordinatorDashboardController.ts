@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
+import { checkAgenciaEstado } from '../services/agencyScheduleService';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -2537,6 +2538,126 @@ export const coordinatorDashboardController = {
     } catch (error) {
       console.error('Error actualizando tarifas:', error);
       res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  },
+
+  // 6. Estado de Atención de la Central (Abierta / En Pausa por Tormenta, Emergencia o Fiestas)
+  async getEstadoAtencionCentral(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      const coordinador = await prisma.coordinador.findFirst({
+        where: { userId },
+        include: { remiseria: true }
+      });
+
+      let rem = coordinador?.remiseria || null;
+      if (!rem) {
+        rem = await prisma.remiseria.findFirst({ where: { estado: true } }) || await prisma.remiseria.findFirst();
+      }
+
+      if (!rem) {
+        return res.status(404).json({ success: false, message: 'Remisería no encontrada' });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          remiseriaId: rem.id,
+          nombreFantasia: rem.nombreFantasia,
+          agenciaAbierta: rem.agenciaAbierta !== false,
+          mensajeCierre: rem.mensajeCierre || '',
+          cierreAutomaticoFiestas: rem.cierreAutomaticoFiestas !== false,
+          estadoOperativo: checkAgenciaEstado(rem)
+        }
+      });
+    } catch (error) {
+      console.error('Error obteniendo estado de atención de la central:', error);
+      return res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  },
+
+  async updateEstadoAtencionCentral(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const rol = req.user?.rol;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      if (rol !== 'COORDINADOR' && rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: 'No autorizado' });
+      }
+
+      const coordinador = await prisma.coordinador.findFirst({
+        where: { userId }
+      });
+
+      let targetRemiseriaId = coordinador?.remiseriaId || null;
+      if (!targetRemiseriaId && rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId },
+          include: { remiserias: true }
+        });
+        targetRemiseriaId = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+      if (!targetRemiseriaId) {
+        const remDefault = await prisma.remiseria.findFirst({ where: { estado: true } }) || await prisma.remiseria.findFirst();
+        targetRemiseriaId = remDefault?.id || null;
+      }
+
+      if (!targetRemiseriaId) {
+        return res.status(404).json({ success: false, message: 'Remisería no encontrada' });
+      }
+
+      const { agenciaAbierta, mensajeCierre, cierreAutomaticoFiestas } = req.body;
+      const dataToUpdate: any = {};
+
+      if (agenciaAbierta !== undefined) dataToUpdate.agenciaAbierta = Boolean(agenciaAbierta);
+      if (mensajeCierre !== undefined) dataToUpdate.mensajeCierre = String(mensajeCierre);
+      if (cierreAutomaticoFiestas !== undefined) dataToUpdate.cierreAutomaticoFiestas = Boolean(cierreAutomaticoFiestas);
+
+      const updatedRemiseria = await prisma.remiseria.update({
+        where: { id: targetRemiseriaId },
+        data: dataToUpdate
+      });
+
+      // Emitir actualización en vivo a App de Clientes, Panel Dueño y otros Coordinadores
+      try {
+        const { getIO } = await import('../lib/socket');
+        const io = getIO();
+        if (io) {
+          io.emit('agencia_estado_actualizado', {
+            remiseriaId: updatedRemiseria.id,
+            agenciaAbierta: updatedRemiseria.agenciaAbierta,
+            mensajeCierre: updatedRemiseria.mensajeCierre,
+            cierreAutomaticoFiestas: updatedRemiseria.cierreAutomaticoFiestas,
+            estadoOperativo: checkAgenciaEstado(updatedRemiseria)
+          });
+        }
+      } catch (socketErr) {
+        console.warn('Aviso socket agencia_estado_actualizado:', socketErr);
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          remiseriaId: updatedRemiseria.id,
+          agenciaAbierta: updatedRemiseria.agenciaAbierta,
+          mensajeCierre: updatedRemiseria.mensajeCierre,
+          cierreAutomaticoFiestas: updatedRemiseria.cierreAutomaticoFiestas,
+          estadoOperativo: checkAgenciaEstado(updatedRemiseria)
+        },
+        message: updatedRemiseria.agenciaAbierta
+          ? 'Central habilitada y recibiendo viajes'
+          : 'Central puesta en pausa / cerrada temporalmente'
+      });
+    } catch (error) {
+      console.error('Error actualizando estado de atención de la central:', error);
+      return res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
   }
 };
