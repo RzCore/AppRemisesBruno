@@ -24,8 +24,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2. Bloquear cualquier intento de acceso a rutas de clientes en la app interna
-  if (pathname.startsWith('/cliente')) {
+  // 2. Bloquear rutas obsoletas o de clientes en la app interna
+  if (pathname.startsWith('/cliente') || pathname.startsWith('/registro-chofer')) {
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
@@ -33,7 +33,6 @@ export function middleware(request: NextRequest) {
   // 3. Rutas públicas de autenticación interna
   const isAuthRoute =
     pathname.startsWith('/login') ||
-    pathname.startsWith('/registro-chofer') ||
     pathname.startsWith('/forgot-password') ||
     pathname.startsWith('/reset-password');
 

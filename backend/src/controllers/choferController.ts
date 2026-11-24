@@ -392,8 +392,14 @@ export const choferController = {
         });
       }
 
-      // Validar acceso del usuario creador a la remisería
+      // Validar acceso exclusivo del Dueño (o Admin) para dar de alta choferes
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede dar de alta choferes',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -401,16 +407,6 @@ export const choferController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para crear choferes en esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para crear choferes en esta remisería',
@@ -432,8 +428,8 @@ export const choferController = {
         }
       }
 
-      // El email del chofer será el provisto, o si no se provee, generaremos uno temporal para que pueda loguearse
-      const choferEmail = email || `${numeroChofer.toLowerCase()}@remiseria.com`;
+      // El email del chofer será el provisto, o si no se provee, generaremos uno con el dominio oficial
+      const choferEmail = (email && email.trim()) ? email.trim().toLowerCase() : `${numeroChofer.toLowerCase()}@brunoremises.com.ar`;
       
       // Verificar si el email ya está en uso por otro usuario
       const existingUser = await prisma.user.findUnique({
@@ -573,8 +569,14 @@ export const choferController = {
         });
       }
 
-      // Validar acceso
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede modificar choferes',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -582,16 +584,6 @@ export const choferController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(existingChofer.remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para modificar choferes de esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== existingChofer.remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para modificar choferes de esta remisería',
@@ -744,8 +736,14 @@ export const choferController = {
         });
       }
 
-      // Validar acceso
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede dar de baja choferes',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -753,16 +751,6 @@ export const choferController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(chofer.remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para eliminar choferes de esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== chofer.remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para eliminar choferes de esta remisería',
@@ -819,8 +807,14 @@ export const choferController = {
         });
       }
 
-      // Validar acceso
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede cambiar el estado de los choferes',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -828,16 +822,6 @@ export const choferController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(chofer.remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para modificar choferes de esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== chofer.remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para modificar choferes de esta remisería',

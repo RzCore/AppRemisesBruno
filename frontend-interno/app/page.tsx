@@ -104,13 +104,6 @@ export default function InternoHomePage() {
 
           <div className="flex items-center space-x-3">
             <Link
-              href="/registro-chofer"
-              className="hidden sm:inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Postulación Choferes</span>
-            </Link>
-            <Link
               href="/login"
               className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 transition-all"
             >

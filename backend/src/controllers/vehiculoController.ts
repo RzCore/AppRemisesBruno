@@ -257,8 +257,14 @@ export const vehiculoController = {
         });
       }
 
-      // Validar acceso del usuario creador a la remisería
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede dar de alta vehículos',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -266,16 +272,6 @@ export const vehiculoController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para crear vehículos en esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para crear vehículos en esta remisería',
@@ -408,8 +404,14 @@ export const vehiculoController = {
         });
       }
 
-      // Validar acceso
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede modificar vehículos',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -417,16 +419,6 @@ export const vehiculoController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(existingVehiculo.remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para modificar vehículos de esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== existingVehiculo.remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para modificar vehículos de esta remisería',
@@ -577,8 +569,14 @@ export const vehiculoController = {
         });
       }
 
-      // Validar acceso
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede dar de baja vehículos',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -586,16 +584,6 @@ export const vehiculoController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(vehiculo.remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para eliminar vehículos de esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== vehiculo.remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para eliminar vehículos de esta remisería',
@@ -660,8 +648,14 @@ export const vehiculoController = {
         });
       }
 
-      // Validar acceso
+      // Validar acceso exclusivo del Dueño (o Admin)
       const { rol, id: userId } = req.user!;
+      if (rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'Solo el dueño puede cambiar el estado de los vehículos',
+        });
+      }
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
@@ -669,16 +663,6 @@ export const vehiculoController = {
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
         if (!remiseriaIds.includes(vehiculo.remiseriaId)) {
-          return res.status(403).json({
-            success: false,
-            message: 'No tienes permisos para modificar vehículos de esta remisería',
-          });
-        }
-      } else if (rol === 'COORDINADOR') {
-        const coordinador = await prisma.coordinador.findFirst({
-          where: { userId }
-        });
-        if (coordinador?.remiseriaId !== vehiculo.remiseriaId) {
           return res.status(403).json({
             success: false,
             message: 'No tienes permisos para modificar vehículos de esta remisería',

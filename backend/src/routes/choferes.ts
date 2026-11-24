@@ -4,10 +4,6 @@ import { authenticateToken } from '../middleware/auth';
 
 const router = express.Router();
 
-// Rutas públicas de auto-registro del chofer (sin token)
-router.post('/registro', choferController.registroPublico);
-router.get('/remiserias-disponibles', choferController.getRemiseriasDisponibles);
-
 // Aplicar middleware de autenticación a todas las rutas protegidas
 router.use(authenticateToken);
 
@@ -47,29 +43,15 @@ router.post('/gastos', choferController.crearGasto);
 router.delete('/gastos/:gastoId', choferController.eliminarGasto);
 router.get('/resumen-financiero', choferController.getResumenFinanciero);
 
-// Obtener todos los choferes
+// Lectura de choferes (Dueño, Admin y Coordinador)
 router.get('/', choferController.getAll);
-
-// Obtener choferes por remisería
 router.get('/remiseria/:remiseriaId', choferController.getByRemiseria);
-
-// Obtener chofer por ID
 router.get('/:id', choferController.getById);
 
-// Crear chofer
+// Gestión de choferes exclusiva del Dueño / Admin
 router.post('/', choferController.create);
-
-// Actualizar chofer
 router.put('/:id', choferController.update);
-
-// Baja lógica del chofer
 router.delete('/:id', choferController.delete);
-
-// Cambiar estado del chofer
 router.patch('/:id/toggle-status', choferController.toggleStatus);
 
-// Aprobar o rechazar solicitud de chofer (Dueño / Coordinador)
-router.patch('/:id/aprobar', choferController.aprobarChofer);
-router.patch('/:id/rechazar', choferController.rechazarChofer);
-
-export default router; 
+export default router;

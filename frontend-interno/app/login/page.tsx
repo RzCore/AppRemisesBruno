@@ -192,17 +192,8 @@ export default function InternoLoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 text-center space-y-2">
-            <p className="text-sm text-gray-600">
-              ¿Querés trabajar de chofer?{' '}
-              <Link
-                href="/registro-chofer"
-                className="text-emerald-600 hover:text-emerald-700 font-semibold"
-              >
-                Postulate como chofer aquí
-              </Link>
-            </p>
-            {process.env.NODE_ENV !== 'production' && (
+          {process.env.NODE_ENV !== 'production' && (
+            <div className="mt-6 text-center space-y-2">
               <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200 text-left">
                 <p className="text-sm font-medium text-blue-800 mb-2">Credenciales Demo (Desarrollo):</p>
                 <div className="text-xs text-blue-700 space-y-1">
@@ -217,8 +208,8 @@ export default function InternoLoginPage() {
                   </button>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

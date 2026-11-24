@@ -108,14 +108,18 @@ export default function ChoferesPage() {
     try {
       const response = await choferService.create(formData);
       if (response.success) {
+        const emailAcceso = response.data?.email || formData.email || `${(formData.numeroChofer || '').toLowerCase()}@brunoremises.com.ar`;
         const alertas = (response as any).alertasVencimiento || [];
         if (alertas.length > 0) {
           toast.success(
-            `Chofer creado exitosamente. Se le notificó en su app sobre ${alertas.length} documento(s) por vencer o vencido(s).`,
-            { duration: 5500 }
+            `Chofer creado (Acceso: ${emailAcceso} / Clave: ${formData.dni}). Se alertaron ${alertas.length} documento(s) por vencer.`,
+            { duration: 6500 }
           );
         } else {
-          toast.success('Chofer creado exitosamente');
+          toast.success(
+            `Chofer dado de alta. Ingresa con ${emailAcceso} y clave ${formData.dni}`,
+            { duration: 6000 }
+          );
         }
         setShowCreateModal(false);
         setFormData({
@@ -384,48 +388,19 @@ export default function ChoferesPage() {
 
   if (!user) return null;
 
-  const solicitudesPendientes = choferes.filter((c) => c.estado === 'PENDIENTE_APROBACION');
-
   return (
     <div className="space-y-6">
-      {/* Alerta de Choferes Pendientes de Aprobación */}
-      {solicitudesPendientes.length > 0 && filterEstado !== 'PENDIENTE_APROBACION' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-base shadow-xs">
-              <Clock className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <p className="font-bold text-amber-900 text-sm">
-                {solicitudesPendientes.length === 1
-                  ? 'Tienes 1 nueva solicitud de chofer pendiente'
-                  : `Tienes ${solicitudesPendientes.length} nuevas solicitudes de choferes pendientes`}
-              </p>
-              <p className="text-xs text-amber-700">
-                Choferes que completaron su registro con documentación y esperan tu aprobación para operar.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setFilterEstado('PENDIENTE_APROBACION')}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors shrink-0"
-          >
-            Ver Pendientes ({solicitudesPendientes.length})
-          </button>
-        </div>
-      )}
-
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Choferes</h2>
-          <p className="text-sm text-slate-500">Gestioná las postulaciones y choferes de tus remiserías.</p>
+          <p className="text-sm text-slate-500">Administrá el alta, documentación y vehículos asignados de tus choferes.</p>
         </div>
         <button
           onClick={openCreateModal}
           className="btn btn-primary shadow-md shadow-primary-500/20"
         >
           <Plus className="w-5 h-5 mr-2" />
-          Nuevo Chofer (Manual)
+          Nuevo Chofer
         </button>
       </div>
 
@@ -447,10 +422,8 @@ export default function ChoferesPage() {
             className="input max-w-[220px] bg-white cursor-pointer font-medium text-xs"
           >
             <option value="all">Todos los estados</option>
-            <option value="PENDIENTE_APROBACION">⏳ Pendientes de Aprobación</option>
             <option value="ACTIVO">Activos</option>
             <option value="SUSPENDIDO">Suspendidos</option>
-            <option value="RECHAZADO">Rechazados</option>
             <option value="DADO_DE_BAJA">Dados de Baja</option>
           </select>
         </div>
@@ -1082,6 +1055,23 @@ export default function ChoferesPage() {
                       <span className="text-[11px] text-slate-500">
                         {formData.esPropietario ? 'Comisión base 20%' : 'Se lleva el 30% diario'}
                       </span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-emerald-50/80 rounded-xl border border-emerald-200 text-xs space-y-1">
+                    <span className="text-[10px] text-emerald-700 font-bold uppercase block">
+                      Credenciales de acceso para la App del Chofer (choferes.brunoremises.com.ar)
+                    </span>
+                    <div className="text-slate-700">
+                      Usuario (Email):{' '}
+                      <strong className="font-mono text-slate-900">
+                        {formData.email?.trim()
+                          ? formData.email.trim().toLowerCase()
+                          : `${(formData.numeroChofer || '').toLowerCase()}@brunoremises.com.ar`}
+                      </strong>
+                    </div>
+                    <div className="text-slate-700">
+                      Contraseña inicial: <strong className="font-mono text-slate-900">{formData.dni}</strong> (su DNI)
                     </div>
                   </div>
 
