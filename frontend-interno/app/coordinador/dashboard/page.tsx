@@ -109,6 +109,10 @@ function formatCleanAddress(sug: any, userInput?: string): { mainText: string; s
   };
 }
 
+const soloNumeros = (val: string) => val.replace(/\D/g, '');
+const soloLetras = (val: string) =>
+  val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '');
+
 export default function CoordinadorDashboard() {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -844,13 +848,14 @@ export default function CoordinadorDashboard() {
   };
 
   const handleBuscarDni = async () => {
-    if (!dniSearch) {
-      toast.error('Ingrese un DNI');
+    const cleanDni = soloNumeros(dniSearch);
+    if (!cleanDni || cleanDni.length < 7 || cleanDni.length > 8) {
+      toast.error('Ingrese un DNI numérico válido (7 u 8 dígitos)');
       return;
     }
     setBuscandoDni(true);
     try {
-      const res = await clienteAuthService.buscarClientePorDni(dniSearch);
+      const res = await clienteAuthService.buscarClientePorDni(cleanDni);
       if (res.success && res.data) {
         const c = res.data;
         setClientData({
@@ -893,15 +898,31 @@ export default function CoordinadorDashboard() {
 
   const handleCrearCliente = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientData.nombre || !clientData.apellido || !clientData.telefono || !dniSearch) {
-      toast.error('Complete los datos requeridos');
+    const cleanNom = soloLetras(clientData.nombre).trim();
+    const cleanApe = soloLetras(clientData.apellido).trim();
+    const cleanTel = soloNumeros(clientData.telefono);
+    const cleanDni = soloNumeros(dniSearch);
+
+    if (cleanNom.length < 2 || cleanApe.length < 2) {
+      toast.error('Ingrese nombre y apellido válidos (solo letras)');
+      return;
+    }
+    if (cleanTel.length < 8) {
+      toast.error('Ingrese un teléfono válido (al menos 8 dígitos numéricos)');
+      return;
+    }
+    if (cleanDni.length < 7 || cleanDni.length > 8) {
+      toast.error('El DNI debe tener 7 u 8 dígitos numéricos');
       return;
     }
     setCreandoCliente(true);
     try {
       const res = await coordinadorDashboardService.createCliente({
         ...clientData,
-        dni: dniSearch
+        nombre: cleanNom,
+        apellido: cleanApe,
+        telefono: cleanTel,
+        dni: cleanDni
       });
       if (res.success && res.data) {
         toast.success('Cliente registrado exitosamente');
@@ -1183,7 +1204,12 @@ export default function CoordinadorDashboard() {
 
   // Búsqueda predictiva mientras el despachador tipea en el modal Express
   useEffect(() => {
-    const term = expressData.telefono.trim().length >= 3 ? expressData.telefono.trim() : expressData.nombre.trim();
+    const term =
+      expressData.telefono.trim().length >= 3
+        ? expressData.telefono.trim()
+        : expressData.apellido.trim().length >= 2
+        ? expressData.apellido.trim()
+        : expressData.nombre.trim();
     if (!term || term.length < 2) {
       setPredictiveSuggestions([]);
       return;
@@ -1201,7 +1227,7 @@ export default function CoordinadorDashboard() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [expressData.telefono, expressData.nombre]);
+  }, [expressData.telefono, expressData.nombre, expressData.apellido]);
 
   // Autocompletado de dirección de origen para Despacho Express
   useEffect(() => {
@@ -3048,9 +3074,12 @@ export default function CoordinadorDashboard() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">DNI del Cliente</label>
                     <div className="flex space-x-2">
                       <input 
-                        type="text" 
+                        type="tel"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={8}
                         value={dniSearch}
-                        onChange={(e) => setDniSearch(e.target.value)}
+                        onChange={(e) => setDniSearch(soloNumeros(e.target.value).slice(0, 8))}
                         placeholder="Ej: 38450123"
                         className="flex-1 px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
                         onKeyDown={(e) => {
@@ -3087,8 +3116,10 @@ export default function CoordinadorDashboard() {
                       <input 
                         type="text"
                         required
+                        maxLength={50}
                         value={clientData.nombre}
-                        onChange={(e) => setClientData({ ...clientData, nombre: e.target.value })}
+                        onChange={(e) => setClientData({ ...clientData, nombre: soloLetras(e.target.value) })}
+                        placeholder="Ej: Juan"
                         className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                       />
                     </div>
@@ -3097,8 +3128,10 @@ export default function CoordinadorDashboard() {
                       <input 
                         type="text"
                         required
+                        maxLength={50}
                         value={clientData.apellido}
-                        onChange={(e) => setClientData({ ...clientData, apellido: e.target.value })}
+                        onChange={(e) => setClientData({ ...clientData, apellido: soloLetras(e.target.value) })}
+                        placeholder="Ej: Pérez"
                         className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                       />
                     </div>
@@ -3106,10 +3139,14 @@ export default function CoordinadorDashboard() {
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-0.5">Teléfono *</label>
                     <input 
-                      type="text"
+                      type="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={15}
                       required
                       value={clientData.telefono}
-                      onChange={(e) => setClientData({ ...clientData, telefono: e.target.value })}
+                      onChange={(e) => setClientData({ ...clientData, telefono: soloNumeros(e.target.value).slice(0, 15) })}
+                      placeholder="Ej: 2346551234"
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                     />
                   </div>
@@ -3357,11 +3394,14 @@ export default function CoordinadorDashboard() {
                   📞 Teléfono del Pasajero *
                 </label>
                 <input
-                  type="text"
+                  type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={15}
                   autoFocus
                   required
                   value={expressData.telefono}
-                  onChange={(e) => setExpressData({ ...expressData, telefono: e.target.value })}
+                  onChange={(e) => setExpressData({ ...expressData, telefono: soloNumeros(e.target.value).slice(0, 15) })}
                   placeholder="Ej: 2364123456"
                   className="w-full px-3.5 py-2.5 border-2 border-orange-300 rounded-xl text-base font-semibold focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
                 />
@@ -3403,8 +3443,9 @@ export default function CoordinadorDashboard() {
                   <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Nombre</label>
                   <input
                     type="text"
+                    maxLength={50}
                     value={expressData.nombre}
-                    onChange={(e) => setExpressData({ ...expressData, nombre: e.target.value })}
+                    onChange={(e) => setExpressData({ ...expressData, nombre: soloLetras(e.target.value) })}
                     placeholder="Ej: Juan"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
                   />
@@ -3413,8 +3454,9 @@ export default function CoordinadorDashboard() {
                   <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Apellido</label>
                   <input
                     type="text"
+                    maxLength={50}
                     value={expressData.apellido}
-                    onChange={(e) => setExpressData({ ...expressData, apellido: e.target.value })}
+                    onChange={(e) => setExpressData({ ...expressData, apellido: soloLetras(e.target.value) })}
                     placeholder="Ej: Pérez"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
                   />

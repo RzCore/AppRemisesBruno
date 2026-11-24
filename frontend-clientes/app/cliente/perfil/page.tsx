@@ -50,6 +50,11 @@ const PRESET_ALIASES = [
   { label: 'Otro', icon: 'map-pin' },
 ];
 
+const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
+const soloLetras = (val: string) =>
+  val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '');
+const soloNumeros = (val: string) => val.replace(/\D/g, '');
+
 export default function ClientePerfilPage() {
   const { user, updateUser } = useAuth();
   useAppTracking('CLIENTE_PROFILE_ACCESS');
@@ -80,6 +85,7 @@ export default function ClientePerfilPage() {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<ProfileFormData>();
 
@@ -132,10 +138,31 @@ export default function ClientePerfilPage() {
   }, [direccionForm]);
 
   const onSubmit = async (data: ProfileFormData) => {
+    const cleanData: ProfileFormData = {
+      ...data,
+      nombre: soloLetras(data.nombre).trim(),
+      apellido: soloLetras(data.apellido).trim(),
+      telefono: soloNumeros(data.telefono).slice(0, 15),
+      direccion: data.direccion.trim(),
+    };
+
+    if (cleanData.nombre.length < 2 || !SOLO_LETRAS_REGEX.test(cleanData.nombre)) {
+      toast.error('El nombre solo puede contener letras');
+      return;
+    }
+    if (cleanData.apellido.length < 2 || !SOLO_LETRAS_REGEX.test(cleanData.apellido)) {
+      toast.error('El apellido solo puede contener letras');
+      return;
+    }
+    if (cleanData.telefono.length < 8) {
+      toast.error('Ingresá un teléfono válido (al menos 8 dígitos numéricos)');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const res = await clienteService.updateProfile(data);
+      const res = await clienteService.updateProfile(cleanData);
 
       if (res.success && res.data) {
         toast.success('Perfil actualizado exitosamente');
@@ -145,7 +172,7 @@ export default function ClientePerfilPage() {
             ...user,
             cliente: {
               ...user.cliente,
-              ...data,
+              ...cleanData,
             },
           });
         }
@@ -673,8 +700,18 @@ export default function ClientePerfilPage() {
                 </label>
                 <div className="relative">
                   <input
-                    {...register('nombre', { required: 'El nombre es requerido' })}
+                    {...register('nombre', {
+                      required: 'El nombre es requerido',
+                      minLength: { value: 2, message: 'El nombre debe tener al menos 2 letras' },
+                      pattern: { value: SOLO_LETRAS_REGEX, message: 'El nombre solo puede contener letras' },
+                      onChange: (e) => {
+                        const clean = soloLetras(e.target.value);
+                        e.target.value = clean;
+                        setValue('nombre', clean, { shouldValidate: true });
+                      },
+                    })}
                     type="text"
+                    maxLength={50}
                     disabled={!isEditing}
                     className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-xs font-medium focus:ring-2 focus:ring-primary-500 transition-colors ${
                       !isEditing
@@ -695,8 +732,18 @@ export default function ClientePerfilPage() {
                 </label>
                 <div className="relative">
                   <input
-                    {...register('apellido', { required: 'El apellido es requerido' })}
+                    {...register('apellido', {
+                      required: 'El apellido es requerido',
+                      minLength: { value: 2, message: 'El apellido debe tener al menos 2 letras' },
+                      pattern: { value: SOLO_LETRAS_REGEX, message: 'El apellido solo puede contener letras' },
+                      onChange: (e) => {
+                        const clean = soloLetras(e.target.value);
+                        e.target.value = clean;
+                        setValue('apellido', clean, { shouldValidate: true });
+                      },
+                    })}
                     type="text"
+                    maxLength={50}
                     disabled={!isEditing}
                     className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-xs font-medium focus:ring-2 focus:ring-primary-500 transition-colors ${
                       !isEditing
@@ -736,8 +783,21 @@ export default function ClientePerfilPage() {
                 </label>
                 <div className="relative">
                   <input
-                    {...register('telefono', { required: 'El teléfono es requerido' })}
+                    {...register('telefono', {
+                      required: 'El teléfono es requerido',
+                      minLength: { value: 8, message: 'El teléfono debe tener al menos 8 dígitos' },
+                      maxLength: { value: 15, message: 'Máximo 15 dígitos' },
+                      pattern: { value: /^\d{8,15}$/, message: 'El teléfono solo puede contener números' },
+                      onChange: (e) => {
+                        const clean = soloNumeros(e.target.value).slice(0, 15);
+                        e.target.value = clean;
+                        setValue('telefono', clean, { shouldValidate: true });
+                      },
+                    })}
                     type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={15}
                     disabled={!isEditing}
                     className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-xs font-medium focus:ring-2 focus:ring-primary-500 transition-colors ${
                       !isEditing

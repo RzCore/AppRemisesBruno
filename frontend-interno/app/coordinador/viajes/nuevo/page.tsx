@@ -56,21 +56,26 @@ export default function NuevoViaje() {
   const [buscandoCliente, setBuscandoCliente] = useState(false);
   const [clienteEncontrado, setClienteEncontrado] = useState(false);
 
+  const soloNumeros = (val: string) => val.replace(/\D/g, '');
+  const soloLetras = (val: string) =>
+    val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '');
+
   const buscarClientePorDni = async () => {
-    if (!formData.dniCliente || formData.dniCliente.length < 7) {
-      toast.error('Ingrese un DNI válido');
+    const cleanDni = soloNumeros(formData.dniCliente);
+    if (!cleanDni || cleanDni.length < 7 || cleanDni.length > 8) {
+      toast.error('Ingrese un DNI numérico válido (7 u 8 dígitos)');
       return;
     }
 
     setBuscandoCliente(true);
     try {
-      const response = await clienteAuthService.buscarClientePorDni(formData.dniCliente);
+      const response = await clienteAuthService.buscarClientePorDni(cleanDni);
 
       if (response.success && response.data) {
         setFormData(prev => ({
           ...prev,
-          nombreCliente: `${response.data.nombre} ${response.data.apellido}`,
-          telefonoCliente: response.data.telefono
+          nombreCliente: `${response.data.nombre} ${response.data.apellido}`.trim(),
+          telefonoCliente: soloNumeros(response.data.telefono || '')
         }));
         setClienteEncontrado(true);
         toast.success('Cliente encontrado');
@@ -88,6 +93,19 @@ export default function NuevoViaje() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (formData.dniCliente.length < 7 || formData.dniCliente.length > 8) {
+      toast.error('El DNI debe tener 7 u 8 dígitos numéricos');
+      return;
+    }
+    if (!formData.nombreCliente.trim() || /\d/.test(formData.nombreCliente)) {
+      toast.error('El nombre del cliente solo puede contener letras');
+      return;
+    }
+    if (formData.telefonoCliente.length < 8) {
+      toast.error('Ingrese un teléfono válido (al menos 8 dígitos numéricos)');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -105,9 +123,18 @@ export default function NuevoViaje() {
   };
 
   const handleInputChange = (field: keyof ViajeFormData, value: string) => {
+    let cleanValue = value;
+    if (field === 'dniCliente') {
+      cleanValue = soloNumeros(value).slice(0, 8);
+    } else if (field === 'nombreCliente') {
+      cleanValue = soloLetras(value);
+    } else if (field === 'telefonoCliente') {
+      cleanValue = soloNumeros(value).slice(0, 15);
+    }
+
     setFormData(prev => ({
       ...prev,
-      [field]: value
+      [field]: cleanValue
     }));
 
     // Reset cliente encontrado si cambia el DNI
@@ -154,7 +181,9 @@ export default function NuevoViaje() {
                 </label>
                 <div className="flex gap-2">
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
                     value={formData.dniCliente}
                     onChange={(e) => handleInputChange('dniCliente', e.target.value)}
@@ -202,6 +231,7 @@ export default function NuevoViaje() {
                   <input
                     type="text"
                     required
+                    maxLength={80}
                     value={formData.nombreCliente}
                     onChange={(e) => handleInputChange('nombreCliente', e.target.value)}
                     disabled={clienteEncontrado}
@@ -218,12 +248,15 @@ export default function NuevoViaje() {
                     <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                     <input
                       type="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={15}
                       required
                       value={formData.telefonoCliente}
                       onChange={(e) => handleInputChange('telefonoCliente', e.target.value)}
                       disabled={clienteEncontrado}
                       className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      placeholder="11 1234-5678"
+                      placeholder="2346551234"
                     />
                   </div>
                 </div>

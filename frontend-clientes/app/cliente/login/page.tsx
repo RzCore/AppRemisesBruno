@@ -22,6 +22,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+const soloNumeros = (val: string) => val.replace(/\D/g, '');
+const soloLetras = (val: string) =>
+  val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '');
+
 export default function ClienteLoginPage() {
   const router = useRouter();
   const { user, login } = useAuth();
@@ -41,6 +45,7 @@ export default function ClienteLoginPage() {
 
   // Datos para registro express si no está registrado
   const [nuevoNombre, setNuevoNombre] = useState('');
+  const [nuevoApellido, setNuevoApellido] = useState('');
   const [nuevoDni, setNuevoDni] = useState('');
   const [nuevoTelefono, setNuevoTelefono] = useState('');
   const [nuevoPin, setNuevoPin] = useState('');
@@ -65,8 +70,8 @@ export default function ClienteLoginPage() {
   // Paso 1: Procesar Identificador (DNI o Celular)
   const handleContinuarIdentificador = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanId = identificador.trim().replace(/\D/g, '');
-    if (cleanId.length < 6) {
+    const cleanId = soloNumeros(identificador.trim());
+    if (cleanId.length < 7) {
       toast.error('Por favor ingresá un número de DNI o teléfono válido (al menos 7 dígitos)');
       return;
     }
@@ -86,7 +91,7 @@ export default function ClienteLoginPage() {
           setNuevoDni('');
         }
         setPaso('REGISTRO_EXPRESS');
-        toast('¡Bienvenido! Completá tu nombre para empezar a viajar.', { icon: '👋' });
+        toast('¡Bienvenido! Completá tus datos para empezar a viajar.', { icon: '👋' });
       } else {
         // Cliente existe -> mostrar opción de PIN o solicitar código
         setPaso('PIN');
@@ -182,19 +187,32 @@ export default function ClienteLoginPage() {
   // Paso 3: Registro Express de nuevo cliente
   const handleRegistroExpress = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevoNombre.trim()) {
-      toast.error('Por favor ingresá tu nombre y apellido');
+    const cleanNom = soloLetras(nuevoNombre).trim();
+    const cleanApe = soloLetras(nuevoApellido).trim();
+
+    if (cleanNom.length < 2) {
+      toast.error('Por favor ingresá tu nombre (solo letras)');
       return;
     }
-    const cleanD = nuevoDni.replace(/\D/g, '');
-    const cleanT = nuevoTelefono.replace(/\D/g, '');
+    if (cleanApe.length < 2) {
+      toast.error('Por favor ingresá tu apellido (solo letras)');
+      return;
+    }
 
-    if (cleanD.length < 7 || cleanD.length > 9) {
-      toast.error('El DNI debe tener 7 u 8 dígitos');
+    const cleanD = soloNumeros(nuevoDni);
+    const cleanT = soloNumeros(nuevoTelefono);
+    const cleanP = soloNumeros(nuevoPin);
+
+    if (cleanD.length < 7 || cleanD.length > 8) {
+      toast.error('El DNI debe tener 7 u 8 dígitos numéricos');
       return;
     }
     if (cleanT.length < 8) {
       toast.error('Por favor ingresá un número de teléfono celular válido');
+      return;
+    }
+    if (cleanP.length > 0 && cleanP.length < 4) {
+      toast.error('Si ingresás un PIN, debe tener al menos 4 dígitos numéricos');
       return;
     }
 
@@ -202,9 +220,10 @@ export default function ClienteLoginPage() {
     try {
       const res = await clienteAuthService.registroExpress({
         dni: cleanD,
-        nombre: nuevoNombre.trim(),
+        nombre: cleanNom,
+        apellido: cleanApe,
         telefono: cleanT,
-        pin: nuevoPin || undefined
+        pin: cleanP || undefined
       });
 
       const payload: any = res.data || res;
@@ -260,10 +279,12 @@ export default function ClienteLoginPage() {
                 <input
                   type="tel"
                   inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={15}
                   autoFocus
                   required
                   value={identificador}
-                  onChange={(e) => setIdentificador(e.target.value)}
+                  onChange={(e) => setIdentificador(soloNumeros(e.target.value).slice(0, 15))}
                   placeholder="Ej: 35123456 ó 2346551234"
                   className="w-full pl-4 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-bold text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder:text-slate-400 placeholder:text-sm placeholder:font-normal"
                 />
@@ -320,11 +341,12 @@ export default function ClienteLoginPage() {
                 <input
                   type="password"
                   inputMode="numeric"
+                  pattern="[0-9]*"
                   maxLength={6}
                   autoFocus
                   required
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) => setPin(soloNumeros(e.target.value).slice(0, 6))}
                   placeholder="••••"
                   className="w-full text-center tracking-[0.5em] py-3.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-black text-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder:tracking-normal placeholder:text-sm"
                 />
@@ -471,19 +493,36 @@ export default function ClienteLoginPage() {
             </div>
 
             <form onSubmit={handleRegistroExpress} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Nombre y Apellido *
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  value={nuevoNombre}
-                  onChange={(e) => setNuevoNombre(e.target.value)}
-                  placeholder="Ej: Juan Pérez"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nombre *
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    maxLength={50}
+                    value={nuevoNombre}
+                    onChange={(e) => setNuevoNombre(soloLetras(e.target.value))}
+                    placeholder="Ej: Juan"
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Apellido *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={50}
+                    value={nuevoApellido}
+                    onChange={(e) => setNuevoApellido(soloLetras(e.target.value))}
+                    placeholder="Ej: Pérez"
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -494,9 +533,11 @@ export default function ClienteLoginPage() {
                   <input
                     type="tel"
                     inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={8}
                     required
                     value={nuevoDni}
-                    onChange={(e) => setNuevoDni(e.target.value)}
+                    onChange={(e) => setNuevoDni(soloNumeros(e.target.value).slice(0, 8))}
                     placeholder="35123456"
                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
@@ -508,9 +549,11 @@ export default function ClienteLoginPage() {
                   <input
                     type="tel"
                     inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={15}
                     required
                     value={nuevoTelefono}
-                    onChange={(e) => setNuevoTelefono(e.target.value)}
+                    onChange={(e) => setNuevoTelefono(soloNumeros(e.target.value).slice(0, 15))}
                     placeholder="2346551234"
                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
@@ -524,9 +567,10 @@ export default function ClienteLoginPage() {
                 <input
                   type="password"
                   inputMode="numeric"
+                  pattern="[0-9]*"
                   maxLength={6}
                   value={nuevoPin}
-                  onChange={(e) => setNuevoPin(e.target.value)}
+                  onChange={(e) => setNuevoPin(soloNumeros(e.target.value).slice(0, 6))}
                   placeholder="Ej: 1234 (para entrar siempre rápido)"
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />

@@ -4,6 +4,8 @@ import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 
+const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
+
 function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -918,9 +920,42 @@ export const coordinatorDashboardController = {
         });
       }
 
+      const cleanDni = String(dni).replace(/\D/g, '');
+      const cleanTel = String(telefono).replace(/\D/g, '');
+      const cleanNombre = String(nombre).trim();
+      const cleanApellido = String(apellido).trim();
+
+      if (!/^\d{7,8}$/.test(cleanDni)) {
+        return res.status(400).json({
+          success: false,
+          message: 'El DNI debe contener únicamente números (7 u 8 dígitos)'
+        });
+      }
+
+      if (cleanNombre.length < 2 || !SOLO_LETRAS_REGEX.test(cleanNombre)) {
+        return res.status(400).json({
+          success: false,
+          message: 'El nombre solo puede contener letras'
+        });
+      }
+
+      if (cleanApellido.length < 2 || !SOLO_LETRAS_REGEX.test(cleanApellido)) {
+        return res.status(400).json({
+          success: false,
+          message: 'El apellido solo puede contener letras'
+        });
+      }
+
+      if (!/^\d{8,15}$/.test(cleanTel)) {
+        return res.status(400).json({
+          success: false,
+          message: 'El teléfono debe contener únicamente números (al menos 8 dígitos)'
+        });
+      }
+
       // Verificar si ya existe un cliente con ese DNI
       const existingCliente = await prisma.cliente.findUnique({
-        where: { dni }
+        where: { dni: cleanDni }
       });
 
       if (existingCliente) {
@@ -933,7 +968,7 @@ export const coordinatorDashboardController = {
       // Generar email único si no se provee o verificar el existente
       let finalEmail = email;
       if (!finalEmail) {
-        finalEmail = `${dni}@appremises.com`;
+        finalEmail = `${cleanDni}@appremises.com`;
       }
 
       const existingUser = await prisma.user.findUnique({
@@ -941,7 +976,7 @@ export const coordinatorDashboardController = {
       });
 
       if (existingUser) {
-        finalEmail = `${dni}-${Date.now()}@appremises.com`;
+        finalEmail = `${cleanDni}-${Date.now()}@appremises.com`;
       }
 
       // Password por defecto
@@ -960,10 +995,10 @@ export const coordinatorDashboardController = {
       // Crear el registro de Cliente
       const cliente = await prisma.cliente.create({
         data: {
-          nombre,
-          apellido,
-          dni,
-          telefono,
+          nombre: cleanNombre,
+          apellido: cleanApellido,
+          dni: cleanDni,
+          telefono: cleanTel,
           email: finalEmail,
           direccion,
           fechaNacimiento: new Date('1990-01-01'), // Fecha por defecto
@@ -1890,15 +1925,24 @@ export const coordinatorDashboardController = {
       }
 
       let clienteId: string | null = null;
-      const cleanPhone = telefono.trim();
+      const cleanPhone = String(telefono).replace(/\D/g, '');
+      if (cleanPhone.length < 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ingrese un teléfono numérico válido'
+        });
+      }
+      const cleanNomExpress = nombre ? String(nombre).replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '').trim() : '';
+      const cleanApeExpress = apellido ? String(apellido).replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '').trim() : '';
+
       let cliente = await prisma.cliente.findFirst({
         where: { telefono: cleanPhone }
       });
 
-      if (!cliente && nombre) {
+      if (!cliente && cleanNomExpress) {
         try {
-          const dummyEmail = `cliente_${cleanPhone.replace(/\D/g, '') || Date.now()}@bruno.local`;
-          const dummyDni = `TEL_${cleanPhone.replace(/\D/g, '').slice(-8) || Date.now()}`;
+          const dummyEmail = `cliente_${cleanPhone || Date.now()}@bruno.local`;
+          const dummyDni = `TEL_${cleanPhone.slice(-8) || Date.now()}`;
           const bcrypt = await import('bcryptjs');
           const hashedPassword = await bcrypt.default.hash('123456', 10);
 
@@ -1913,8 +1957,8 @@ export const coordinatorDashboardController = {
           cliente = await prisma.cliente.create({
             data: {
               userId: nuevoUser.id,
-              nombre: nombre.trim(),
-              apellido: (apellido || '').trim(),
+              nombre: cleanNomExpress,
+              apellido: cleanApeExpress,
               dni: dummyDni,
               telefono: cleanPhone,
               email: dummyEmail,
@@ -1979,7 +2023,7 @@ export const coordinatorDashboardController = {
         data: {
           remiseriaId: coordinador.remiseriaId,
           clienteId,
-          clienteNombre: nombre ? `${nombre} ${apellido || ''}`.trim() : (cliente ? `${cliente.nombre} ${cliente.apellido}` : 'Pasajero Telefónico'),
+          clienteNombre: cleanNomExpress ? `${cleanNomExpress} ${cleanApeExpress}`.trim() : (cliente ? `${cliente.nombre} ${cliente.apellido}`.trim() : 'Pasajero Telefónico'),
           clienteTelefono: cleanPhone,
           origen: origen.trim(),
           destino: (destino || 'A convenir').trim(),

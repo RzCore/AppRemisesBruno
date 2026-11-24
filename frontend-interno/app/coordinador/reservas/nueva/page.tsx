@@ -66,8 +66,21 @@ export default function NuevaReserva() {
     { value: '0', label: 'Domingo' }
   ];
 
+  const soloNumeros = (val: string) => val.replace(/\D/g, '');
+  const soloLetras = (val: string) =>
+    val.replace(/[^a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]/g, '');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.nombreCliente.trim() || /\d/.test(formData.nombreCliente)) {
+      toast.error('El nombre del cliente solo puede contener letras');
+      return;
+    }
+    if (formData.telefonoCliente.length < 8) {
+      toast.error('Ingrese un teléfono válido (al menos 8 dígitos numéricos)');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -85,9 +98,18 @@ export default function NuevaReserva() {
   };
 
   const handleInputChange = (field: keyof ReservaFormData, value: string | string[]) => {
+    let cleanValue = value;
+    if (typeof value === 'string') {
+      if (field === 'nombreCliente') {
+        cleanValue = soloLetras(value);
+      } else if (field === 'telefonoCliente') {
+        cleanValue = soloNumeros(value).slice(0, 15);
+      }
+    }
+
     setFormData(prev => ({
       ...prev,
-      [field]: value
+      [field]: cleanValue
     }));
   };
 
@@ -138,6 +160,7 @@ export default function NuevaReserva() {
                 <input
                   type="text"
                   required
+                  maxLength={80}
                   value={formData.nombreCliente}
                   onChange={(e) => handleInputChange('nombreCliente', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -153,11 +176,14 @@ export default function NuevaReserva() {
                   <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={15}
                     required
                     value={formData.telefonoCliente}
                     onChange={(e) => handleInputChange('telefonoCliente', e.target.value)}
                     className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="11 1234-5678"
+                    placeholder="2346551234"
                   />
                 </div>
               </div>

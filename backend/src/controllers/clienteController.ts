@@ -16,6 +16,8 @@ const routeCache = new Map<string, RouteCacheEntry>();
 let osrmConsecutiveErrors = 0;
 let osrmDisabledUntil = 0;
 
+const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
+
 export const registerCliente = async (req: Request, res: Response) => {
   try {
     const {
@@ -38,6 +40,39 @@ export const registerCliente = async (req: Request, res: Response) => {
       });
     }
 
+    const cleanDni = String(dni).replace(/\D/g, '');
+    const cleanTel = String(telefono).replace(/\D/g, '');
+    const cleanNombre = String(nombre).trim();
+    const cleanApellido = String(apellido).trim();
+
+    if (!/^\d{7,8}$/.test(cleanDni)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El DNI debe contener únicamente números (7 u 8 dígitos)'
+      });
+    }
+
+    if (cleanNombre.length < 2 || !SOLO_LETRAS_REGEX.test(cleanNombre)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El nombre solo puede contener letras'
+      });
+    }
+
+    if (cleanApellido.length < 2 || !SOLO_LETRAS_REGEX.test(cleanApellido)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El apellido solo puede contener letras'
+      });
+    }
+
+    if (!/^\d{8,15}$/.test(cleanTel)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El teléfono debe contener únicamente números (al menos 8 dígitos)'
+      });
+    }
+
     // Verificar si el email ya existe
     const existingUser = await prisma.user.findUnique({
       where: { email }
@@ -52,7 +87,7 @@ export const registerCliente = async (req: Request, res: Response) => {
 
     // Verificar si el DNI ya existe
     const existingCliente = await prisma.cliente.findUnique({
-      where: { dni }
+      where: { dni: cleanDni }
     });
 
     if (existingCliente) {
@@ -87,10 +122,10 @@ export const registerCliente = async (req: Request, res: Response) => {
     // Crear cliente
     const cliente = await prisma.cliente.create({
       data: {
-        nombre,
-        apellido,
-        dni,
-        telefono,
+        nombre: cleanNombre,
+        apellido: cleanApellido,
+        dni: cleanDni,
+        telefono: cleanTel,
         email,
         direccion,
         fechaNacimiento: new Date(fechaNacimiento),
@@ -248,10 +283,40 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
     }
 
     const updateData: any = {};
-    if (nombre !== undefined) updateData.nombre = nombre;
-    if (apellido !== undefined) updateData.apellido = apellido;
-    if (telefono !== undefined) updateData.telefono = telefono;
-    if (direccion !== undefined) updateData.direccion = direccion;
+    if (nombre !== undefined) {
+      const cleanNombre = String(nombre).trim();
+      if (cleanNombre.length < 2 || !SOLO_LETRAS_REGEX.test(cleanNombre)) {
+        return res.status(400).json({
+          success: false,
+          error: 'El nombre solo puede contener letras',
+          message: 'El nombre solo puede contener letras'
+        });
+      }
+      updateData.nombre = cleanNombre;
+    }
+    if (apellido !== undefined) {
+      const cleanApellido = String(apellido).trim();
+      if (cleanApellido.length < 2 || !SOLO_LETRAS_REGEX.test(cleanApellido)) {
+        return res.status(400).json({
+          success: false,
+          error: 'El apellido solo puede contener letras',
+          message: 'El apellido solo puede contener letras'
+        });
+      }
+      updateData.apellido = cleanApellido;
+    }
+    if (telefono !== undefined) {
+      const cleanTel = String(telefono).replace(/\D/g, '');
+      if (!/^\d{8,15}$/.test(cleanTel)) {
+        return res.status(400).json({
+          success: false,
+          error: 'El teléfono debe contener únicamente números (al menos 8 dígitos)',
+          message: 'El teléfono debe contener únicamente números (al menos 8 dígitos)'
+        });
+      }
+      updateData.telefono = cleanTel;
+    }
+    if (direccion !== undefined) updateData.direccion = String(direccion).trim();
     if (genero !== undefined) updateData.genero = genero;
     if (fotoUrl !== undefined) updateData.fotoUrl = fotoUrl;
     if (direccionesFrecuentes !== undefined) {
@@ -1832,16 +1897,18 @@ export async function calcularPrecioViaje(
 export const buscarClientePorDni = async (req: Request, res: Response) => {
   try {
     const { dni } = req.params;
+    const cleanDni = String(dni || '').replace(/\D/g, '');
 
-    if (!dni) {
+    if (!cleanDni || !/^\d{7,8}$/.test(cleanDni)) {
       return res.status(400).json({
         success: false,
-        error: 'DNI es requerido'
+        error: 'El DNI debe contener únicamente números (7 u 8 dígitos)',
+        message: 'El DNI debe contener únicamente números (7 u 8 dígitos)'
       });
     }
 
     const cliente = await prisma.cliente.findUnique({
-      where: { dni },
+      where: { dni: cleanDni },
       select: {
         id: true,
         nombre: true,

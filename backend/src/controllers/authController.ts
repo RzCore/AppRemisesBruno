@@ -240,9 +240,44 @@ export const register = async (req: Request, res: Response) => {
   }
 };
 
+const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
+
 export const registerCliente = async (req: Request, res: Response) => {
   try {
     const { email, password, nombre, apellido, dni, telefono, direccion, fechaNacimiento, fotoUrl } = req.body;
+
+    const cleanDni = String(dni || '').replace(/\D/g, '');
+    const cleanTel = String(telefono || '').replace(/\D/g, '');
+    const cleanNombre = String(nombre || '').trim();
+    const cleanApellido = String(apellido || '').trim();
+
+    if (!/^\d{7,8}$/.test(cleanDni)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El DNI debe contener únicamente números (7 u 8 dígitos)'
+      });
+    }
+
+    if (cleanNombre.length < 2 || !SOLO_LETRAS_REGEX.test(cleanNombre)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El nombre solo puede contener letras'
+      });
+    }
+
+    if (cleanApellido.length < 2 || !SOLO_LETRAS_REGEX.test(cleanApellido)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El apellido solo puede contener letras'
+      });
+    }
+
+    if (!/^\d{8,15}$/.test(cleanTel)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El teléfono debe contener únicamente números (al menos 8 dígitos)'
+      });
+    }
 
     // Verificar si el usuario ya existe
     const existingUser = await prisma.user.findUnique({
@@ -258,7 +293,7 @@ export const registerCliente = async (req: Request, res: Response) => {
 
     // Verificar si el DNI ya existe
     const existingCliente = await prisma.cliente.findUnique({
-      where: { dni }
+      where: { dni: cleanDni }
     });
 
     if (existingCliente) {
@@ -305,10 +340,10 @@ export const registerCliente = async (req: Request, res: Response) => {
 
       const cliente = await tx.cliente.create({
         data: {
-          nombre,
-          apellido,
-          dni,
-          telefono,
+          nombre: cleanNombre,
+          apellido: cleanApellido,
+          dni: cleanDni,
+          telefono: cleanTel,
           email,
           direccion,
           fechaNacimiento: new Date(fechaNacimiento),
@@ -1014,8 +1049,35 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
 
     const cleanDni = String(dni).replace(/\D/g, '').trim();
     const cleanTel = String(telefono).replace(/\D/g, '').trim();
-    const cleanNom = String(nombre).trim();
-    const cleanApe = String(apellido || '').trim();
+    let cleanNom = String(nombre).trim();
+    let cleanApe = String(apellido || '').trim();
+
+    if (!/^\d{7,8}$/.test(cleanDni)) {
+      return res.status(400).json({ success: false, error: 'El DNI debe contener únicamente números (7 u 8 dígitos)' });
+    }
+
+    if (!/^\d{8,15}$/.test(cleanTel)) {
+      return res.status(400).json({ success: false, error: 'El teléfono debe contener únicamente números (al menos 8 dígitos)' });
+    }
+
+    if (!cleanApe && cleanNom.includes(' ')) {
+      const parts = cleanNom.split(/\s+/);
+      cleanNom = parts[0];
+      cleanApe = parts.slice(1).join(' ');
+    }
+
+    if (cleanNom.length < 2 || !SOLO_LETRAS_REGEX.test(cleanNom)) {
+      return res.status(400).json({ success: false, error: 'El nombre solo puede contener letras' });
+    }
+
+    if (cleanApe && !SOLO_LETRAS_REGEX.test(cleanApe)) {
+      return res.status(400).json({ success: false, error: 'El apellido solo puede contener letras' });
+    }
+
+    const cleanPin = pin ? String(pin).replace(/\D/g, '') : '';
+    if (pin && cleanPin.length < 4) {
+      return res.status(400).json({ success: false, error: 'El PIN debe contener al menos 4 dígitos numéricos' });
+    }
 
     // Verificar si ya existe cliente con ese DNI
     let clienteExistente = await prisma.cliente.findUnique({
@@ -1023,7 +1085,7 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
       include: { user: true, remiseria: true },
     });
 
-    const clave = pin && String(pin).length >= 4 ? String(pin) : '123456';
+    const clave = cleanPin.length >= 4 ? cleanPin : '123456';
     const passwordHash = await bcrypt.hash(clave, 10);
     const jwtSecret = process.env.JWT_SECRET || 'secret';
     const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || 'refresh_secret';
