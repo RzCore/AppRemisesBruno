@@ -3,6 +3,9 @@ import {
   registerCliente,
   getClienteProfile,
   updateClienteProfile,
+  getClientePinEstado,
+  updateClientePin,
+  geocodeCliente,
   getClienteViajes,
   getClienteReservas,
   solicitarViaje,
@@ -26,6 +29,7 @@ const router = express.Router();
 // Rutas públicas
 router.post('/register', registerCliente);
 router.post('/viajes/calcular-precio', calcularPrecio);
+router.get('/geocode', geocodeCliente);
 router.get('/buscar-dni/:dni', buscarClientePorDni);
 router.get('/disponibilidad', getDisponibilidad);
 router.get('/tracking/:token', getViajeTracking);
@@ -33,6 +37,8 @@ router.get('/tracking/:token', getViajeTracking);
 // Rutas protegidas
 router.get('/profile', authenticateToken, getClienteProfile);
 router.put('/profile', authenticateToken, updateClienteProfile);
+router.get('/pin', authenticateToken, getClientePinEstado);
+router.put('/pin', authenticateToken, updateClientePin);
 router.get('/viajes', authenticateToken, getClienteViajes);
 router.get('/reservas', authenticateToken, getClienteReservas);
 

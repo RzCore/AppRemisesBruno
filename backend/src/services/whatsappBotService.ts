@@ -842,6 +842,64 @@ function parsearFechaHoraReserva(input: string): { fecha: Date; fechaTexto: stri
   };
 }
 
+// Registro en memoria para evitar saludar múltiples veces el mismo día de cumpleaños
+const cumpleSaludadosMap = new Set<string>();
+
+function esEmailAutogenerado(email?: string | null): boolean {
+  if (!email) return true;
+  const e = email.toLowerCase().trim();
+  return (
+    /^cliente_\d+.*@remisesbruno\.com\.ar$/.test(e) ||
+    e.endsWith('@cliente.brunoremises.com.ar') ||
+    e.endsWith('@bruno.local') ||
+    e.endsWith('@appremises.com')
+  );
+}
+
+/**
+ * Determina si en la fecha actual de Argentina (o en una fecha dada) es el cumpleaños real del pasajero.
+ * Ignora la fecha comodín 1990-01-01T00:00:00.000Z asignada automáticamente al crear cuentas rápidas.
+ */
+export function esCumpleaniosCliente(
+  cliente?: { fechaNacimiento?: Date | string | null; email?: string | null } | null,
+  fechaReferenciaUtc?: Date
+): boolean {
+  if (!cliente?.fechaNacimiento) return false;
+  const fn = new Date(cliente.fechaNacimiento);
+  if (isNaN(fn.getTime())) return false;
+
+  const bYear = fn.getUTCFullYear();
+  const bMonth = fn.getUTCMonth(); // 0-11
+  const bDay = fn.getUTCDate(); // 1-31
+  const bHours = fn.getUTCHours();
+
+  // Ignorar el placeholder automático 1990-01-01 00:00:00 UTC si nunca fue editado por el usuario
+  if (bYear === 1990 && bMonth === 0 && bDay === 1 && bHours === 0) {
+    return false;
+  }
+
+  if (fechaReferenciaUtc) {
+    const parts = new Intl.DateTimeFormat('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(fechaReferenciaUtc);
+    const map: Record<string, string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    const refMonth = parseInt(map.month, 10) - 1;
+    const refDay = parseInt(map.day, 10);
+    return bMonth === refMonth && bDay === refDay;
+  }
+
+  const ar = getFechaActualArgentina();
+  return bMonth === ar.month && bDay === ar.day;
+}
+
+function obtenerClaveCumpleHoy(identificador: string): string {
+  const ar = getFechaActualArgentina();
+  return `${ar.year}-${ar.month + 1}-${ar.day}:${identificador}`;
+}
+
 // ==============================================================================
 // REGISTRO Y VINCULACIÓN SEGURA DE CLIENTES DESDE WHATSAPP
 // ==============================================================================
@@ -1892,8 +1950,22 @@ export const whatsappBotService = {
         console.warn('Socket aviso WhatsApp nueva reserva:', sErr);
       }
 
-      // 4. Confirmar al pasajero por WhatsApp
+      // 4. Confirmar al pasajero por WhatsApp (con saludo de cumpleaños si corresponde)
+      let prefijoCumpleReserva = '';
+      if (esCumpleaniosCliente(clienteExistente)) {
+        const claveCumple = obtenerClaveCumpleHoy(cleanFrom);
+        if (!cumpleSaludadosMap.has(claveCumple)) {
+          cumpleSaludadosMap.add(claveCumple);
+          const nomCumple = (clienteExistente?.nombre || clienteNombre).trim();
+          prefijoCumpleReserva =
+            `🎂🎉 *¡MUY FELIZ CUMPLEAÑOS, ${nomCumple.toUpperCase()}!* 🎉🎂\n` +
+            `De parte de todo el equipo de *Remises Bruno*, te deseamos que pases un día espectacular. ¡Gracias por elegirnos en tu día! 🥂✨\n` +
+            `━━━━━━━━━━━━━━━━━━━\n\n`;
+        }
+      }
+
       const confirmacionTexto =
+        prefijoCumpleReserva +
         `📅 *¡Reserva agendada con éxito!*\n\n` +
         `Tu viaje quedó registrado en nuestra central:\n` +
         `━━━━━━━━━━━━━━━━━━━\n` +
@@ -2012,8 +2084,20 @@ export const whatsappBotService = {
         }).catch(() => {});
       } catch {}
 
-      // 3. Confirmar al pasajero por WhatsApp
+      // 3. Confirmar al pasajero por WhatsApp (con saludo especial si hoy es su cumpleaños)
+      let prefijoCumple = '';
+      if (esCumpleaniosCliente(clienteExistente)) {
+        const claveCumple = obtenerClaveCumpleHoy(cleanFrom);
+        cumpleSaludadosMap.add(claveCumple);
+        const nomCumple = (clienteExistente?.nombre || clienteNombre).trim();
+        prefijoCumple =
+          `🎂🎉 *¡MUY FELIZ CUMPLEAÑOS, ${nomCumple.toUpperCase()}!* 🎉🎂\n` +
+          `De parte de todo el equipo de *Remises Bruno*, te deseamos un día espectacular lleno de alegría. ¡Gracias por dejarnos acompañarte en tu cumpleaños! 🥂✨\n` +
+          `━━━━━━━━━━━━━━━━━━━\n\n`;
+      }
+
       const confirmacionTexto =
+        prefijoCumple +
         `🚕 *¡Pedido confirmado!*\n\n` +
         `Tu solicitud ya ingresó a nuestra central con el viaje *#${viaje.id.slice(-4).toUpperCase()}*.\n` +
         `🔒 *PIN de inicio de viaje:* *${codigoPin}*\n\n` +
@@ -2252,6 +2336,41 @@ export const whatsappBotService = {
       } catch (err) {
         console.warn('Aviso notificando reanudación manual de bot:', err);
       }
+    }
+  },
+
+  /**
+   * Envía un saludo de Feliz Cumpleaños por WhatsApp cuando el pasajero solicita un viaje desde la App Web (máximo 1 vez en el día)
+   */
+  async enviarSaludoCumpleaniosPasajero(cliente: {
+    id?: string;
+    nombre?: string | null;
+    telefono?: string | null;
+    fechaNacimiento?: Date | string | null;
+    email?: string | null;
+  } | null) {
+    if (!cliente || !cliente.telefono || !esCumpleaniosCliente(cliente)) return false;
+
+    const cleanTel = whatsappService.formatearNumero(cliente.telefono);
+    if (!cleanTel || cleanTel.length < 8) return false;
+
+    const claveCumple = obtenerClaveCumpleHoy(cleanTel);
+    if (cumpleSaludadosMap.has(claveCumple)) return false;
+    cumpleSaludadosMap.add(claveCumple);
+
+    const nombre = (cliente.nombre || 'Pasajero').trim();
+    const mensaje =
+      `🎂🎉 *¡MUY FELIZ CUMPLEAÑOS, ${nombre.toUpperCase()}!* 🎉🎂\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `Vimos que acabás de solicitar un viaje en un día muy especial. De parte de todo el equipo de *Remises Bruno*, queremos desearte un excelente cumpleaños lleno de alegría.\n\n` +
+      `🚕 ¡Tu móvil ya está en gestión y gracias por elegirnos para acompañarte hoy! 🥂✨`;
+
+    try {
+      await whatsappService.enviarTexto(cleanTel, mensaje);
+      return true;
+    } catch (err) {
+      console.warn('Aviso enviando saludo de cumpleaños por WhatsApp:', err);
+      return false;
     }
   },
 

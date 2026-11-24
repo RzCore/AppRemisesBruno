@@ -25,7 +25,86 @@ const geocodeSearchCache = new Map<string, { data: any[]; expiresAt: number }>()
 const geocodeInFlightMap = new Map<string, Promise<any[]>>();
 const osrmDistanceCache = new Map<string, { distanceKm: number; expiresAt: number }>();
 
-async function searchNominatimCached(rawQuery: string, limit = 5): Promise<any[]> {
+function formatSuggestionDisplayName(addr: any, fallbackDisplay: string, houseNumberOverride?: string): string {
+  const road = addr?.road || addr?.pedestrian || addr?.street || addr?.residential || '';
+  const houseNumber = addr?.house_number || houseNumberOverride || '';
+  const city =
+    addr?.city ||
+    addr?.town ||
+    addr?.village ||
+    addr?.municipality ||
+    addr?.suburb ||
+    'Chivilcoy';
+
+  if (road) {
+    const roadHasNumber = houseNumber ? new RegExp(`\\b${houseNumber}\\b`).test(road) : false;
+    const streetPart = houseNumber && !roadHasNumber ? `${road} ${houseNumber}` : road;
+    return city ? `${streetPart}, ${city}` : streetPart;
+  }
+  return fallbackDisplay;
+}
+
+async function fetchNominatimList(qParam: string, limit: number, viewboxParam: string): Promise<any[]> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+      qParam
+    )}&countrycodes=ar&limit=${limit}&addressdetails=1&${viewboxParam}&bounded=0`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'RemisesBrunoApp/1.1 (contacto@brunoremises.com.ar)',
+        'Accept-Language': 'es-AR,es;q=0.9',
+      },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchPhotonFallback(qParam: string, limit: number, houseNumberOverride?: string): Promise<any[]> {
+  try {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(
+      qParam
+    )}&lat=-34.8968&lon=-60.0190&limit=${limit}`;
+    const response = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!response.ok) return [];
+    const json = (await response.json()) as any;
+    if (!Array.isArray(json?.features)) return [];
+
+    return json.features
+      .filter((f: any) => {
+        const country = (f?.properties?.countrycode || f?.properties?.country || '').toLowerCase();
+        return !country || country === 'ar' || country.includes('argentina');
+      })
+      .map((f: any) => {
+        const props = f.properties || {};
+        const coords = f.geometry?.coordinates || [];
+        const road = props.street || props.name || '';
+        const house_number = props.housenumber || houseNumberOverride || '';
+        const city = props.city || props.town || props.locality || props.county || 'Chivilcoy';
+        const state = props.state || 'Buenos Aires';
+        const addr = { road, house_number, city, state };
+        const rawDisplay = [road, house_number, city, state].filter(Boolean).join(', ');
+        return {
+          lat: coords[1] !== undefined ? String(coords[1]) : '',
+          lon: coords[0] !== undefined ? String(coords[0]) : '',
+          display_name: formatSuggestionDisplayName(addr, rawDisplay, houseNumberOverride),
+          address: addr,
+        };
+      })
+      .filter((item: any) => item.lat && item.lon && item.display_name);
+  } catch {
+    return [];
+  }
+}
+
+export async function searchNominatimCached(rawQuery: string, limit = 5): Promise<any[]> {
   const queryString = (rawQuery || '').trim();
   if (!queryString || queryString.length < 3) return [];
 
@@ -46,37 +125,65 @@ async function searchNominatimCached(rawQuery: string, limit = 5): Promise<any[]
     try {
       const hasCityConstraint =
         /,/g.test(queryString) ||
-        /chivilcoy|buenos\s+aires|caba|federal|ezeiza|retiro|lujan|mercedes/i.test(queryString);
-      const viewboxParam = 'viewbox=-60.15,-34.83,-59.88,-34.96';
-      let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryString)}&countrycodes=ar&limit=${limit}&addressdetails=1&${viewboxParam}&bounded=0`;
-      if (!hasCityConstraint) {
-        url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryString + ', Chivilcoy')}&countrycodes=ar&limit=${limit}&addressdetails=1&${viewboxParam}&bounded=0`;
+        /chivilcoy|bragado|alberti|suipacha|moquehu[aá]|gorostiaga|chacabuco|25\s+de\s+mayo|buenos\s+aires|caba|federal|ezeiza|retiro|lujan|mercedes/i.test(
+          queryString
+        );
+      const viewboxParam = 'viewbox=-60.55,-34.55,-59.35,-35.20';
+
+      // Extraer altura / número de calle si el usuario lo ingresó (ej: "Sarmiento 340")
+      const houseNumMatch = queryString.match(/^(.*?)\s+(\d{1,5})(?:\s*,.*)?$/);
+      const streetOnly = houseNumMatch ? houseNumMatch[1].trim() : '';
+      const typedHouseNumber = houseNumMatch ? houseNumMatch[2] : undefined;
+
+      const primaryQuery = hasCityConstraint ? queryString : `${queryString}, Chivilcoy`;
+      let data = await fetchNominatimList(primaryQuery, limit, viewboxParam);
+
+      // Si buscó calle + altura y OSM solo tiene la calle sin numeración catastral, buscar por nombre de calle
+      if (data.length === 0 && streetOnly.length >= 3) {
+        const streetQuery = hasCityConstraint ? streetOnly : `${streetOnly}, Chivilcoy`;
+        data = await fetchNominatimList(streetQuery, limit, viewboxParam);
       }
 
-      const response = await fetch(url, {
-        headers: { 'User-Agent': 'AppRemises/1.0 (coordinacion@remises.com)' },
-        signal: AbortSignal.timeout(3500),
-      });
-      let data = (await response.json()) as any[];
+      if (!hasCityConstraint && data.length === 0) {
+        data = await fetchNominatimList(queryString, limit, viewboxParam);
+      }
 
-      if (!hasCityConstraint && (!Array.isArray(data) || data.length === 0)) {
-        const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryString)}&countrycodes=ar&limit=${limit}&addressdetails=1&${viewboxParam}&bounded=0`;
-        const fallbackResponse = await fetch(fallbackUrl, {
-          headers: { 'User-Agent': 'AppRemises/1.0 (coordinacion@remises.com)' },
-          signal: AbortSignal.timeout(3500),
+      // Fallback a Photon (OSM) si Nominatim limitó o no devolvió resultados
+      if (data.length === 0) {
+        data = await fetchPhotonFallback(primaryQuery, limit, typedHouseNumber);
+        if (data.length === 0 && streetOnly.length >= 3) {
+          data = await fetchPhotonFallback(
+            hasCityConstraint ? streetOnly : `${streetOnly}, Chivilcoy`,
+            limit,
+            typedHouseNumber
+          );
+        }
+      } else {
+        // Enriquecer display_name limpio preservando la altura ingresada por el usuario
+        data = data.map((item: any) => {
+          const addr = { ...(item.address || {}) };
+          if (typedHouseNumber && !addr.house_number && (addr.road || addr.pedestrian || addr.street)) {
+            addr.house_number = typedHouseNumber;
+          }
+          return {
+            ...item,
+            address: addr,
+            display_name: formatSuggestionDisplayName(addr, item.display_name || '', typedHouseNumber),
+          };
         });
-        data = (await fallbackResponse.json()) as any[];
       }
 
       const finalData = Array.isArray(data) ? data : [];
-      if (geocodeSearchCache.size >= 1500) {
-        const oldestKey = geocodeSearchCache.keys().next().value;
-        if (oldestKey) geocodeSearchCache.delete(oldestKey);
+      if (finalData.length > 0) {
+        if (geocodeSearchCache.size >= 1500) {
+          const oldestKey = geocodeSearchCache.keys().next().value;
+          if (oldestKey) geocodeSearchCache.delete(oldestKey);
+        }
+        geocodeSearchCache.set(cacheKey, {
+          data: finalData,
+          expiresAt: Date.now() + GEOCODE_CACHE_TTL_MS,
+        });
       }
-      geocodeSearchCache.set(cacheKey, {
-        data: finalData,
-        expiresAt: Date.now() + GEOCODE_CACHE_TTL_MS,
-      });
       return finalData;
     } finally {
       geocodeInFlightMap.delete(cacheKey);

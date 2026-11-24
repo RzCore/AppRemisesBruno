@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
+import { searchNominatimCached } from './coordinatorDashboardController';
+import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBotService';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
 interface RouteCacheEntry {
@@ -258,6 +260,8 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
       nombre,
       apellido,
       telefono,
+      email,
+      fechaNacimiento,
       direccion,
       genero,
       fotoUrl,
@@ -316,6 +320,61 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
       }
       updateData.telefono = cleanTel;
     }
+
+    let nuevoEmailValidado: string | null = null;
+    if (email !== undefined && String(email).trim() !== '') {
+      const cleanEmail = String(email).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Ingresá un correo electrónico válido',
+          message: 'Ingresá un correo electrónico válido'
+        });
+      }
+      if (cleanEmail !== cliente.email.toLowerCase()) {
+        const [existeUser, existeCliente] = await Promise.all([
+          prisma.user.findFirst({
+            where: {
+              email: { equals: cleanEmail, mode: 'insensitive' },
+              NOT: { id: userId }
+            }
+          }),
+          prisma.cliente.findFirst({
+            where: {
+              email: { equals: cleanEmail, mode: 'insensitive' },
+              NOT: { id: cliente.id }
+            }
+          })
+        ]);
+        if (existeUser || existeCliente) {
+          return res.status(400).json({
+            success: false,
+            error: 'Ese correo electrónico ya está asociado a otra cuenta',
+            message: 'Ese correo electrónico ya está asociado a otra cuenta'
+          });
+        }
+        nuevoEmailValidado = cleanEmail;
+        updateData.email = cleanEmail;
+      }
+    }
+
+    if (fechaNacimiento !== undefined && String(fechaNacimiento).trim() !== '') {
+      const rawFecha = String(fechaNacimiento).trim();
+      const matchIso = rawFecha.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const parsedDate = matchIso
+        ? new Date(`${matchIso[1]}-${matchIso[2]}-${matchIso[3]}T12:00:00.000Z`)
+        : new Date(rawFecha);
+
+      if (isNaN(parsedDate.getTime()) || parsedDate.getUTCFullYear() < 1900 || parsedDate > new Date()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Ingresá una fecha de nacimiento válida',
+          message: 'Ingresá una fecha de nacimiento válida'
+        });
+      }
+      updateData.fechaNacimiento = parsedDate;
+    }
+
     if (direccion !== undefined) updateData.direccion = String(direccion).trim();
     if (genero !== undefined) updateData.genero = genero;
     if (fotoUrl !== undefined) updateData.fotoUrl = fotoUrl;
@@ -326,10 +385,18 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
           : direccionesFrecuentes;
     }
 
-    // Actualizar campos del cliente
-    const updatedCliente = await prisma.cliente.update({
-      where: { userId },
-      data: updateData
+    // Actualizar campos del cliente (y email de usuario si cambió)
+    const updatedCliente = await prisma.$transaction(async (tx) => {
+      if (nuevoEmailValidado) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { email: nuevoEmailValidado }
+        });
+      }
+      return tx.cliente.update({
+        where: { userId },
+        data: updateData
+      });
     });
 
     // Track the action
@@ -356,6 +423,137 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
       error: 'Tuvimos un inconveniente técnico momentáneo. Para no demorar tu viaje, comunicate a nuestros teléfonos fijos: 2346-427637 o 2346-433000.',
       message: 'Tuvimos un inconveniente técnico momentáneo. Para no demorar tu viaje, comunicate a nuestros teléfonos fijos: 2346-427637 o 2346-433000.'
     });
+  }
+};
+
+export const getClientePinEstado = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Usuario no autenticado'
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Usuario no encontrado'
+      });
+    }
+
+    const isDefault123456 = await bcrypt.compare('123456', user.passwordHash);
+    const isDefaultCoord = !isDefault123456 && (await bcrypt.compare('RemisDefault123!', user.passwordHash));
+    const tienePinPersonalizado = !(isDefault123456 || isDefaultCoord);
+
+    return res.json({
+      success: true,
+      data: { tienePinPersonalizado }
+    });
+  } catch (error) {
+    console.error('Error consultando estado de PIN del cliente:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'No se pudo consultar el estado del PIN'
+    });
+  }
+};
+
+export const updateClientePin = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { pin, confirmarPin } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Usuario no autenticado',
+        message: 'Usuario no autenticado'
+      });
+    }
+
+    const cleanPin = String(pin || '').replace(/\D/g, '');
+    const cleanConfirm = confirmarPin !== undefined ? String(confirmarPin).replace(/\D/g, '') : cleanPin;
+
+    if (!/^\d{4,6}$/.test(cleanPin)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El PIN debe contener 4 dígitos numéricos',
+        message: 'El PIN debe contener 4 dígitos numéricos'
+      });
+    }
+
+    if (cleanPin !== cleanConfirm) {
+      return res.status(400).json({
+        success: false,
+        error: 'Los PIN ingresados no coinciden',
+        message: 'Los PIN ingresados no coinciden'
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Usuario no encontrado',
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(cleanPin, 10);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash }
+    });
+
+    try {
+      await prisma.appUsage.create({
+        data: {
+          userId,
+          userEmail: user.email,
+          action: 'CLIENTE_UPDATE_PIN',
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent') || null
+        }
+      });
+    } catch {}
+
+    return res.json({
+      success: true,
+      data: { tienePinPersonalizado: true },
+      message: '¡Tu PIN de ingreso fue guardado exitosamente!'
+    });
+  } catch (error) {
+    console.error('Error actualizando PIN del cliente:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error al guardar tu PIN de ingreso',
+      message: 'Error al guardar tu PIN de ingreso'
+    });
+  }
+};
+
+export const geocodeCliente = async (req: Request, res: Response) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length < 3) {
+      return res.json({ success: true, data: [] });
+    }
+    const resultados = await searchNominatimCached(q, 5);
+    return res.json({ success: true, data: resultados });
+  } catch (error) {
+    console.error('Error en geocodeCliente:', error);
+    return res.json({ success: true, data: [] });
   }
 };
 
@@ -794,9 +992,17 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       console.warn('Push aviso nuevo viaje:', pushErr);
     }
 
+    // Si hoy es el cumpleaños del pasajero, enviarle saludo especial por el bot de WhatsApp e incluirlo en respuesta
+    let saludoCumpleanios: string | undefined = undefined;
+    if (esCumpleaniosCliente(clienteActual)) {
+      saludoCumpleanios = `🎂 ¡Muy feliz cumpleaños, ${clienteActual?.nombre || 'Pasajero'}! De parte de todo el equipo de Remises Bruno te deseamos un gran día 🎉`;
+      whatsappBotService.enviarSaludoCumpleaniosPasajero(clienteActual).catch(() => {});
+    }
+
     res.json({
       success: true,
       data: viaje,
+      saludoCumpleanios,
       message: 'Viaje solicitado exitosamente'
     });
   } catch (error) {

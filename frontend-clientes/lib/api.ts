@@ -1463,15 +1463,7 @@ export const coordinadorDashboardService = {
   },
 
   geocode: async (q: string): Promise<ApiResponse<any>> => {
-    try {
-      const response = await api.get('/coordinator-dashboard/geocode', { params: { q } });
-      return handleApiResponse<any>(response);
-    } catch (error: any) {
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Error al buscar direcciones',
-      };
-    }
+    return clienteService.geocode(q);
   },
 
   createReserva: async (data: any): Promise<ApiResponse<any>> => {
@@ -1963,6 +1955,125 @@ export const clienteService = {
     }
   },
 
+  // Autocompletado de direcciones con respaldo directo desde el navegador (Nominatim / Photon)
+  geocode: async (q: string): Promise<ApiResponse<any[]>> => {
+    const queryString = (q || '').trim();
+    if (!queryString || queryString.length < 3) {
+      return { success: true, data: [] };
+    }
+
+    const houseNumMatch = queryString.match(/^(.*?)\s+(\d{1,5})(?:\s*,.*)?$/);
+    const streetOnly = houseNumMatch ? houseNumMatch[1].trim() : '';
+    const typedHouseNumber = houseNumMatch ? houseNumMatch[2] : undefined;
+
+    const formatCleanItem = (addr: any, fallbackDisplay: string) => {
+      const road = addr?.road || addr?.pedestrian || addr?.street || addr?.residential || '';
+      const houseNumber = addr?.house_number || typedHouseNumber || '';
+      const city =
+        addr?.city ||
+        addr?.town ||
+        addr?.village ||
+        addr?.municipality ||
+        addr?.suburb ||
+        'Chivilcoy';
+      if (road) {
+        const roadHasNum = houseNumber ? new RegExp(`\\b${houseNumber}\\b`).test(road) : false;
+        const streetPart = houseNumber && !roadHasNum ? `${road} ${houseNumber}` : road;
+        return city ? `${streetPart}, ${city}` : streetPart;
+      }
+      return fallbackDisplay;
+    };
+
+    // 1. Intentar primero el endpoint del backend (/cliente/geocode)
+    try {
+      const response = await api.get('/cliente/geocode', { params: { q: queryString } });
+      const res = handleApiResponse<any[]>(response);
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res;
+      }
+    } catch {
+      // Continuar con respaldo directo desde el navegador
+    }
+
+    const hasCity =
+      /,/g.test(queryString) ||
+      /chivilcoy|bragado|alberti|suipacha|moquehu[aá]|gorostiaga|chacabuco|25\s+de\s+mayo|buenos\s+aires|caba|mercedes/i.test(
+        queryString
+      );
+    const primaryQuery = hasCity ? queryString : `${queryString}, Chivilcoy`;
+
+    // 2. Respaldo directo en navegador vía Nominatim OpenStreetMap
+    const tryBrowserNominatim = async (searchQ: string): Promise<any[]> => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          searchQ
+        )}&countrycodes=ar&limit=5&addressdetails=1&viewbox=-60.55,-34.55,-59.35,-35.20&bounded=0`;
+        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!r.ok) return [];
+        const list = await r.json();
+        if (!Array.isArray(list)) return [];
+        return list.map((item: any) => ({
+          ...item,
+          display_name: formatCleanItem(item.address, item.display_name || ''),
+        }));
+      } catch {
+        return [];
+      }
+    };
+
+    let browserResults = await tryBrowserNominatim(primaryQuery);
+    if (browserResults.length === 0 && streetOnly.length >= 3) {
+      browserResults = await tryBrowserNominatim(hasCity ? streetOnly : `${streetOnly}, Chivilcoy`);
+    }
+    if (browserResults.length > 0) {
+      return { success: true, data: browserResults };
+    }
+
+    // 3. Segundo respaldo directo vía Photon (Komoot OSM)
+    const tryBrowserPhoton = async (searchQ: string): Promise<any[]> => {
+      try {
+        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(
+          searchQ
+        )}&lat=-34.8968&lon=-60.0190&limit=5`;
+        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!r.ok) return [];
+        const json = await r.json();
+        if (!Array.isArray(json?.features)) return [];
+        return json.features
+          .filter((f: any) => {
+            const c = (f?.properties?.countrycode || f?.properties?.country || '').toLowerCase();
+            return !c || c === 'ar' || c.includes('argentina');
+          })
+          .map((f: any) => {
+            const p = f.properties || {};
+            const coords = f.geometry?.coordinates || [];
+            const addr = {
+              road: p.street || p.name || '',
+              house_number: p.housenumber || typedHouseNumber || '',
+              city: p.city || p.town || p.locality || 'Chivilcoy',
+              state: p.state || 'Buenos Aires',
+            };
+            const rawDisplay = [addr.road, addr.house_number, addr.city].filter(Boolean).join(', ');
+            return {
+              lat: coords[1] !== undefined ? String(coords[1]) : '',
+              lon: coords[0] !== undefined ? String(coords[0]) : '',
+              display_name: formatCleanItem(addr, rawDisplay),
+              address: addr,
+            };
+          })
+          .filter((i: any) => i.lat && i.lon && i.display_name);
+      } catch {
+        return [];
+      }
+    };
+
+    let photonResults = await tryBrowserPhoton(primaryQuery);
+    if (photonResults.length === 0 && streetOnly.length >= 3) {
+      photonResults = await tryBrowserPhoton(hasCity ? streetOnly : `${streetOnly}, Chivilcoy`);
+    }
+    return { success: true, data: photonResults };
+  },
+
   // Obtener ubicación actual
   getUbicacionActual: async (lat?: number, lng?: number): Promise<ApiResponse<{ lat: number; lng: number; direccion: string }>> => {
     try {
@@ -2025,6 +2136,30 @@ export const clienteService = {
       return {
         success: false,
         message: error.response?.data?.message || error.response?.data?.error || 'Error al actualizar perfil',
+      };
+    }
+  },
+
+  getPinEstado: async (): Promise<ApiResponse<{ tienePinPersonalizado: boolean }>> => {
+    try {
+      const response = await api.get('/cliente/pin');
+      return handleApiResponse<{ tienePinPersonalizado: boolean }>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'Error al consultar estado de PIN',
+      };
+    }
+  },
+
+  updatePin: async (pin: string, confirmarPin: string): Promise<ApiResponse<{ tienePinPersonalizado: boolean }>> => {
+    try {
+      const response = await api.put('/cliente/pin', { pin, confirmarPin });
+      return handleApiResponse<{ tienePinPersonalizado: boolean }>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'Error al guardar tu PIN',
       };
     }
   },

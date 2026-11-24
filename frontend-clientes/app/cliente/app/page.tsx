@@ -1155,7 +1155,12 @@ export default function ClienteApp() {
         }
         // Asegurar que el cliente reciba alertas push cuando el auto llegue a la puerta
         subscribeToPushNotifications().catch(() => {});
-        toast.success('Buscando el auto más cercano...');
+        const saludoCumple = (res as any).saludoCumpleanios;
+        if (saludoCumple) {
+          toast.success(saludoCumple, { duration: 7500, icon: '🎂' });
+        } else {
+          toast.success('Buscando el auto más cercano...');
+        }
       } else {
         toast.error(
           res.message ||
