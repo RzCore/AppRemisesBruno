@@ -7,6 +7,7 @@ import { AuthenticatedRequest } from '../types';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { searchNominatimCached } from './coordinatorDashboardController';
 import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBotService';
+import { calcularAjusteOrigenRemoto } from '../lib/pricingUtils';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
 interface RouteCacheEntry {
@@ -1080,11 +1081,14 @@ export const calcularPrecio = async (req: Request, res: Response) => {
         destino,
         precioEstimado: cotizacion.precio,
         distancia: cotizacion.distanciaKm,
+        distanciaViaje: cotizacion.distanciaViajeKm,
         tiempoEstimado: cotizacion.tiempoEstimado,
         tarifaBase: bajadaBandera,
         tarifaPorKm: valorKm,
         tarifaPorMinuto: 0,
-        esTarifaDiferenciada: Boolean(customTarifas)
+        esTarifaDiferenciada: Boolean(customTarifas),
+        esOrigenRemoto: cotizacion.esOrigenRemoto,
+        kmAproximacion: cotizacion.kmAproximacion
       }
     });
   } catch (error) {
@@ -1958,7 +1962,14 @@ export async function calcularPrecioViaje(
   longitudDestino?: number,
   paradas?: Array<{ direccion?: string; lat?: number; lon?: number }>,
   customTarifas?: { bajadaBandera?: number; valorKm?: number }
-): Promise<{ precio: number; distanciaKm: number; tiempoEstimado: number }> {
+): Promise<{
+  precio: number;
+  distanciaKm: number;
+  distanciaViajeKm: number;
+  tiempoEstimado: number;
+  esOrigenRemoto: boolean;
+  kmAproximacion: number;
+}> {
   const remiseria = await prisma.remiseria.findFirst({ where: { estado: true } }) || await prisma.remiseria.findFirst();
   const bajadaBandera = (customTarifas?.bajadaBandera && customTarifas.bajadaBandera > 0)
     ? customTarifas.bajadaBandera
@@ -2079,9 +2090,22 @@ export async function calcularPrecioViaje(
     }
   }
 
+  // Ajuste por origen fuera del radio urbano de la base (ej. pasajero en Alberti pidiendo móvil desde Chivilcoy)
+  const ajusteRemoto = await calcularAjusteOrigenRemoto({
+    distanciaViajeKm: distanciaKm,
+    latOrigen: latitudOrigen,
+    lonOrigen: longitudOrigen,
+    latDestino: latitudDestino,
+    lonDestino: longitudDestino,
+    baseLat: remiseria?.latitud,
+    baseLon: remiseria?.longitud,
+  });
+
+  const distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
+
   let precioEstimado = bajadaBandera;
-  if (distanciaKm > 1) {
-    precioEstimado += (distanciaKm - 1) * valorKm;
+  if (distanciaFacturable > 1) {
+    precioEstimado += (distanciaFacturable - 1) * valorKm;
   }
 
   // Cada parada intermedia suma recargo por parada (detención/espera corta y desvío mínimo)
@@ -2095,8 +2119,11 @@ export async function calcularPrecioViaje(
 
   return {
     precio: precioEstimado,
-    distanciaKm,
-    tiempoEstimado
+    distanciaKm: distanciaFacturable,
+    distanciaViajeKm: distanciaKm,
+    tiempoEstimado,
+    esOrigenRemoto: ajusteRemoto.esOrigenRemoto,
+    kmAproximacion: ajusteRemoto.kmAproximacion,
   };
 } 
 // Buscar cliente por DNI

@@ -3,6 +3,7 @@ import { whatsappService } from './whatsappService';
 import { pushNotificationService } from './pushNotificationService';
 import { transcriptionService } from './transcriptionService';
 import { checkAgenciaEstado } from './agencyScheduleService';
+import { calcularAjusteOrigenRemoto } from '../lib/pricingUtils';
 import crypto from 'crypto';
 
 // ==============================================================================
@@ -1749,14 +1750,30 @@ export const whatsappBotService = {
           if (dist < 0.5) dist = 0.8;
         }
 
+        // Ajuste por origen fuera del radio urbano de la base (ej. Alberti -> Alberti)
+        const ajusteRemoto = await calcularAjusteOrigenRemoto({
+          distanciaViajeKm: dist,
+          latOrigen: sesion.origenLat,
+          lonOrigen: sesion.origenLon,
+          latDestino: sesion.destinoLat,
+          lonDestino: sesion.destinoLon,
+          baseLat: remiseria?.latitud,
+          baseLon: remiseria?.longitud,
+        });
+        const distFacturable = ajusteRemoto.distanciaFacturableKm;
+
         // Cálculo de precio según tarifario vigente de la remisería
-        const kmAdicionales = Math.max(0, dist - 1);
+        const kmAdicionales = Math.max(0, distFacturable - 1);
         const precioGpsPuro = bajadaBandera + kmAdicionales * valorKm;
         const precioEstimado = Math.round(precioGpsPuro / 100) * 100;
 
-        sesion.distanciaKm = dist;
+        sesion.distanciaKm = distFacturable;
         sesion.precioEstimado = precioEstimado;
         sesion.estado = 'CONFIRMANDO_COTIZACION';
+
+        const notaOrigenRemoto = ajusteRemoto.esOrigenRemoto
+          ? `🚗 _Incluye traslado del móvil desde base (Chivilcoy)_\n`
+          : '';
 
         if (sesion.esReserva && sesion.fechaHoraTexto) {
           const resumenReserva =
@@ -1766,6 +1783,7 @@ export const whatsappBotService = {
             `🟢 *Origen:* ${sesion.origen}\n` +
             `🔴 *Destino:* ${sesion.destino}\n` +
             `📏 *Distancia:* ~${dist} km\n` +
+            notaOrigenRemoto +
             `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
             `━━━━━━━━━━━━━━━━━━━\n` +
             `¿Confirmás la reserva?`;
@@ -1786,6 +1804,7 @@ export const whatsappBotService = {
             `🟢 *Origen:* ${sesion.origen}\n` +
             `🔴 *Destino:* ${sesion.destino}\n` +
             `📏 *Distancia:* ~${dist} km\n` +
+            notaOrigenRemoto +
             `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
             `━━━━━━━━━━━━━━━━━━━\n` +
             `¿Deseas solicitar el móvil ahora?`;
@@ -1852,13 +1871,28 @@ export const whatsappBotService = {
             if (dist < 0.5) dist = 0.8;
           }
 
-          const kmAdicionales = Math.max(0, dist - 1);
+          const ajusteRemoto2 = await calcularAjusteOrigenRemoto({
+            distanciaViajeKm: dist,
+            latOrigen: sesion.origenLat,
+            lonOrigen: sesion.origenLon,
+            latDestino: sesion.destinoLat,
+            lonDestino: sesion.destinoLon,
+            baseLat: remiseria?.latitud,
+            baseLon: remiseria?.longitud,
+          });
+          const distFacturable2 = ajusteRemoto2.distanciaFacturableKm;
+
+          const kmAdicionales = Math.max(0, distFacturable2 - 1);
           const precioGpsPuro = bajadaBandera + kmAdicionales * valorKm;
           const precioEstimado = Math.round(precioGpsPuro / 100) * 100;
 
-          sesion.distanciaKm = dist;
+          sesion.distanciaKm = distFacturable2;
           sesion.precioEstimado = precioEstimado;
           sesion.estado = 'CONFIRMANDO_COTIZACION';
+
+          const notaOrigenRemoto2 = ajusteRemoto2.esOrigenRemoto
+            ? `🚗 _Incluye traslado del móvil desde base (Chivilcoy)_\n`
+            : '';
 
           if (sesion.esReserva && sesion.fechaHoraTexto) {
             const resumenReserva =
@@ -1868,6 +1902,7 @@ export const whatsappBotService = {
               `🟢 *Origen:* ${sesion.origen}\n` +
               `🔴 *Destino:* ${sesion.destino}\n` +
               `📏 *Distancia:* ~${dist} km\n` +
+              notaOrigenRemoto2 +
               `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
               `━━━━━━━━━━━━━━━━━━━\n` +
               `¿Confirmás la reserva?`;
@@ -1888,6 +1923,7 @@ export const whatsappBotService = {
               `🟢 *Origen:* ${sesion.origen}\n` +
               `🔴 *Destino:* ${sesion.destino}\n` +
               `📏 *Distancia:* ~${dist} km\n` +
+              notaOrigenRemoto2 +
               `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
               `━━━━━━━━━━━━━━━━━━━\n` +
               `¿Deseas solicitar el móvil ahora?`;
@@ -1932,13 +1968,28 @@ export const whatsappBotService = {
             if (dist < 0.5) dist = 0.8;
           }
 
-          const kmAdicionales = Math.max(0, dist - 1);
+          const ajusteRemoto3 = await calcularAjusteOrigenRemoto({
+            distanciaViajeKm: dist,
+            latOrigen: sesion.origenLat,
+            lonOrigen: sesion.origenLon,
+            latDestino: sesion.destinoLat,
+            lonDestino: sesion.destinoLon,
+            baseLat: remiseria?.latitud,
+            baseLon: remiseria?.longitud,
+          });
+          const distFacturable3 = ajusteRemoto3.distanciaFacturableKm;
+
+          const kmAdicionales = Math.max(0, distFacturable3 - 1);
           const precioGpsPuro = bajadaBandera + kmAdicionales * valorKm;
           const precioEstimado = Math.round(precioGpsPuro / 100) * 100;
 
-          sesion.distanciaKm = dist;
+          sesion.distanciaKm = distFacturable3;
           sesion.precioEstimado = precioEstimado;
           sesion.estado = 'CONFIRMANDO_COTIZACION';
+
+          const notaOrigenRemoto3 = ajusteRemoto3.esOrigenRemoto
+            ? `🚗 _Incluye traslado del móvil desde base (Chivilcoy)_\n`
+            : '';
 
           if (sesion.esReserva && sesion.fechaHoraTexto) {
             const resumenReserva =
@@ -1948,6 +1999,7 @@ export const whatsappBotService = {
               `🟢 *Origen:* ${sesion.origen}\n` +
               `🔴 *Destino:* ${sesion.destino}\n` +
               `📏 *Distancia:* ~${dist} km\n` +
+              notaOrigenRemoto3 +
               `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
               `━━━━━━━━━━━━━━━━━━━\n` +
               `¿Confirmás la reserva?`;
@@ -1969,6 +2021,7 @@ export const whatsappBotService = {
             `🟢 *Origen:* ${sesion.origen}\n` +
             `🔴 *Destino:* ${sesion.destino}\n` +
             `📏 *Distancia:* ~${dist} km\n` +
+            notaOrigenRemoto3 +
             `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
             `━━━━━━━━━━━━━━━━━━━\n` +
             `¿Deseas solicitar el móvil ahora?`;

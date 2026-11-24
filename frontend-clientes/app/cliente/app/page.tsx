@@ -914,9 +914,15 @@ export default function ClienteApp() {
       if (res.success && res.data) {
         setPresupuesto({
           precio: res.data.precioEstimado,
-          distancia: res.data.distancia ? `${res.data.distancia} km` : 'Calculada',
+          distancia: res.data.distanciaViaje
+            ? `${res.data.distanciaViaje} km`
+            : res.data.distancia
+              ? `${res.data.distancia} km`
+              : 'Calculada',
           tiempo: res.data.tiempoEstimado ? `${res.data.tiempoEstimado} min` : '10-15 min',
           esTarifaDiferenciada: res.data.esTarifaDiferenciada,
+          esOrigenRemoto: Boolean(res.data.esOrigenRemoto),
+          kmAproximacion: Number(res.data.kmAproximacion || 0),
         });
       }
     } catch {
@@ -1088,9 +1094,15 @@ export default function ClienteApp() {
       if (res.success && res.data) {
         setPresupuesto({
           precio: res.data.precioEstimado,
-          distancia: res.data.distancia ? `${res.data.distancia} km` : 'Calculada',
+          distancia: res.data.distanciaViaje
+            ? `${res.data.distanciaViaje} km`
+            : res.data.distancia
+              ? `${res.data.distancia} km`
+              : 'Calculada',
           tiempo: res.data.tiempoEstimado ? `${res.data.tiempoEstimado} min` : '10-15 min',
           esTarifaDiferenciada: res.data.esTarifaDiferenciada,
+          esOrigenRemoto: Boolean(res.data.esOrigenRemoto),
+          kmAproximacion: Number(res.data.kmAproximacion || 0),
         });
       } else {
         toast.error(
@@ -1694,6 +1706,11 @@ export default function ClienteApp() {
                       <Clock className="w-3.5 h-3.5" />
                       Estimado: {presupuesto.tiempo} ({presupuesto.distancia})
                     </p>
+                    {presupuesto.esOrigenRemoto && (
+                      <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mt-1">
+                        Incluye traslado del móvil desde Chivilcoy
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="text-right">

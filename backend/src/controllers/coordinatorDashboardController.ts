@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
+import { calcularAjusteOrigenRemoto } from '../lib/pricingUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -1284,12 +1285,25 @@ export const coordinatorDashboardController = {
         }
       }
 
+      // Ajuste por origen fuera del radio urbano de la base (ej. pasajero en Alberti pidiendo móvil desde Chivilcoy)
+      const ajusteRemoto = await calcularAjusteOrigenRemoto({
+        distanciaViajeKm: distanciaKm,
+        latOrigen: finalLatOrigen,
+        lonOrigen: finalLonOrigen,
+        latDestino: finalLatDestino,
+        lonDestino: finalLonDestino,
+        baseLat: coordinador.remiseria?.latitud,
+        baseLon: coordinador.remiseria?.longitud,
+      });
+
+      const distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
+
       // Fórmula solicitada por el usuario:
       // Bajada de bandera incluye de 0 a 1 KM. 
       // Por cada KM restante se le suma valorKm.
       let precioEstimado = bajadaBandera;
-      if (distanciaKm > 1) {
-        precioEstimado += (distanciaKm - 1) * valorKm;
+      if (distanciaFacturable > 1) {
+        precioEstimado += (distanciaFacturable - 1) * valorKm;
       }
       // Redondear a múltiplos de 50 para cobro exacto y ágil
       precioEstimado = Math.round(precioEstimado / 50) * 50;
@@ -1299,7 +1313,10 @@ export const coordinatorDashboardController = {
         data: {
           origen,
           destino,
-          distanciaKm,
+          distanciaKm: distanciaFacturable,
+          distanciaViajeKm: distanciaKm,
+          esOrigenRemoto: ajusteRemoto.esOrigenRemoto,
+          kmAproximacion: ajusteRemoto.kmAproximacion,
           precio: precioEstimado,
           precioEstimado,
           precioSugerido: precioEstimado,

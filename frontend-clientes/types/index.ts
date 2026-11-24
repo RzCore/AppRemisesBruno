@@ -608,11 +608,14 @@ export interface CalculoPrecioData {
   origen: string;
   destino: string;
   distancia?: number;
+  distanciaViaje?: number;
   tiempoEstimado?: number;
   precioEstimado: number;
   tarifaBase: number;
   tarifaPorKm: number;
   tarifaPorMinuto: number;
+  esOrigenRemoto?: boolean;
+  kmAproximacion?: number;
 }
 
 export interface ReservaClienteData {
