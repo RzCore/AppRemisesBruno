@@ -1,0 +1,872 @@
+export interface User {
+  id: string;
+  email: string;
+  rol: 'ADMIN' | 'DUENIO' | 'COORDINADOR' | 'CLIENTE' | 'CHOFER';
+  duenio?: Duenio;
+  coordinador?: Coordinador;
+  cliente?: Cliente;
+  chofer?: Chofer;
+}
+
+export interface Duenio {
+  id: string;
+  nombre: string;
+  telefono: string;
+  dni: string;
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+  user?: {
+    id: string;
+    email: string;
+    activo: boolean;
+    createdAt: string;
+  };
+  remiserias?: RemiseriaDuenio[];
+}
+
+export interface Remiseria {
+  id: string;
+  nombreFantasia: string;
+  razonSocial: string;
+  cuit: string;
+  direccion: string;
+  telefono: string;
+  latitud?: number;
+  longitud?: number;
+  estado: boolean;
+  valorKm?: number;
+  bajadaBandera?: number;
+  valorHoraEspera?: number;
+  comisionDuenioAuto?: number;
+  comisionPorcentaje?: number;
+  agenciaAbierta?: boolean;
+  mensajeCierre?: string;
+  cierreAutomaticoFiestas?: boolean;
+  estadoOperativo?: {
+    abierta: boolean;
+    motivo: string;
+    mensaje: string;
+    reaperturaEstimada?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  duenios?: RemiseriaDuenio[];
+  coordinadores?: Coordinador[];
+  choferes?: Chofer[];
+  vehiculos?: Vehiculo[];
+  viajes?: Viaje[];
+}
+
+export interface RemiseriaDuenio {
+  id: string;
+  remiseriaId: string;
+  duenioId: string;
+  createdAt: string;
+  remiseria?: Remiseria;
+  duenio?: Duenio;
+}
+
+// Coordinador (solo nombre, email y contraseña)
+export interface Coordinador {
+  id: string;
+  nombre: string;
+  email: string;
+  activo: boolean;
+  createdAt: string;
+  updatedAt: string;
+  remiseriaId: string;
+  remiseria?: Remiseria;
+}
+
+export interface DireccionFrecuente {
+  id: string;
+  alias: string; // ej: "Casa", "Trabajo", "Gimnasio", "Novia/o", "Facultad", "Otro"
+  direccion: string;
+  pisoDepto?: string;
+  referencia?: string;
+  icono?: string;
+  latitud?: number;
+  longitud?: number;
+}
+
+export interface Cliente {
+  id: string;
+  nombre: string;
+  apellido: string;
+  dni: string;
+  telefono: string;
+  email: string;
+  direccion: string;
+  fechaNacimiento: string;
+  genero?: string;
+  fotoUrl?: string | null;
+  direccionesFrecuentes?: string | DireccionFrecuente[] | null;
+  activo: boolean;
+  cuentaCorrienteHabilitada?: boolean;
+  limiteCuentaCorriente?: number;
+  saldoCuentaCorriente?: number;
+  saldoPendiente?: number;
+  tipoTarifa?: 'LISTA_NORMAL' | 'PERSONALIZADA';
+  tarifaValorKm?: number | null;
+  tarifaPrecioTramo?: number | null;
+  tarifaValorHoraEspera?: number | null;
+  pagaChoferTipo?: 'LISTA_NORMAL' | 'PERSONALIZADO';
+  choferValorKm?: number | null;
+  choferPrecioTramo?: number | null;
+  choferValorHoraEspera?: number | null;
+  totalViajes?: number;
+  viajesCompletados?: number;
+  viajesCuentaCorriente?: number;
+  ultimoViaje?: any;
+  createdAt: string;
+  updatedAt: string;
+  userId: string;
+  user?: User;
+  remiseriaId?: string;
+  remiseria?: Remiseria;
+}
+
+export interface CreateCoordinadorData {
+  nombre: string;
+  email: string;
+  password: string;
+  remiseriaId: string;
+}
+
+export interface UpdateCoordinadorData {
+  nombre?: string;
+  email?: string;
+  password?: string;
+  activo?: boolean;
+}
+
+export interface PagoCuentaCorriente {
+  id: string;
+  clienteId: string;
+  monto: number;
+  saldoAnterior: number;
+  saldoRestante: number;
+  metodoPago?: string | null;
+  observaciones?: string | null;
+  fecha: string;
+  createdAt: string;
+}
+
+export type MetodoPago = 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE';
+
+// Chofer
+export interface Chofer {
+  id: string;
+  numeroChofer: string;
+  nombre: string;
+  apellido: string;
+  dni: string;
+  telefono: string;
+  email?: string;
+  direccion?: string;
+  categoriaLicencia: string;
+  vtoLicencia: string;
+  estado: 'PENDIENTE_APROBACION' | 'ACTIVO' | 'SUSPENDIDO' | 'RECHAZADO' | 'DADO_DE_BAJA';
+  motivoRechazo?: string;
+  observaciones?: string;
+  esPropietario?: boolean;
+  comisionPorcentaje?: number;
+  fotoUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  remiseriaId: string;
+  remiseria?: Remiseria;
+  viajes?: Viaje[];
+  vehiculoId?: string;
+  vehiculo?: Vehiculo;
+}
+
+export interface CreateChoferData {
+  numeroChofer?: string;
+  nombre: string;
+  apellido: string;
+  dni: string;
+  telefono: string;
+  email?: string;
+  password?: string;
+  direccion?: string;
+  categoriaLicencia: string;
+  vtoLicencia: string;
+  remiseriaId: string;
+  fotoUrl?: string;
+  vehiculoId?: string;
+  esPropietario?: boolean;
+  comisionPorcentaje?: number;
+}
+
+export interface UpdateChoferData {
+  numeroChofer?: string;
+  nombre?: string;
+  apellido?: string;
+  dni?: string;
+  telefono?: string;
+  email?: string;
+  direccion?: string;
+  categoriaLicencia?: string;
+  vtoLicencia?: string;
+  estado?: 'PENDIENTE_APROBACION' | 'ACTIVO' | 'SUSPENDIDO' | 'RECHAZADO' | 'DADO_DE_BAJA';
+  motivoRechazo?: string;
+  observaciones?: string;
+  vehiculoId?: string;
+  esPropietario?: boolean;
+  comisionPorcentaje?: number;
+  fotoUrl?: string;
+}
+
+// Vehículo
+export interface Vehiculo {
+  id: string;
+  patente: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  color: string;
+  tipo: string;
+  capacidad: number;
+  estado: 'ACTIVO' | 'MANTENIMIENTO' | 'INACTIVO';
+  propietario: string;
+  vtoVtv?: string;
+  vtoMatafuego?: string;
+  vtoSeguro?: string;
+  observaciones?: string;
+  createdAt: string;
+  updatedAt: string;
+  remiseriaId: string;
+  remiseria?: Remiseria;
+  viajes?: Viaje[];
+  choferes?: Chofer[];
+}
+
+export type EstadoVencimiento = 'VENCIDO' | 'VENCE_HOY' | 'PROXIMO_A_VENCER' | 'AL_DIA' | 'NO_REGISTRADO';
+export type UrgenciaVencimiento = 'CRITICA' | 'ADVERTENCIA' | 'OK';
+
+export interface DocumentoEvaluado {
+  tipo: 'LICENCIA' | 'SEGURO' | 'VTV' | 'MATAFUEGO';
+  nombre: string;
+  fecha: string | null;
+  estado: EstadoVencimiento;
+  diasRestantes: number | null;
+  urgencia: UrgenciaVencimiento;
+  mensaje: string;
+  label?: string;
+}
+
+export interface ResumenDocumentacion {
+  tieneAlertas: boolean;
+  tieneCriticas: boolean;
+  cantidadAlertas: number;
+  alertas: DocumentoEvaluado[];
+  items: {
+    licencia: DocumentoEvaluado;
+    seguro: DocumentoEvaluado;
+    vtv: DocumentoEvaluado;
+    matafuego: DocumentoEvaluado;
+  };
+}
+
+export interface CreateVehiculoData {
+  patente: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  color: string;
+  tipo: string;
+  capacidad: number;
+  propietario: string;
+  vtoVtv?: string;
+  vtoMatafuego?: string;
+  vtoSeguro?: string;
+  observaciones?: string;
+  remiseriaId: string;
+  choferId?: string;
+}
+
+export interface UpdateVehiculoData {
+  patente?: string;
+  marca?: string;
+  modelo?: string;
+  anio?: number;
+  color?: string;
+  tipo?: string;
+  capacidad?: number;
+  propietario?: string;
+  vtoVtv?: string;
+  vtoMatafuego?: string;
+  vtoSeguro?: string;
+  observaciones?: string;
+  estado?: 'ACTIVO' | 'MANTENIMIENTO' | 'INACTIVO';
+  choferId?: string;
+}
+
+// Viaje (recaudación)
+export interface Viaje {
+  id: string;
+  origen: string;
+  destino: string;
+  precio: number;
+  fecha: string;
+  estado: 'PENDIENTE' | 'ACEPTADO' | 'EN_CAMINO' | 'EN_CURSO' | 'COMPLETADO' | 'CANCELADO';
+  metodoPago?: MetodoPago;
+  distanciaKmConPasajero?: number;
+  distanciaKmSinPasajero?: number;
+  observaciones?: string;
+  createdAt: string;
+  updatedAt: string;
+  remiseriaId: string;
+  choferId: string;
+  vehiculoId: string;
+  clienteNombre?: string;
+  clienteTelefono?: string;
+  clienteEmail?: string;
+  artEmpresaId?: string | null;
+  artEmpresa?: ArtEmpresa | null;
+  numeroSiniestro?: string | null;
+  precioArt?: number | null;
+  precioFacturaArt?: number;
+  pagaChofer?: number;
+  gananciaNeta?: number;
+  horaSalidaChofer?: string | null;
+  horaTurno?: string | null;
+  codigoPin?: string | null;
+  requierePin?: boolean;
+  tiempoEsperaSegundos?: number;
+  costoEspera?: number;
+  montoPeajes?: number | null;
+  observacionesPeaje?: string | null;
+  estadoCoordinacion?: 'PENDIENTE_CONTACTO' | 'CONFIRMADO' | 'RECHAZADO_POR_PACIENTE' | 'NO_RESPONDE' | null;
+  motivoRechazoPaciente?: string | null;
+  auxilioMecanico?: boolean;
+  puntoTrasbordo?: string | null;
+  kmChoferInicial?: number | null;
+  pagaChoferInicial?: number | null;
+  cierreFacturacionArtId?: string | null;
+  remiseria?: Remiseria;
+  chofer?: Chofer;
+  vehiculo?: Vehiculo;
+}
+
+export interface CreateViajeData {
+  origen: string;
+  destino: string;
+  precio: number;
+  fecha: string;
+  observaciones?: string;
+  remiseriaId: string;
+  choferId: string;
+  vehiculoId: string;
+}
+
+export interface UpdateViajeData {
+  origen?: string;
+  destino?: string;
+  precio?: number;
+  fecha?: string;
+  estado?: 'PENDIENTE' | 'ACEPTADO' | 'EN_CAMINO' | 'EN_CURSO' | 'COMPLETADO' | 'CANCELADO';
+  observaciones?: string;
+  choferId?: string;
+  vehiculoId?: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface RegisterData {
+  email: string;
+  password: string;
+  nombre: string;
+  telefono: string;
+}
+
+export interface CreateRemiseriaData {
+  nombreFantasia: string;
+  razonSocial: string;
+  cuit: string;
+  direccion: string;
+  telefono: string;
+  latitud?: number;
+  longitud?: number;
+  duenioIds: string[];
+}
+
+export interface UpdateRemiseriaData {
+  nombreFantasia?: string;
+  razonSocial?: string;
+  cuit?: string;
+  direccion?: string;
+  telefono?: string;
+  latitud?: number;
+  longitud?: number;
+  estado?: boolean;
+  duenioIds?: string[];
+  valorKm?: number;
+  bajadaBandera?: number;
+  valorHoraEspera?: number;
+  comisionDuenioAuto?: number;
+  comisionPorcentaje?: number;
+  agenciaAbierta?: boolean;
+  mensajeCierre?: string;
+  cierreAutomaticoFiestas?: boolean;
+}
+
+export interface CreateDuenioData {
+  email: string;
+  password: string;
+  nombre: string;
+  telefono: string;
+  dni: string;
+  remiseriaIds?: string[];
+}
+
+export interface UpdateDuenioData {
+  nombre?: string;
+  telefono?: string;
+  dni?: string;
+  activo?: boolean;
+  email?: string;
+  password?: string;
+  remiseriaIds?: string[];
+}
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+}
+
+// Interfaces para el dashboard de coordinadores
+export interface ViajeCoordinador {
+  id: string;
+  nombreCliente: string;
+  telefonoCliente: string;
+  direccionOrigen: string;
+  direccionDestino: string;
+  fechaHora: string;
+  estado: 'pendiente' | 'en_curso' | 'completado' | 'cancelado';
+  prioridad: 'normal' | 'alta' | 'urgente';
+  metodoContacto: 'app' | 'telefono' | 'personal';
+  choferAsignado?: string;
+  vehiculoAsignado?: string;
+  observaciones?: string;
+  createdAt: string;
+}
+
+export interface ReservaCoordinador {
+  id: string;
+  nombreCliente: string;
+  telefonoCliente: string;
+  direccionOrigen: string;
+  direccionDestino: string;
+  fechaInicio: string;
+  horaInicio: string;
+  tipoReserva: 'unica' | 'periodica';
+  fechaFin?: string;
+  diasSemana?: string[];
+  horaFin?: string;
+  estado: 'activa' | 'completada' | 'cancelada';
+  observaciones?: string;
+  createdAt: string;
+}
+
+export interface VehiculoTiempoReal {
+  id: string;
+  patente: string;
+  chofer: string;
+  estado: 'disponible' | 'en_viaje' | 'fuera_servicio';
+  ubicacion: {
+    lat: number;
+    lng: number;
+  };
+  ultimaActualizacion: string;
+  direccionActual: string;
+}
+
+export interface ChoferTiempoReal {
+  id: string;
+  nombre: string;
+  telefono: string;
+  email: string;
+  estado: 'disponible' | 'en_viaje' | 'fuera_servicio' | 'descanso';
+  vehiculo?: {
+    patente: string;
+    modelo: string;
+  };
+  ubicacion?: {
+    lat: number;
+    lng: number;
+    direccion: string;
+  };
+  ultimaActualizacion: string;
+  viajesHoy: number;
+  calificacion: number;
+}
+
+export interface CreateViajeCoordinadorData {
+  nombreCliente: string;
+  telefonoCliente: string;
+  direccionOrigen: string;
+  direccionDestino: string;
+  fechaHora: string;
+  tipoViaje: 'inmediato' | 'programado';
+  observaciones: string;
+  prioridad: 'normal' | 'alta' | 'urgente';
+  metodoContacto: 'app' | 'telefono' | 'personal';
+}
+
+export interface CreateReservaData {
+  nombreCliente: string;
+  telefonoCliente: string;
+  direccionOrigen: string;
+  direccionDestino: string;
+  fechaInicio: string;
+  horaInicio: string;
+  tipoReserva: 'unica' | 'periodica';
+  fechaFin?: string;
+  diasSemana?: string[];
+  horaFin?: string;
+  observaciones: string;
+  prioridad: 'normal' | 'alta' | 'urgente';
+  metodoContacto: 'app' | 'telefono' | 'personal';
+}
+
+export interface ReporteData {
+  periodo: string;
+  totalViajes: number;
+  viajesCompletados: number;
+  viajesCancelados: number;
+  totalRecaudado: number;
+  promedioCalificacion: number;
+  choferesActivos: number;
+  tiempoPromedioViaje: number;
+  topChoferes: Array<{
+    nombre: string;
+    viajes: number;
+    calificacion: number;
+    recaudacion: number;
+  }>;
+  viajesPorHora: Array<{
+    hora: string;
+    cantidad: number;
+  }>;
+} 
+
+export interface ParadaIntermedia {
+  id?: string;
+  direccion: string;
+  lat?: number;
+  lon?: number;
+  completada?: boolean;
+  orden?: number;
+}
+
+export interface MensajeChatViaje {
+  id: string;
+  remitente: 'CLIENTE' | 'CHOFER';
+  remitenteNombre: string;
+  texto: string;
+  timestamp: string;
+}
+
+export interface CalificacionViajeData {
+  estrellasChofer: number;
+  estrellasVehiculo: number;
+  tags?: string[];
+  comentario?: string;
+}
+
+// Tipos para funcionalidad del cliente
+export interface SolicitudViajeData {
+  origen: string;
+  destino: string;
+  fechaHora?: string; // Para viajes programados
+  observaciones?: string;
+  usarUbicacionActual?: boolean;
+  latitudOrigen?: number;
+  longitudOrigen?: number;
+  latitudDestino?: number;
+  longitudDestino?: number;
+  paradas?: ParadaIntermedia[];
+  metodoPago?: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE';
+  pagaCon?: number;
+}
+
+export interface CalculoPrecioData {
+  origen: string;
+  destino: string;
+  distancia?: number;
+  tiempoEstimado?: number;
+  precioEstimado: number;
+  tarifaBase: number;
+  tarifaPorKm: number;
+  tarifaPorMinuto: number;
+}
+
+export interface ReservaClienteData {
+  origen: string;
+  destino: string;
+  fechaInicio: string;
+  horaInicio: string;
+  tipoReserva: 'unica' | 'periodica';
+  fechaFin?: string;
+  diasSemana?: string[];
+  horaFin?: string;
+  observaciones?: string;
+  latitudOrigen?: number;
+  longitudOrigen?: number;
+  latitudDestino?: number;
+  longitudDestino?: number;
+}
+
+export interface ViajeCliente {
+  id: string;
+  origen: string;
+  destino: string;
+  precio: number;
+  fecha: string;
+  estado: 'PENDIENTE' | 'ACEPTADO' | 'EN_CAMINO' | 'EN_CURSO' | 'COMPLETADO' | 'CANCELADO';
+  metodoPago?: MetodoPago;
+  pagaCon?: number;
+  vueltoEstimado?: number;
+  observaciones?: string;
+  createdAt: string;
+  trackingToken?: string;
+  codigoPin?: string | null;
+  requierePin?: boolean;
+  paradas?: string | ParadaIntermedia[];
+  tiempoEsperaSegundos?: number;
+  costoEspera?: number;
+  enEspera?: boolean;
+  mensajesChat?: string | MensajeChatViaje[];
+  motivoCancelacion?: string;
+  debeAbonarMinimo?: boolean;
+  costoCancelacion?: number;
+  calificacion?: any;
+  chofer?: {
+    id?: string;
+    nombre: string;
+    apellido?: string;
+    telefono: string;
+    fotoUrl?: string;
+    vehiculo?: {
+      id?: string;
+      patente: string;
+      marca: string;
+      modelo: string;
+      color?: string;
+    };
+  };
+  vehiculo?: {
+    id?: string;
+    patente: string;
+    marca: string;
+    modelo: string;
+    color?: string;
+  };
+  remiseria?: {
+    id?: string;
+    nombreFantasia: string;
+    telefono: string;
+  };
+}
+
+export interface ReservaCliente {
+  id: string;
+  origen: string;
+  destino: string;
+  fechaInicio: string;
+  horaInicio: string;
+  tipoReserva: 'unica' | 'periodica';
+  fechaFin?: string;
+  diasSemana?: string[];
+  horaFin?: string;
+  estado: 'activa' | 'completada' | 'cancelada';
+  observaciones?: string;
+  createdAt: string;
+  viajesGenerados?: ViajeCliente[];
+} 
+
+export interface Liquidacion {
+  id: string;
+  fecha: string;
+  choferId: string;
+  coordinadorId: string;
+  totalRecaudado: number;
+  combustible: number;
+  comisionChofer: number;
+  comisionAgencia: number;
+  gananciaPropietario: number;
+  observaciones?: string;
+  createdAt: string;
+}
+
+export interface LiquidacionPendienteResumen {
+  chofer: {
+    id: string;
+    nombre: string;
+    apellido: string;
+    numeroChofer: string;
+    esPropietario: boolean;
+    comisionPorcentaje: number;
+    comisionDuenioAuto: number;
+  };
+  viajes: Viaje[];
+  resumen: {
+    totalRecaudado: number;
+    totalEfectivo?: number;
+    totalTransferencia?: number;
+    comisionChofer: number;
+    comisionAgencia: number;
+    combustible: number;
+    gananciaPropietario: number;
+  };
+}
+
+// ART y Empresas (Tarifas Corporativas)
+export interface ArtEmpresa {
+  id: string;
+  nombre: string;
+  cuit?: string | null;
+  razonSocial?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  direccion?: string | null;
+  valorKm: number;
+  precioTramo: number;
+  valorHoraEspera: number;
+  pagaChoferTipo?: 'LISTA_NORMAL' | 'PERSONALIZADO';
+  choferValorKm?: number | null;
+  choferPrecioTramo?: number | null;
+  choferValorHoraEspera?: number | null;
+  activo: boolean;
+  periodoFacturacion?: 'SEMANAL' | 'QUINCENAL' | 'MENSUAL';
+  diaCorteFacturacion?: number | null;
+  observaciones?: string | null;
+  remiseriaId: string;
+  createdAt?: string;
+  updatedAt?: string;
+  totalViajes?: number;
+  viajesCompletados?: number;
+  totalFacturado?: number;
+  totalPagaChofer?: number;
+  gananciaEstimada?: number;
+  totalKm?: number;
+  totalEsperaMinutos?: number;
+  totalCostoEspera?: number;
+}
+
+export interface CreateArtEmpresaData {
+  nombre: string;
+  cuit?: string;
+  razonSocial?: string;
+  telefono?: string;
+  email?: string;
+  direccion?: string;
+  valorKm: number;
+  precioTramo: number;
+  valorHoraEspera: number;
+  pagaChoferTipo?: 'LISTA_NORMAL' | 'PERSONALIZADO';
+  choferValorKm?: number;
+  choferPrecioTramo?: number;
+  choferValorHoraEspera?: number;
+  periodoFacturacion?: 'SEMANAL' | 'QUINCENAL' | 'MENSUAL';
+  diaCorteFacturacion?: number;
+  observaciones?: string;
+  activo?: boolean;
+  remiseriaId?: string;
+}
+
+export interface UpdateArtEmpresaData extends Partial<CreateArtEmpresaData> {}
+
+export interface FacturacionArtResumen {
+  totalViajes: number;
+  totalFacturado: number;
+  totalPeajes?: number;
+  totalFacturadoTotal?: number;
+  totalPagaChofer?: number;
+  totalPagaChoferTotal?: number;
+  totalGanancia?: number;
+  totalKm: number;
+  totalEsperaMinutos: number;
+  totalCostoEspera: number;
+  promedioPorViaje: number;
+}
+
+export interface CierreFacturacionArt {
+  id: string;
+  remiseriaId: string;
+  artEmpresaId: string;
+  artEmpresa?: ArtEmpresa;
+  periodoTipo: string;
+  fechaDesde: string;
+  fechaHasta: string;
+  totalViajes: number;
+  totalKm: number;
+  totalEsperaHoras: number;
+  totalPeajes: number;
+  totalFacturadoArt: number;
+  totalPagaChoferes: number;
+  margenGanancia: number;
+  estado: 'PENDIENTE_FACTURAR' | 'FACTURA_EMITIDA' | 'COBRADO' | 'ANULADO';
+  numeroFactura?: string | null;
+  fechaEmision?: string | null;
+  fechaEnvioFactura?: string | null;
+  fechaCobro?: string | null;
+  metodoCobro?: string | null;
+  comprobanteCobroUrl?: string | null;
+  observaciones?: string | null;
+  viajes?: Viaje[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FacturacionPorArtItem {
+  artEmpresa: ArtEmpresa;
+  totalViajes: number;
+  totalFacturado: number;
+  totalPagaChofer?: number;
+  totalGanancia?: number;
+  totalKm: number;
+  totalEsperaMinutos: number;
+  totalCostoEspera: number;
+  viajes: any[];
+}
+
+export interface FacturacionArtResponse {
+  resumen: FacturacionArtResumen;
+  porArt: FacturacionPorArtItem[];
+  viajes: any[];
+}
+
+export interface CrearViajeArtData {
+  artEmpresaId: string;
+  choferId: string;
+  vehiculoId?: string;
+  clienteNombre: string;
+  clienteTelefono?: string;
+  clienteDni?: string;
+  numeroSiniestro?: string;
+  origen: string;
+  destino: string;
+  fecha: string; // YYYY-MM-DD
+  horaSalidaChofer: string; // HH:mm
+  horaTurno: string; // HH:mm
+  distanciaKm?: number;
+  precio: number;
+  precioArt: number;
+  observaciones?: string;
+}
+ 

@@ -1,96 +1,69 @@
-# 🚀 Guía de Despliegue en Vercel - Remises Bruno
+# 🚀 Guía de Despliegue en Vercel - Remises Bruno (2 Apps Separadas)
 
-Esta guía detalla los pasos exactos para desplegar la plataforma **Remises Bruno** en **Vercel** con su dominio principal y la arquitectura de subdominios solicitada.
+La plataforma **Remises Bruno** está dividida en **dos aplicaciones Frontend independientes** que consumen el mismo **Backend**:
 
----
-
-## 🌐 Arquitectura de Dominios Configurada
-
-| Subdominio / URL | Perfil / Módulo | Destino Interno (Reescrito por Middleware) |
-| :--- | :--- | :--- |
-| **`https://www.brunoremises.com.ar`** | **Web Institucional / Portal General** | Página principal con tarjetas de acceso a cada portal y login |
-| **`https://clientes.brunoremises.com.ar`** | **Pasajeros / Clientes** | `/cliente/app` (Petición de viaje, mapa, tarifas) |
-| **`https://choferes.brunoremises.com.ar`** | **Conductores / Choferes** | `/chofer/app` (App del chofer, GPS en vivo, viajes, gastos) |
-| **`https://coordinacion.brunoremises.com.ar`** | **Operadores / Coordinadores** | `/coordinador/dashboard` (Despacho, mapa en vivo, cierres) |
-| **`https://admin.brunoremises.com.ar`** | **Dueño / Administración** | `/duenio/dashboard` (Liquidaciones, flota, finanzas) |
-
-> **Nota técnica:** Se implementó `frontend/middleware.ts` en Next.js. El usuario verá en su navegador una URL limpia (ej: `clientes.brunoremises.com.ar/` o `choferes.brunoremises.com.ar/gastos`) sin prefijos redundantes, y la autenticación cuenta con SSO compartido bajo la cookie `.brunoremises.com.ar`.
+1. **`frontend-clientes`**: App pública y liviana exclusiva para pasajeros (DNI + PIN / WhatsApp OTP, pedir remís, reservas y seguimiento GPS en vivo).
+2. **`frontend-interno`**: Plataforma operativa interna exclusiva para **Choferes, Coordinadores y Dueño/Administración** (con sesiones, cookies y PWA totalmente aisladas de la app de pasajeros).
 
 ---
 
-## 1️⃣ Paso 1: Desplegar el Frontend en Vercel
+## 🌐 Mapa de Dominios por Proyecto en Vercel
 
-1. Entrá a [Vercel](https://vercel.com/) e iniciá sesión con tu cuenta de GitHub/GitLab.
-2. Hacé clic en **"Add New..."** ➔ **"Project"**.
-3. Seleccioná el repositorio del proyecto `AppRemises`.
-4. En la configuración del proyecto:
-   - **Project Name:** `remises-bruno` (o el nombre que prefieras).
-   - **Framework Preset:** `Next.js` (detectado automáticamente).
-   - **Root Directory:** Hacé clic en **Edit** y seleccioná la carpeta:
-     ```text
-     frontend
-     ```
-5. En la sección **Environment Variables** (Variables de Entorno), agregá:
-   - `NEXT_PUBLIC_API_URL`: URL de tu backend en producción con `/api` al final (Ej: `https://api.brunoremises.com.ar/api` o `https://appremises-backend.onrender.com/api`).
-   - `NEXT_PUBLIC_SOCKET_URL`: URL base de tu backend para WebSockets (Ej: `https://api.brunoremises.com.ar` o `https://appremises-backend.onrender.com`).
-6. Hacé clic en **Deploy**.
+### Proyecto 1 en Vercel: `remises-bruno-clientes`
+- **Root Directory:** `frontend-clientes`
+- **Dominios asignados:**
+  - `brunoremises.com.ar`
+  - `www.brunoremises.com.ar`
+  - `cliente.brunoremises.com.ar`
+  - `clientes.brunoremises.com.ar`
+
+### Proyecto 2 en Vercel: `remises-bruno-interno`
+- **Root Directory:** `frontend-interno`
+- **Dominios asignados:**
+  - `choferes.brunoremises.com.ar` ➔ Abre directo la App de Choferes (`/chofer/app`)
+  - `coordinacion.brunoremises.com.ar` ➔ Abre directo la Central de Coordinación (`/coordinador/dashboard`)
+  - `admin.brunoremises.com.ar` ➔ Abre directo el Panel del Dueño / Administración (`/duenio/dashboard`)
 
 ---
 
-## 2️⃣ Paso 2: Configurar los Subdominios en Vercel
+## 🛠️ Cómo actualizar tus proyectos en Vercel (Paso a Paso)
 
-Una vez que el proyecto esté desplegado en Vercel:
-
-1. Ve a **Settings** ➔ **Domains** en tu proyecto de Vercel.
-2. Agregá uno a uno los siguientes dominios:
+### 1️⃣ Configurar `frontend-clientes` en Vercel
+1. En Vercel, hacé clic en **Add New...** ➔ **Project** y seleccioná el repositorio `AppRemisesBruno` (o reutilizá tu proyecto existente si preferís).
+2. En **Root Directory**, hacé clic en **Edit** y elegí:
+   ```text
+   frontend-clientes
+   ```
+3. Agregá las **Environment Variables**:
+   - `NEXT_PUBLIC_API_URL`: URL de tu backend con `/api` al final (ej: `https://api.brunoremises.com.ar/api`).
+   - `NEXT_PUBLIC_SOCKET_URL`: URL base de tu backend (ej: `https://api.brunoremises.com.ar`).
+4. Desplegá (**Deploy**) y en **Settings ➔ Domains** asignale únicamente:
    - `brunoremises.com.ar`
    - `www.brunoremises.com.ar`
+   - `cliente.brunoremises.com.ar`
    - `clientes.brunoremises.com.ar`
+
+### 2️⃣ Configurar `frontend-interno` en Vercel
+1. En Vercel, creá el segundo proyecto (**Add New...** ➔ **Project**) conectado al **mismo repositorio** `AppRemisesBruno` (o actualizá el **Root Directory** de tu proyecto anterior en **Settings ➔ General ➔ Root Directory**).
+2. En **Root Directory**, seleccioná:
+   ```text
+   frontend-interno
+   ```
+3. Agregá las mismas **Environment Variables**:
+   - `NEXT_PUBLIC_API_URL`
+   - `NEXT_PUBLIC_SOCKET_URL`
+4. Desplegá (**Deploy**) y en **Settings ➔ Domains** asignale únicamente los 3 subdominios internos:
    - `choferes.brunoremises.com.ar`
    - `coordinacion.brunoremises.com.ar`
    - `admin.brunoremises.com.ar`
 
----
-
-## 3️⃣ Paso 3: Configurar los Registros DNS (En tu proveedor: DonWeb, Cloudflare, etc.)
-
-Ingresá al panel de administración de tu zona DNS de `brunoremises.com.ar` y agregá los siguientes registros:
-
-| Tipo | Nombre (Host) | Valor / Destino | TTL |
-| :--- | :--- | :--- | :--- |
-| **A** | `@` (o en blanco) | `76.76.21.21` | Automático / 3600 |
-| **CNAME** | `www` | `cname.vercel-dns.com.` | Automático / 3600 |
-| **CNAME** | `clientes` | `cname.vercel-dns.com.` | Automático / 3600 |
-| **CNAME** | `choferes` | `cname.vercel-dns.com.` | Automático / 3600 |
-| **CNAME** | `coordinacion` | `cname.vercel-dns.com.` | Automático / 3600 |
-| **CNAME** | `admin` | `cname.vercel-dns.com.` | Automático / 3600 |
-
-*(Si además alojás el backend en un subdominio propio como `api.brunoremises.com.ar`, agregá un CNAME `api` que apunte al host de tu backend, ej: `appremises-backend.onrender.com`)*.
+*(Nota: Si alguno de esos subdominios estaba asignado al proyecto anterior en Vercel, primero quitalo de ese proyecto en Settings ➔ Domains y agregalo al nuevo; los registros DNS CNAME en tu proveedor no necesitan cambiarse porque siguen apuntando a `cname.vercel-dns.com.`).*
 
 ---
 
-## 4️⃣ Paso 4: Backend (Express + Socket.io + PostgreSQL)
+## 💻 Desarrollo Local
 
-> ⚠️ **Importante sobre WebSockets:** Vercel es una plataforma serverless pensada para el Frontend. Los servidores de WebSockets en tiempo real (`Socket.io`) requieren un proceso Node.js continuo las 24 horas. Por esta razón, el backend debe correr en una plataforma persistente como **Render**, **Railway**, **Fly.io** o un **VPS**.
-
-### Despliegue del Backend en Render / Railway:
-1. Crear un nuevo servicio **Web Service** conectado al mismo repositorio.
-2. **Root Directory:** `backend`
-3. **Build Command:** `npm install && npm run build`
-4. **Start Command:** `npm start`
-5. **Variables de entorno del Backend:**
-   - `DATABASE_URL`: Conexión PostgreSQL (Supabase / Neon / Render Postgres).
-   - `DIRECT_URL`: Conexión directa PostgreSQL.
-   - `JWT_SECRET`: Clave secreta para tokens JWT.
-   - `PORT`: `3001` (o la asignada automáticamente por el host).
-   - `FRONTEND_URL`: `https://www.brunoremises.com.ar` (El backend ya está programado para autorizar automáticamente por CORS todos los subdominios `*.brunoremises.com.ar`).
-
----
-
-## 5️⃣ Verificación Final
-
-- Entrá a `https://www.brunoremises.com.ar` ➔ Verás la portada oficial con acceso a cada portal.
-- Entrá a `https://clientes.brunoremises.com.ar` ➔ Entrarás a la app de clientes.
-- Entrá a `https://choferes.brunoremises.com.ar` ➔ Entrarás a la app de choferes.
-- Entrá a `https://coordinacion.brunoremises.com.ar` ➔ Entrarás al panel del coordinador.
-- Entrá a `https://admin.brunoremises.com.ar` ➔ Entrarás al panel de administración del dueño.
+- **Backend:** `http://localhost:3001` (`npm run dev:backend`)
+- **App Clientes (`frontend-clientes`):** `http://localhost:3000` (`npm run dev:clientes`)
+- **App Interna (`frontend-interno`):** `http://localhost:3002` (`npm run dev:interno`)
+- **Levantar todo junto:** `npm run dev` desde la raíz del proyecto.

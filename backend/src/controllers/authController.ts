@@ -522,8 +522,17 @@ export const forgotPassword = async (req: Request, res: Response) => {
         },
       });
 
-      // Armar URL del frontend
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      // Armar URL del frontend interno (Choferes, Coordinador, Dueño)
+      const reqOrigin = req.headers.origin;
+      const isAllowedOrigin =
+        reqOrigin &&
+        (/^https:\/\/([a-z0-9-]+\.)?brunoremises\.com\.ar$/i.test(reqOrigin) ||
+          /^http:\/\/localhost:\d+$/i.test(reqOrigin));
+      const frontendUrl =
+        (isAllowedOrigin ? reqOrigin : null) ||
+        process.env.FRONTEND_INTERNO_URL ||
+        process.env.FRONTEND_URL ||
+        'http://localhost:3002';
       const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
       // Enviar email
