@@ -246,13 +246,16 @@ export default function ClienteLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center items-center p-4 selection:bg-emerald-500 selection:text-white transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-between items-center p-4 selection:bg-emerald-500 selection:text-white transition-colors duration-200">
       {/* Botón flotante de Modo Oscuro */}
       <div className="absolute top-4 right-4 z-20">
         <ThemeToggle />
       </div>
 
-      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/60 dark:shadow-none border border-slate-100 dark:border-slate-800 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
+      {/* Espaciador superior para mantener la tarjeta centrada */}
+      <div className="hidden sm:block" aria-hidden="true" />
+
+      <div className="w-full max-w-md my-auto bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/60 dark:shadow-none border border-slate-100 dark:border-slate-800 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
         {/* Encabezado con Logo oficial */}
         <div className="flex flex-col items-center text-center mb-6">
           <div className="mb-3 transform hover:scale-105 transition-transform">
@@ -595,6 +598,31 @@ export default function ClienteLoginPage() {
         )}
 
       </div>
+
+      {/* Footer Desarrollador - RzCore */}
+      <footer className="w-full pt-6 pb-2 flex justify-center">
+        <a
+          href="https://rzcore.dev"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Visitar rzcore.dev"
+          className="group inline-flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-sky-400/60 dark:hover:border-sky-500/50 shadow-sm hover:shadow-md transition-all duration-200"
+        >
+          <span className="w-7 h-7 overflow-hidden flex items-center justify-center shrink-0">
+            <img
+              src="/Rz-Core-Isologo.png"
+              alt="RzCore Logo"
+              className="w-12 h-12 max-w-none object-contain pointer-events-none select-none group-hover:scale-110 transition-transform duration-200"
+            />
+          </span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+            Desarrollado por{' '}
+            <span className="font-extrabold text-slate-800 dark:text-slate-100 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">
+              RzCore
+            </span>
+          </span>
+        </a>
+      </footer>
     </div>
   );
 }

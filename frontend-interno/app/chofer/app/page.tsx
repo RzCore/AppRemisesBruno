@@ -802,6 +802,21 @@ export default function ChoferApp() {
 
     // Alerta sonora y visual inmediata si el cliente cancela el viaje
     socket.on('viaje_cancelado', (data: any) => {
+      const cancelledId = data?.viajeId || data?.viaje?.id;
+      const myChoferId = user?.chofer?.id || choferIdRef.current;
+
+      // Si el viaje cancelado estaba como alerta entrante o en cola programada, quitarlo
+      if (cancelledId) {
+        setAlertaViaje((prev: any) => (prev?.id === cancelledId ? null : prev));
+        setViajesProgramados((prev) => prev.filter((v) => v.id !== cancelledId));
+      }
+
+      const eraMiViajeActual =
+        (viajeActualRef.current && cancelledId && viajeActualRef.current.id === cancelledId) ||
+        (myChoferId && data?.viaje?.choferId === myChoferId);
+
+      if (!eraMiViajeActual) return;
+
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {

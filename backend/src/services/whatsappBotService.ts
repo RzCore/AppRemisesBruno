@@ -18,7 +18,9 @@ type EstadoConversacion =
   | 'CONFIRMANDO_AUDIO_ORIGEN'
   | 'ESPERANDO_DESTINO'
   | 'CONFIRMANDO_AUDIO_DESTINO'
-  | 'CONFIRMANDO_COTIZACION';
+  | 'CONFIRMANDO_COTIZACION'
+  | 'CONFIRMANDO_CANCELACION_VIAJE'
+  | 'CONFIRMANDO_CANCELACION_RESERVA';
 
 interface SesionClienteWhatsApp {
   telefono: string;
@@ -40,6 +42,8 @@ interface SesionClienteWhatsApp {
   precioEstimado?: number;
   audioDireccionPendiente?: string;
   audioTextoOriginal?: string;
+  viajeCancelarId?: string;
+  reservaCancelarId?: string;
   updatedAt: number;
 }
 
@@ -845,6 +849,8 @@ function parsearFechaHoraReserva(input: string): { fecha: Date; fechaTexto: stri
 // Registro en memoria para evitar saludar múltiples veces el mismo día de cumpleaños
 const cumpleSaludadosMap = new Set<string>();
 
+const APP_CLIENTES_URL = 'https://cliente.brunoremises.com.ar';
+
 function esEmailAutogenerado(email?: string | null): boolean {
   if (!email) return true;
   const e = email.toLowerCase().trim();
@@ -1074,7 +1080,11 @@ export const whatsappBotService = {
           sesion.nombre = cliente.nombre;
           sesion.estado = 'IDLE';
 
-          const saludoNuevo = `✅ *Identidad registrada con éxito.*\n\n👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n¿Cómo querés viajar hoy?`;
+          const saludoNuevo =
+            `✅ *Identidad registrada con éxito.*\n\n` +
+            `👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n` +
+            `📲 _Tip: También podés descargar nuestra App en_ *${APP_CLIENTES_URL}* _(ingresando con tu DNI) para pedir viajes aunque algún día falle WhatsApp._\n\n` +
+            `¿Cómo querés viajar hoy?`;
           return await whatsappService.enviarBotones(cleanFrom, saludoNuevo, [
             { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
             { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
@@ -1101,7 +1111,11 @@ export const whatsappBotService = {
         sesion.nombre = cliente.nombre;
         sesion.estado = 'IDLE';
 
-        const saludoNuevo = `✅ *¡Registro completado exitosamente!*\n\n👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n¿Cómo querés viajar hoy?`;
+        const saludoNuevo =
+          `✅ *¡Registro completado exitosamente!*\n\n` +
+          `👋 ¡Hola, *${cliente.nombre}*! Gracias por comunicarte con *Remises Bruno*.\n\n` +
+          `📲 _Tip: También podés descargar nuestra App en_ *${APP_CLIENTES_URL}* _(ingresando con tu DNI) para pedir viajes aunque algún día falle WhatsApp._\n\n` +
+          `¿Cómo querés viajar hoy?`;
         return await whatsappService.enviarBotones(cleanFrom, saludoNuevo, [
           { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
           { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
@@ -1120,11 +1134,143 @@ export const whatsappBotService = {
     const nombreMostrado = cliente?.nombre || senderName || 'Pasajero';
     sesion.nombre = nombreMostrado;
 
-    // 2. Comandos globales directos (reiniciar, cancelar, estado, operador)
+    // 2. Comandos globales directos (reiniciar, cancelar pedido/reserva, estado, operador)
     const textoLower = (texto || '').trim().toLowerCase();
     const actionId = botonId || '';
 
-    if (actionId === 'BTN_CANCELAR' || textoLower === 'cancelar' || textoLower === 'salir') {
+    // Botones directos de cancelación de un pedido o reserva ya confirmados
+    if (actionId.startsWith('BTN_CANCELAR_VIAJE')) {
+      const targetViajeId = actionId.replace('BTN_CANCELAR_VIAJE_', '').trim();
+      return await this.solicitarConfirmacionCancelarViaje(
+        cleanFrom,
+        sesion,
+        cliente?.id,
+        targetViajeId && targetViajeId !== 'BTN_CANCELAR_VIAJE' ? targetViajeId : undefined
+      );
+    }
+
+    if (actionId.startsWith('BTN_SI_CANCELAR_VIAJE_')) {
+      const targetViajeId = actionId.replace('BTN_SI_CANCELAR_VIAJE_', '').trim();
+      return await this.ejecutarCancelacionViajeWhatsApp(cleanFrom, cliente?.id, targetViajeId || undefined);
+    }
+
+    if (actionId.startsWith('BTN_NO_CANCELAR_VIAJE_')) {
+      const targetViajeId = actionId.replace('BTN_NO_CANCELAR_VIAJE_', '').trim();
+      resetSesion(cleanFrom);
+      const cod = targetViajeId ? `#${targetViajeId.slice(-4).toUpperCase()}` : '';
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        `👍 *¡Perfecto!* Tu pedido *${cod}* continúa activo en nuestra central.`,
+        [
+          { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
+          { id: targetViajeId ? `BTN_CANCELAR_VIAJE_${targetViajeId}` : 'BTN_CANCELAR_VIAJE', title: '❌ Cancelar Pedido' },
+          { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+        ]
+      );
+    }
+
+    if (actionId.startsWith('BTN_CANCELAR_RESERVA')) {
+      const targetReservaId = actionId.replace('BTN_CANCELAR_RESERVA_', '').trim();
+      return await this.solicitarConfirmacionCancelarReserva(
+        cleanFrom,
+        sesion,
+        cliente?.id,
+        targetReservaId && targetReservaId !== 'BTN_CANCELAR_RESERVA' ? targetReservaId : undefined
+      );
+    }
+
+    if (actionId.startsWith('BTN_SI_CANCELAR_RESERVA_')) {
+      const targetReservaId = actionId.replace('BTN_SI_CANCELAR_RESERVA_', '').trim();
+      return await this.ejecutarCancelacionReservaWhatsApp(cleanFrom, cliente?.id, targetReservaId || undefined);
+    }
+
+    if (actionId.startsWith('BTN_NO_CANCELAR_RESERVA_')) {
+      const targetReservaId = actionId.replace('BTN_NO_CANCELAR_RESERVA_', '').trim();
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        `👍 *¡Perfecto!* Tu reserva programada continúa activa en nuestra central.`,
+        [
+          { id: 'BTN_ESTADO', title: '📍 Mis Reservas' },
+          { id: targetReservaId ? `BTN_CANCELAR_RESERVA_${targetReservaId}` : 'BTN_CANCELAR_RESERVA', title: '❌ Cancelar Reserva' },
+          { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+        ]
+      );
+    }
+
+    const esTextoCancelarViajeActivo =
+      textoLower === 'cancelar viaje' ||
+      textoLower === 'cancelar pedido' ||
+      textoLower === 'cancelar remis' ||
+      textoLower === 'cancelar remís' ||
+      textoLower === 'no quiero viajar' ||
+      textoLower === 'no voy a viajar' ||
+      textoLower === 'no viajo';
+
+    const esTextoCancelarReservaActiva =
+      textoLower === 'cancelar reserva' ||
+      textoLower === 'anular reserva';
+
+    if (esTextoCancelarReservaActiva) {
+      return await this.solicitarConfirmacionCancelarReserva(cleanFrom, sesion, cliente?.id);
+    }
+
+    if (esTextoCancelarViajeActivo) {
+      return await this.solicitarConfirmacionCancelarViaje(cleanFrom, sesion, cliente?.id);
+    }
+
+    if (
+      sesion.estado !== 'CONFIRMANDO_CANCELACION_VIAJE' &&
+      sesion.estado !== 'CONFIRMANDO_CANCELACION_RESERVA' &&
+      (actionId === 'BTN_CANCELAR' || textoLower === 'cancelar' || textoLower === 'salir')
+    ) {
+      // Si el usuario está en IDLE (no está armando una cotización) y escribe "cancelar",
+      // verificar primero si tiene un pedido o reserva activa en curso para cancelarla realmente en central
+      if (sesion.estado === 'IDLE' && actionId !== 'BTN_CANCELAR' && textoLower === 'cancelar') {
+        const viajeActivoParaCancelar = await prisma.viaje.findFirst({
+          where: {
+            OR: [
+              { clienteTelefono: cleanFrom },
+              { clienteTelefono: { contains: cleanFrom.slice(-8) } },
+              ...(cliente?.id ? [{ clienteId: cliente.id }] : []),
+            ],
+            estado: { in: ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (viajeActivoParaCancelar) {
+          return await this.solicitarConfirmacionCancelarViaje(
+            cleanFrom,
+            sesion,
+            cliente?.id,
+            viajeActivoParaCancelar.id
+          );
+        }
+
+        const reservaActivaParaCancelar = await prisma.reserva.findFirst({
+          where: {
+            OR: [
+              { clienteTelefono: cleanFrom },
+              { clienteTelefono: { contains: cleanFrom.slice(-8) } },
+              ...(cliente?.id ? [{ clienteId: cliente.id }] : []),
+            ],
+            estado: 'ACTIVA',
+            fechaInicio: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+          },
+          orderBy: { fechaInicio: 'asc' },
+        });
+
+        if (reservaActivaParaCancelar) {
+          return await this.solicitarConfirmacionCancelarReserva(
+            cleanFrom,
+            sesion,
+            cliente?.id,
+            reservaActivaParaCancelar.id
+          );
+        }
+      }
+
       resetSesion(cleanFrom);
       return await whatsappService.enviarBotones(
         cleanFrom,
@@ -1794,6 +1940,29 @@ export const whatsappBotService = {
           sesion.precioEstimado = precioEstimado;
           sesion.estado = 'CONFIRMANDO_COTIZACION';
 
+          if (sesion.esReserva && sesion.fechaHoraTexto) {
+            const resumenReserva =
+              `📋 *Resumen de tu Reserva Programada:*\n` +
+              `━━━━━━━━━━━━━━━━━━━\n` +
+              `🗓️ *Fecha y Hora:* *${sesion.fechaHoraTexto}*\n` +
+              `🟢 *Origen:* ${sesion.origen}\n` +
+              `🔴 *Destino:* ${sesion.destino}\n` +
+              `📏 *Distancia:* ~${dist} km\n` +
+              `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
+              `━━━━━━━━━━━━━━━━━━━\n` +
+              `¿Confirmás la reserva?`;
+
+            return await whatsappService.enviarBotones(
+              cleanFrom,
+              resumenReserva,
+              [
+                { id: 'BTN_CONFIRMAR_RESERVA', title: '✅ Confirmar Reserva' },
+                { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
+              ],
+              'Reserva de Viaje'
+            );
+          }
+
           const resumen =
             `📋 *Resumen de tu viaje:*\n` +
             `━━━━━━━━━━━━━━━━━━━\n` +
@@ -1830,6 +1999,7 @@ export const whatsappBotService = {
           actionId === 'BTN_CONFIRMAR' ||
           actionId === 'BTN_CONFIRMAR_RESERVA' ||
           textoLower.includes('si') ||
+          textoLower.includes('sí') ||
           textoLower.includes('confirmar') ||
           textoLower.includes('confirmo');
 
@@ -1850,6 +2020,85 @@ export const whatsappBotService = {
             ]
           );
         }
+      }
+
+      case 'CONFIRMANDO_CANCELACION_VIAJE': {
+        const targetId = sesion.viajeCancelarId;
+        const confirma =
+          textoLower === 'si' ||
+          textoLower === 'sí' ||
+          textoLower.includes('cancelar') ||
+          textoLower.includes('confirmo') ||
+          textoLower.includes('seguro');
+        const rechaza =
+          textoLower === 'no' ||
+          textoLower.includes('mantener') ||
+          textoLower.includes('seguir') ||
+          textoLower.includes('volver');
+
+        if (confirma) {
+          return await this.ejecutarCancelacionViajeWhatsApp(cleanFrom, cliente?.id, targetId);
+        }
+        if (rechaza) {
+          resetSesion(cleanFrom);
+          const cod = targetId ? `#${targetId.slice(-4).toUpperCase()}` : '';
+          return await whatsappService.enviarBotones(
+            cleanFrom,
+            `👍 *¡Perfecto!* Tu pedido *${cod}* continúa activo en nuestra central.`,
+            [
+              { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
+              { id: targetId ? `BTN_CANCELAR_VIAJE_${targetId}` : 'BTN_CANCELAR_VIAJE', title: '❌ Cancelar Pedido' },
+              { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+            ]
+          );
+        }
+        return await whatsappService.enviarBotones(
+          cleanFrom,
+          '¿Confirmás que querés cancelar tu pedido?',
+          [
+            { id: `BTN_SI_CANCELAR_VIAJE_${targetId || ''}`, title: '✅ Sí, cancelar' },
+            { id: `BTN_NO_CANCELAR_VIAJE_${targetId || ''}`, title: '🔙 No, mantener' },
+          ]
+        );
+      }
+
+      case 'CONFIRMANDO_CANCELACION_RESERVA': {
+        const targetResId = sesion.reservaCancelarId;
+        const confirma =
+          textoLower === 'si' ||
+          textoLower === 'sí' ||
+          textoLower.includes('cancelar') ||
+          textoLower.includes('confirmo') ||
+          textoLower.includes('seguro');
+        const rechaza =
+          textoLower === 'no' ||
+          textoLower.includes('mantener') ||
+          textoLower.includes('seguir') ||
+          textoLower.includes('volver');
+
+        if (confirma) {
+          return await this.ejecutarCancelacionReservaWhatsApp(cleanFrom, cliente?.id, targetResId);
+        }
+        if (rechaza) {
+          resetSesion(cleanFrom);
+          return await whatsappService.enviarBotones(
+            cleanFrom,
+            `👍 *¡Perfecto!* Tu reserva programada continúa activa en nuestra central.`,
+            [
+              { id: 'BTN_ESTADO', title: '📍 Mis Reservas' },
+              { id: targetResId ? `BTN_CANCELAR_RESERVA_${targetResId}` : 'BTN_CANCELAR_RESERVA', title: '❌ Cancelar Reserva' },
+              { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+            ]
+          );
+        }
+        return await whatsappService.enviarBotones(
+          cleanFrom,
+          '¿Confirmás que querés cancelar tu reserva programada?',
+          [
+            { id: `BTN_SI_CANCELAR_RESERVA_${targetResId || ''}`, title: '✅ Sí, cancelar' },
+            { id: `BTN_NO_CANCELAR_RESERVA_${targetResId || ''}`, title: '🔙 No, mantener' },
+          ]
+        );
       }
     }
   },
@@ -1976,11 +2225,13 @@ export const whatsappBotService = {
         `💵 *Precio estimado:* *$${precio.toLocaleString('es-AR')}*\n` +
         `🔒 *PIN de seguridad:* *${codigoPin}*\n` +
         `━━━━━━━━━━━━━━━━━━━\n\n` +
-        `La central asignará tu móvil con anticipación y te avisaremos por WhatsApp en cuanto el chofer salga a buscarte.`;
+        `La central asignará tu móvil con anticipación y te avisaremos por WhatsApp en cuanto el chofer salga a buscarte.\n\n` +
+        `📲 _Descargá nuestra App en_ *${APP_CLIENTES_URL}* _para seguir tus viajes y pedir remís aunque algún día se caiga WhatsApp._`;
 
       await whatsappService.enviarBotones(cleanFrom, confirmacionTexto, [
-        { id: 'BTN_ESTADO', title: '📍 Mis Reservas / Viajes' },
-        { id: 'BTN_OPERADOR', title: '📞 Hablar con Central' },
+        { id: 'BTN_ESTADO', title: '📍 Mis Reservas' },
+        { id: `BTN_CANCELAR_RESERVA_${reserva.id}`, title: '❌ Cancelar Reserva' },
+        { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
       ]);
 
       return { success: true, reservaId: reserva.id, viajeId: viaje.id };
@@ -2101,11 +2352,13 @@ export const whatsappBotService = {
         `🚕 *¡Pedido confirmado!*\n\n` +
         `Tu solicitud ya ingresó a nuestra central con el viaje *#${viaje.id.slice(-4).toUpperCase()}*.\n` +
         `🔒 *PIN de inicio de viaje:* *${codigoPin}*\n\n` +
-        `Estamos asignándote el mejor móvil disponible. Te avisaremos por acá en cuanto el chofer salga a buscarte.`;
+        `Estamos asignándote el mejor móvil disponible. Te avisaremos por acá en cuanto el chofer salga a buscarte.\n\n` +
+        `📲 _Tip: Descargá nuestra App en_ *${APP_CLIENTES_URL}* _para ver el móvil en el mapa y pedir viajes aunque algún día se caiga WhatsApp._`;
 
       await whatsappService.enviarBotones(cleanFrom, confirmacionTexto, [
         { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
-        { id: 'BTN_OPERADOR', title: '📞 Hablar con Central' },
+        { id: `BTN_CANCELAR_VIAJE_${viaje.id}`, title: '❌ Cancelar Pedido' },
+        { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
       ]);
 
       return { success: true, viajeId: viaje.id };
@@ -2217,7 +2470,518 @@ export const whatsappBotService = {
         .join('\n───────────────────\n');
     }
 
+    if (viaje) {
+      if (['PENDIENTE', 'ACEPTADO', 'EN_CAMINO'].includes(viaje.estado)) {
+        return await whatsappService.enviarBotones(cleanFrom, respuesta, [
+          { id: `BTN_CANCELAR_VIAJE_${viaje.id}`, title: '❌ Cancelar Pedido' },
+          { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+        ]);
+      }
+      return await whatsappService.enviarBotones(cleanFrom, respuesta, [
+        { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+      ]);
+    }
+
+    if (reservas.length > 0) {
+      return await whatsappService.enviarBotones(cleanFrom, respuesta, [
+        { id: `BTN_CANCELAR_RESERVA_${reservas[0].id}`, title: '❌ Cancelar Reserva' },
+        { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+        { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+      ]);
+    }
+
     return await whatsappService.enviarTexto(cleanFrom, respuesta);
+  },
+
+  /**
+   * Solicita confirmación antes de cancelar un viaje activo desde WhatsApp
+   */
+  async solicitarConfirmacionCancelarViaje(
+    cleanFrom: string,
+    sesion: SesionClienteWhatsApp,
+    clienteId?: string,
+    viajeIdEspecifico?: string
+  ) {
+    const filtroCliente = {
+      OR: [
+        { clienteTelefono: cleanFrom },
+        { clienteTelefono: { contains: cleanFrom.slice(-8) } },
+        ...(clienteId ? [{ clienteId }] : []),
+      ],
+    };
+
+    const viaje = await prisma.viaje.findFirst({
+      where: viajeIdEspecifico
+        ? { id: viajeIdEspecifico, ...filtroCliente }
+        : {
+            ...filtroCliente,
+            estado: { in: ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] },
+          },
+      include: {
+        vehiculo: true,
+        chofer: { include: { vehiculo: true } },
+        remiseria: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!viaje) {
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        'ℹ️ No encontramos ningún pedido activo para cancelar en este momento.',
+        [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+        ]
+      );
+    }
+
+    const cod = `#${viaje.id.slice(-4).toUpperCase()}`;
+
+    if (viaje.estado === 'COMPLETADO' || viaje.estado === 'CANCELADO') {
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        `ℹ️ El pedido *${cod}* ${viaje.estado === 'CANCELADO' ? 'ya fue cancelado anteriormente' : 'ya ha finalizado'}.`,
+        [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+        ]
+      );
+    }
+
+    if (viaje.estado === 'EN_CURSO') {
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        `⚠️ El viaje *${cod}* ya figura *en curso* con el pasajero a bordo y no puede cancelarse automáticamente.\n\nSi necesitás asistencia comunicate con nuestra central.`,
+        [{ id: 'BTN_OPERADOR', title: '📞 Hablar Central' }]
+      );
+    }
+
+    // Evaluar si el móvil ya está en puerta o a menos de 10 cuadras (1.0 km)
+    let aplicaMinimo = false;
+    const montoMinimo = viaje.remiseria?.bajadaBandera || 3500;
+    if (viaje.estado === 'EN_CAMINO') {
+      aplicaMinimo = true;
+    } else if (viaje.estado === 'ACEPTADO') {
+      const latMovil = viaje.vehiculo?.latitud || viaje.chofer?.vehiculo?.latitud;
+      const lonMovil = viaje.vehiculo?.longitud || viaje.chofer?.vehiculo?.longitud;
+      if (latMovil && lonMovil && viaje.origenDetallado?.includes(',')) {
+        const [latO, lonO] = viaje.origenDetallado.split(',').map((n) => parseFloat(n));
+        if (!isNaN(latO) && !isNaN(lonO)) {
+          const R = 6371;
+          const dLat = ((latO - latMovil) * Math.PI) / 180;
+          const dLon = ((lonO - lonMovil) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos((latMovil * Math.PI) / 180) *
+              Math.cos((latO * Math.PI) / 180) *
+              Math.sin(dLon / 2) *
+              Math.sin(dLon / 2);
+          const distLinealKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          if (distLinealKm <= 1.0) {
+            aplicaMinimo = true;
+          }
+        }
+      }
+    }
+
+    sesion.estado = 'CONFIRMANDO_CANCELACION_VIAJE';
+    sesion.viajeCancelarId = viaje.id;
+
+    const avisoCosto = aplicaMinimo
+      ? `\n⚠️ *Importante:* Tu móvil ya se encuentra a menos de 10 cuadras (o en tu puerta), por lo que al cancelar corresponde abonar el viaje mínimo (*$${montoMinimo.toLocaleString('es-AR')}*).\n`
+      : '';
+
+    const msgConfirmar =
+      `⚠️ *¿Cancelar pedido ${cod}?*\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `🟢 *Origen:* ${viaje.origen}\n` +
+      `🔴 *Destino:* ${viaje.destino}\n` +
+      `━━━━━━━━━━━━━━━━━━━` +
+      avisoCosto +
+      `\n¿Confirmás que decidiste no viajar?`;
+
+    return await whatsappService.enviarBotones(
+      cleanFrom,
+      msgConfirmar,
+      [
+        { id: `BTN_SI_CANCELAR_VIAJE_${viaje.id}`, title: '✅ Sí, cancelar' },
+        { id: `BTN_NO_CANCELAR_VIAJE_${viaje.id}`, title: '🔙 No, mantener' },
+      ],
+      'Cancelar Pedido'
+    );
+  },
+
+  /**
+   * Ejecuta la cancelación real del viaje en base de datos y notifica a Central y Chofer
+   */
+  async ejecutarCancelacionViajeWhatsApp(
+    cleanFrom: string,
+    clienteId?: string,
+    viajeIdEspecifico?: string
+  ) {
+    try {
+      const filtroCliente = {
+        OR: [
+          { clienteTelefono: cleanFrom },
+          { clienteTelefono: { contains: cleanFrom.slice(-8) } },
+          ...(clienteId ? [{ clienteId }] : []),
+        ],
+      };
+
+      const viaje = await prisma.viaje.findFirst({
+        where: viajeIdEspecifico
+          ? { id: viajeIdEspecifico, ...filtroCliente }
+          : {
+              ...filtroCliente,
+              estado: { in: ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO'] },
+            },
+        include: {
+          vehiculo: true,
+          chofer: { include: { vehiculo: true } },
+          remiseria: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      resetSesion(cleanFrom);
+
+      if (!viaje) {
+        return await whatsappService.enviarBotones(
+          cleanFrom,
+          'ℹ️ No encontramos ningún pedido activo para cancelar.',
+          [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+          ]
+        );
+      }
+
+      const cod = `#${viaje.id.slice(-4).toUpperCase()}`;
+
+      if (viaje.estado === 'COMPLETADO' || viaje.estado === 'CANCELADO') {
+        return await whatsappService.enviarBotones(
+          cleanFrom,
+          `ℹ️ El pedido *${cod}* ${viaje.estado === 'CANCELADO' ? 'ya estaba cancelado' : 'ya ha finalizado'}.`,
+          [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+          ]
+        );
+      }
+
+      if (viaje.estado === 'EN_CURSO') {
+        return await whatsappService.enviarBotones(
+          cleanFrom,
+          `⚠️ El viaje *${cod}* ya está en curso y no puede cancelarse por este medio.`,
+          [{ id: 'BTN_OPERADOR', title: '📞 Hablar Central' }]
+        );
+      }
+
+      let debeAbonarMinimo = false;
+      let costoCancelacion: number | null = null;
+      let distanciaAlOrigenKm: number | null = null;
+
+      if (viaje.estado === 'ACEPTADO' || viaje.estado === 'EN_CAMINO') {
+        const latMovil = viaje.vehiculo?.latitud || viaje.chofer?.vehiculo?.latitud;
+        const lonMovil = viaje.vehiculo?.longitud || viaje.chofer?.vehiculo?.longitud;
+
+        if (viaje.estado === 'EN_CAMINO') {
+          debeAbonarMinimo = true;
+        } else if (latMovil && lonMovil && viaje.origenDetallado?.includes(',')) {
+          const [latO, lonO] = viaje.origenDetallado.split(',').map((n) => parseFloat(n));
+          if (!isNaN(latO) && !isNaN(lonO)) {
+            const R = 6371;
+            const dLat = ((latO - latMovil) * Math.PI) / 180;
+            const dLon = ((lonO - lonMovil) * Math.PI) / 180;
+            const a =
+              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos((latMovil * Math.PI) / 180) *
+                Math.cos((latO * Math.PI) / 180) *
+                Math.sin(dLon / 2) *
+                Math.sin(dLon / 2);
+            distanciaAlOrigenKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            if (distanciaAlOrigenKm <= 1.0) {
+              debeAbonarMinimo = true;
+            }
+          }
+        }
+
+        if (debeAbonarMinimo) {
+          costoCancelacion = viaje.remiseria?.bajadaBandera || 3500;
+        }
+      }
+
+      const motivo = 'Cancelado por el cliente desde WhatsApp';
+      const updatedViaje = await prisma.viaje.update({
+        where: { id: viaje.id },
+        data: {
+          estado: 'CANCELADO',
+          motivoCancelacion: motivo,
+          canceladoPor: 'CLIENTE',
+          canceladoEn: new Date(),
+          debeAbonarMinimo,
+          costoCancelacion,
+        },
+        include: {
+          cliente: true,
+          chofer: true,
+          vehiculo: true,
+        },
+      });
+
+      // Si el viaje provenía de una reserva programada, cancelar también la reserva asociada
+      await prisma.reserva
+        .updateMany({
+          where: {
+            clienteTelefono: viaje.clienteTelefono || cleanFrom,
+            origen: viaje.origen,
+            destino: viaje.destino,
+            fechaInicio: viaje.fecha,
+            estado: 'ACTIVA',
+          },
+          data: { estado: 'CANCELADA' },
+        })
+        .catch(() => {});
+
+      // Notificar en tiempo real a Central y Chofer vía Socket.IO
+      try {
+        const { getIO } = await import('../lib/socket');
+        const io = getIO();
+        io.to(viaje.remiseriaId).emit('viaje_cancelado', {
+          viajeId: viaje.id,
+          motivo,
+          canceladoPor: 'CLIENTE',
+          debeAbonarMinimo,
+          costoCancelacion,
+          distanciaKm: distanciaAlOrigenKm ? Number(distanciaAlOrigenKm.toFixed(1)) : null,
+          viaje: updatedViaje,
+        });
+        io.to(viaje.remiseriaId).emit('viaje_estado_actualizado', {
+          viajeId: viaje.id,
+          estado: 'CANCELADO',
+          mensaje: `Viaje cancelado por cliente vía WhatsApp`,
+          viaje: updatedViaje,
+        });
+      } catch (sErr) {
+        console.warn('Socket aviso cancelación WhatsApp:', sErr);
+      }
+
+      // Si tenía chofer asignado, enviar notificación Push nativa al chofer
+      if (updatedViaje.choferId) {
+        pushNotificationService
+          .enviarAChofer(updatedViaje.choferId, {
+            title: `🚨 Viaje ${cod} cancelado`,
+            body: `El pasajero canceló el viaje (${viaje.origen} ➔ ${viaje.destino}).`,
+            url: '/chofer/app',
+            tag: `viaje-cancelado-${viaje.id}`,
+            data: { viajeId: viaje.id },
+          })
+          .catch(() => {});
+      }
+
+      const notaMinimo = debeAbonarMinimo
+        ? `\n\n⚠️ _Nota: Como el móvil ya se encontraba a menos de 10 cuadras, se registró el viaje mínimo ($${(costoCancelacion || 3500).toLocaleString('es-AR')})._`
+        : '';
+
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        `❌ *Pedido ${cod} cancelado*\n\nTu solicitud fue cancelada correctamente y avisamos a nuestra central.${notaMinimo}\n\n¡Cuando necesites viajar nuevamente estamos a tu disposición!`,
+        [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+        ]
+      );
+    } catch (err) {
+      console.error('Error cancelando viaje desde WhatsApp:', err);
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarTexto(
+        cleanFrom,
+        'Tuvimos un inconveniente al cancelar el pedido. Por favor comunicate con nuestra central al 2346-427637 o 2346-433000.'
+      );
+    }
+  },
+
+  /**
+   * Solicita confirmación antes de cancelar una reserva programada desde WhatsApp
+   */
+  async solicitarConfirmacionCancelarReserva(
+    cleanFrom: string,
+    sesion: SesionClienteWhatsApp,
+    clienteId?: string,
+    reservaIdEspecifica?: string
+  ) {
+    const filtroCliente = {
+      OR: [
+        { clienteTelefono: cleanFrom },
+        { clienteTelefono: { contains: cleanFrom.slice(-8) } },
+        ...(clienteId ? [{ clienteId }] : []),
+      ],
+    };
+
+    const reserva = await prisma.reserva.findFirst({
+      where: reservaIdEspecifica
+        ? { id: reservaIdEspecifica, ...filtroCliente }
+        : {
+            ...filtroCliente,
+            estado: 'ACTIVA',
+            fechaInicio: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+          },
+      orderBy: { fechaInicio: 'asc' },
+    });
+
+    if (!reserva || reserva.estado !== 'ACTIVA') {
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        'ℹ️ No tenés ninguna reserva programada activa para cancelar.',
+        [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+        ]
+      );
+    }
+
+    sesion.estado = 'CONFIRMANDO_CANCELACION_RESERVA';
+    sesion.reservaCancelarId = reserva.id;
+    const { fechaTexto } = formatearFechaLegible(reserva.fechaInicio);
+
+    const msgConfirmar =
+      `⚠️ *¿Cancelar reserva programada?*\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `🗓️ *Fecha y Hora:* ${fechaTexto}\n` +
+      `🟢 *Origen:* ${reserva.origen}\n` +
+      `🔴 *Destino:* ${reserva.destino}\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `¿Confirmás que deseás cancelar esta reserva?`;
+
+    return await whatsappService.enviarBotones(
+      cleanFrom,
+      msgConfirmar,
+      [
+        { id: `BTN_SI_CANCELAR_RESERVA_${reserva.id}`, title: '✅ Sí, cancelar' },
+        { id: `BTN_NO_CANCELAR_RESERVA_${reserva.id}`, title: '🔙 No, mantener' },
+      ],
+      'Cancelar Reserva'
+    );
+  },
+
+  /**
+   * Ejecuta la cancelación de una reserva programada y su viaje pendiente asociado
+   */
+  async ejecutarCancelacionReservaWhatsApp(
+    cleanFrom: string,
+    clienteId?: string,
+    reservaIdEspecifica?: string
+  ) {
+    try {
+      const filtroCliente = {
+        OR: [
+          { clienteTelefono: cleanFrom },
+          { clienteTelefono: { contains: cleanFrom.slice(-8) } },
+          ...(clienteId ? [{ clienteId }] : []),
+        ],
+      };
+
+      const reserva = await prisma.reserva.findFirst({
+        where: reservaIdEspecifica
+          ? { id: reservaIdEspecifica, ...filtroCliente }
+          : {
+              ...filtroCliente,
+              estado: 'ACTIVA',
+            },
+        orderBy: { fechaInicio: 'asc' },
+      });
+
+      resetSesion(cleanFrom);
+
+      if (!reserva || reserva.estado !== 'ACTIVA') {
+        return await whatsappService.enviarBotones(
+          cleanFrom,
+          'ℹ️ Esta reserva ya fue cancelada o finalizada.',
+          [
+            { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+            { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+          ]
+        );
+      }
+
+      await prisma.reserva.update({
+        where: { id: reserva.id },
+        data: { estado: 'CANCELADA' },
+      });
+
+      // Buscar y cancelar también el Viaje programado creado junto a la reserva
+      const codReserva = reserva.id.slice(-4).toUpperCase();
+      const viajeAsociado = await prisma.viaje.findFirst({
+        where: {
+          remiseriaId: reserva.remiseriaId,
+          estado: { in: ['PENDIENTE', 'ACEPTADO'] },
+          OR: [
+            { observaciones: { contains: `Reserva #${codReserva}` } },
+            {
+              clienteTelefono: reserva.clienteTelefono,
+              origen: reserva.origen,
+              destino: reserva.destino,
+              fecha: reserva.fechaInicio,
+            },
+          ],
+        },
+        include: { cliente: true, chofer: true, vehiculo: true },
+      });
+
+      if (viajeAsociado) {
+        const updatedViaje = await prisma.viaje.update({
+          where: { id: viajeAsociado.id },
+          data: {
+            estado: 'CANCELADO',
+            motivoCancelacion: 'Reserva cancelada por el cliente desde WhatsApp',
+            canceladoPor: 'CLIENTE',
+            canceladoEn: new Date(),
+          },
+          include: { cliente: true, chofer: true, vehiculo: true },
+        });
+
+        try {
+          const { getIO } = await import('../lib/socket');
+          const io = getIO();
+          io.to(reserva.remiseriaId).emit('viaje_cancelado', {
+            viajeId: viajeAsociado.id,
+            motivo: 'Reserva cancelada por el cliente desde WhatsApp',
+            canceladoPor: 'CLIENTE',
+            debeAbonarMinimo: false,
+            costoCancelacion: null,
+            viaje: updatedViaje,
+          });
+          io.to(reserva.remiseriaId).emit('viaje_estado_actualizado', {
+            viajeId: viajeAsociado.id,
+            estado: 'CANCELADO',
+            mensaje: 'Reserva cancelada por el cliente vía WhatsApp',
+            viaje: updatedViaje,
+          });
+        } catch {}
+      }
+
+      const { fechaTexto } = formatearFechaLegible(reserva.fechaInicio);
+      return await whatsappService.enviarBotones(
+        cleanFrom,
+        `❌ *Reserva cancelada*\n\nTu reserva programada para el *${fechaTexto}* (${reserva.origen} ➔ ${reserva.destino}) fue cancelada correctamente.\n\n¡Cuando nos necesites volvé a escribirnos!`,
+        [
+          { id: 'BTN_PEDIR_AHORA', title: '🚕 Pedir Ahora' },
+          { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
+        ]
+      );
+    } catch (err) {
+      console.error('Error cancelando reserva desde WhatsApp:', err);
+      resetSesion(cleanFrom);
+      return await whatsappService.enviarTexto(
+        cleanFrom,
+        'Tuvimos un inconveniente al cancelar la reserva. Por favor comunicate con nuestra central al 2346-427637 o 2346-433000.'
+      );
+    }
   },
 
   /**
@@ -2236,7 +3000,13 @@ export const whatsappBotService = {
       await whatsappService.enviarTexto(telefono, msg).catch(() => {});
     } else if (nuevoEstado === 'ACEPTADO') {
       const msg = `🚗 *¡Chofer en camino!*\n${choferNombre} aceptó tu viaje${autoStr} y va en camino a buscarte.`;
-      await whatsappService.enviarTexto(telefono, msg).catch(() => {});
+      await whatsappService
+        .enviarBotones(telefono, msg, [
+          { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
+          { id: viaje.id ? `BTN_CANCELAR_VIAJE_${viaje.id}` : 'BTN_CANCELAR_VIAJE', title: '❌ Cancelar Pedido' },
+          { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+        ])
+        .catch(() => {});
     } else if (nuevoEstado === 'LLEGANDO') {
       const msg = `📍 *¡Tu remis está a 2 cuadras!*\n${choferNombre}${autoStr} está llegando. ¡Podés ir preparándote!`;
       await whatsappService.enviarTexto(telefono, msg).catch(() => {});
@@ -2273,7 +3043,9 @@ export const whatsappBotService = {
           `📍 *Recorrido:* ${viaje.origen} ➔ ${viaje.destino}\n` +
           `━━━━━━━━━━━━━━━━━━━\n` +
           `✨ *¡Muchas gracias por elegir Remises Bruno!*\n` +
-          `Esperamos que hayas tenido un excelente viaje. Ante cualquier consulta estamos a tu disposición. ¡Hasta la próxima! 🚕🙌`;
+          `Esperamos que hayas tenido un excelente viaje. Ante cualquier consulta estamos a tu disposición. ¡Hasta la próxima! 🚕🙌\n\n` +
+          `📲 *¿Todavía no tenés nuestra App?*\n` +
+          `Ingresá en ${APP_CLIENTES_URL} e instalala en tu celular para pedir viajes al instante, seguir el móvil en vivo y viajar siempre aunque algún día falle WhatsApp.`;
 
         await whatsappService.enviarTexto(telefono, msgFinalizado).catch((err) => {
           console.warn('Aviso enviando WhatsApp fin de viaje:', err);
