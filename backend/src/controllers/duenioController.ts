@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
+import { sendPasswordChangedEmail } from '../lib/mailer';
 import { ApiResponse, CreateDuenioRequest, UpdateDuenioRequest, AuthenticatedRequest } from '../types';
 
 export const getAllDuenios = async (req: Request, res: Response) => {
@@ -275,10 +276,10 @@ export const updateDuenio = async (req: AuthenticatedRequest, res: Response) => 
         userUpdateData.email = email;
       }
       
-      // Ambos pueden cambiar contraseña
-      if (password !== undefined) {
+      // Ambos pueden cambiar contraseña (solo si ingresó una clave nueva válida)
+      if (password && password.trim().length >= 6) {
         const saltRounds = 12;
-        userUpdateData.passwordHash = await bcrypt.hash(password, saltRounds);
+        userUpdateData.passwordHash = await bcrypt.hash(password.trim(), saltRounds);
       }
 
       if (Object.keys(userUpdateData).length > 0) {
@@ -290,6 +291,13 @@ export const updateDuenio = async (req: AuthenticatedRequest, res: Response) => 
 
       return updatedDuenio;
     });
+
+    if (password && password.trim().length >= 6) {
+      const targetEmail = email || duenio.user?.email;
+      if (targetEmail) {
+        sendPasswordChangedEmail(targetEmail).catch(() => {});
+      }
+    }
 
     // Track update if user is authenticated
     if (req.user) {

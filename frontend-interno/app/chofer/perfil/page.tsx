@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { choferService } from '@/lib/api';
+import { choferService, authService } from '@/lib/api';
 import ThemeToggle from '@/components/ThemeToggle';
 import Link from 'next/link';
 import {
@@ -24,6 +24,8 @@ import {
   ShieldAlert,
   Edit3,
   Calendar,
+  Lock,
+  Mail,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Vehiculo } from '@/types';
@@ -57,6 +59,57 @@ export default function ChoferPerfilPage() {
     vtoMatafuego: '',
   });
   const [guardandoDoc, setGuardandoDoc] = useState(false);
+
+  // Modal para Cambiar Contraseña del Chofer
+  const [modalPassword, setModalPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [guardandoPassword, setGuardandoPassword] = useState(false);
+  const [enviandoLinkEmail, setEnviandoLinkEmail] = useState(false);
+
+  const handleCambiarPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      toast.error('La nueva contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('Las contraseñas nuevas no coinciden');
+      return;
+    }
+    setGuardandoPassword(true);
+    try {
+      const res = await authService.changePassword(currentPassword, newPassword);
+      if (res.success) {
+        toast.success('¡Contraseña actualizada con éxito!');
+        setModalPassword(false);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+      } else {
+        toast.error(res.message || 'No se pudo actualizar la contraseña');
+      }
+    } finally {
+      setGuardandoPassword(false);
+    }
+  };
+
+  const handleEnviarLinkRecuperacion = async () => {
+    if (!user?.email) return;
+    setEnviandoLinkEmail(true);
+    try {
+      const res = await authService.forgotPassword(user.email);
+      if (res.success) {
+        toast.success(`Te enviamos un enlace para cambiar tu clave a ${user.email}`, { duration: 5000 });
+        setModalPassword(false);
+      } else {
+        toast.error(res.message || 'No se pudo enviar el correo');
+      }
+    } finally {
+      setEnviandoLinkEmail(false);
+    }
+  };
 
   const toInputDate = (dateVal?: string | Date | null) => {
     if (!dateVal) return '';
@@ -623,6 +676,28 @@ export default function ChoferPerfilPage() {
         <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors" />
       </Link>
 
+      {/* Seguridad: Cambiar Contraseña */}
+      <button
+        type="button"
+        onClick={() => setModalPassword(true)}
+        className="w-full text-left bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-4 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-700 transition-all group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800/40 flex items-center justify-center">
+            <Lock className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+              Seguridad y Contraseña
+            </h4>
+            <p className="text-xs text-gray-400 dark:text-slate-400">
+              Cambiá tu clave de acceso o solicitá un enlace por correo ({user?.email})
+            </p>
+          </div>
+        </div>
+        <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
+      </button>
+
       {/* ==================================================== */}
       {/* MODAL: CAMBIAR VEHÍCULO / UNIDAD                     */}
       {/* ==================================================== */}
@@ -971,6 +1046,111 @@ export default function ChoferPerfilPage() {
                   className="flex-2 py-3 px-4 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl shadow-md shadow-primary-600/20 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5"
                 >
                   {guardandoDoc ? 'Guardando...' : 'Guardar Vencimientos'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* MODAL: CAMBIAR CONTRASEÑA                            */}
+      {/* ==================================================== */}
+      {modalPassword && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-2xl border border-gray-100 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-gray-900 dark:text-white">Cambiar Contraseña</h3>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">Actualizá tu clave de ingreso</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalPassword(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCambiarPassword} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                  Contraseña actual (al inicio es tu DNI)
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                  Nueva contraseña (mín. 6 caracteres)
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                  Repetir nueva contraseña
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {user?.email && !user.email.endsWith('@brunoremises.com.ar') && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    disabled={enviandoLinkEmail}
+                    onClick={handleEnviarLinkRecuperacion}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    {enviandoLinkEmail ? 'Enviando correo...' : '¿No recordás tu clave actual? Enviar link por email'}
+                  </button>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-3 border-t border-gray-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setModalPassword(false)}
+                  className="flex-1 py-2.5 text-xs font-semibold text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoPassword}
+                  className="flex-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md shadow-blue-600/20 disabled:opacity-50 transition-all"
+                >
+                  {guardandoPassword ? 'Actualizando...' : 'Guardar Nueva Clave'}
                 </button>
               </div>
             </form>

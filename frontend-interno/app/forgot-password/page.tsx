@@ -138,8 +138,8 @@ export default function ForgotPasswordPage() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-slate-600 mt-6">
-          Powered by <span className="text-slate-500">rzcore.dev</span>
+        <p className="text-center text-xs text-slate-500 mt-6">
+          Remises Bruno • Acceso exclusivo para Choferes, Coordinadores y Administración
         </p>
       </div>
     </div>

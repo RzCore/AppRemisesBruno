@@ -213,8 +213,8 @@ function ResetPasswordForm() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-slate-600 mt-6">
-          Powered by <span className="text-slate-500">rzcore.dev</span>
+        <p className="text-center text-xs text-slate-500 mt-6">
+          Remises Bruno • Plataforma Interna de Flota y Gestión
         </p>
       </div>
     </div>

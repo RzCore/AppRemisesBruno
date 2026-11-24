@@ -7,12 +7,14 @@ import {
   validateToken,
   forgotPassword,
   resetPassword,
+  changePassword,
   verificarDni,
   loginCliente,
   solicitarCodigoCliente,
   verificarCodigoCliente,
   registroExpressCliente
 } from '../controllers/authController';
+import { authenticateToken } from '../middleware/auth';
 import { body } from 'express-validator';
 
 const router = Router();
@@ -38,6 +40,7 @@ router.post('/refresh', refreshToken);
 router.get('/validate', validateToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
+router.post('/change-password', authenticateToken, changePassword);
 
 // Rutas exclusivas para login y acceso de Clientes (DNI, Teléfono, PIN o WhatsApp OTP)
 router.post('/cliente/login', loginCliente);

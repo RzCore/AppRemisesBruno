@@ -5,8 +5,9 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { ApiResponse, LoginRequest, RegisterRequest } from '../types';
 import { JwtPayload } from 'jsonwebtoken';
-import { sendPasswordResetEmail } from '../lib/mailer';
+import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../lib/mailer';
 import { identityVerificationService } from '../services/identityVerificationService';
+import { AuthenticatedRequest } from '../types';
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -496,24 +497,31 @@ export const validateToken = async (req: Request, res: Response) => {
   }
 }; 
 
-// Solicitar recuperación de contraseña
+// Solicitar recuperación de contraseña (exclusivo Choferes, Coordinadores y Dueño/Admin)
 export const forgotPassword = async (req: Request, res: Response) => {
   try {
-    const { email } = req.body;
+    const rawEmail = req.body?.email;
 
-    if (!email) {
+    if (!rawEmail || typeof rawEmail !== 'string') {
       return res.status(400).json({ success: false, error: 'El email es requerido' });
     }
 
-    // Buscar usuario (respuesta genérica por seguridad)
-    const user = await prisma.user.findUnique({ where: { email } });
+    const emailNorm = rawEmail.trim().toLowerCase();
 
-    if (user && user.activo) {
+    // Buscar usuario de personal activo (respuesta genérica por seguridad)
+    const user = await prisma.user.findFirst({
+      where: {
+        email: { equals: emailNorm, mode: 'insensitive' },
+      },
+    });
+
+    const staffRoles = ['CHOFER', 'COORDINADOR', 'DUENIO', 'ADMIN'];
+
+    if (user && user.activo && staffRoles.includes(user.rol)) {
       // Generar token seguro
       const token = crypto.randomBytes(32).toString('hex');
       const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
-      // Guardar token en BD
       await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -522,31 +530,44 @@ export const forgotPassword = async (req: Request, res: Response) => {
         },
       });
 
-      // Armar URL del frontend interno (Choferes, Coordinador, Dueño)
+      // Determinar subdominio exacto según el rol del usuario o el origen de la petición
       const reqOrigin = req.headers.origin;
       const isAllowedOrigin =
         reqOrigin &&
-        (/^https:\/\/([a-z0-9-]+\.)?brunoremises\.com\.ar$/i.test(reqOrigin) ||
+        (/^https:\/\/(choferes|coordinacion|coordinador|admin|duenio)\.brunoremises\.com\.ar$/i.test(reqOrigin) ||
           /^http:\/\/localhost:\d+$/i.test(reqOrigin));
+
+      const roleProdSubdomain =
+        user.rol === 'CHOFER'
+          ? 'https://choferes.brunoremises.com.ar'
+          : user.rol === 'COORDINADOR'
+          ? 'https://coordinacion.brunoremises.com.ar'
+          : 'https://admin.brunoremises.com.ar';
+
       const frontendUrl =
         (isAllowedOrigin ? reqOrigin : null) ||
         process.env.FRONTEND_INTERNO_URL ||
-        process.env.FRONTEND_URL ||
-        'http://localhost:3002';
+        (process.env.NODE_ENV === 'production' ? roleProdSubdomain : 'http://localhost:3002');
+
       const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
-      // Enviar email
-      await sendPasswordResetEmail(email, resetUrl);
+      const rolLabel =
+        user.rol === 'CHOFER'
+          ? 'Portal Choferes'
+          : user.rol === 'COORDINADOR'
+          ? 'Central de Coordinación'
+          : 'Administración / Dueño';
+
+      await sendPasswordResetEmail(user.email, resetUrl, rolLabel);
     }
 
-    // Siempre responder igual (no revelar si el email existe)
     res.json({
       success: true,
       message: 'Si el email existe en nuestro sistema, recibirás un link para restablecer tu contraseña.',
     });
   } catch (error) {
     console.error('Error en forgotPassword:', error);
-    res.status(500).json({ success: false, error: 'Error interno del servidor' });
+    res.status(500).json({ success: false, error: 'Error al enviar el correo de recuperación. Verificá que tu email sea válido.' });
   }
 };
 
@@ -590,10 +611,71 @@ export const resetPassword = async (req: Request, res: Response) => {
       },
     });
 
+    sendPasswordChangedEmail(user.email).catch(() => {});
+
     res.json({ success: true, message: 'Contraseña restablecida exitosamente. Ya podés iniciar sesión.' });
   } catch (error) {
     console.error('Error en resetPassword:', error);
     res.status(500).json({ success: false, error: 'Error interno del servidor' });
+  }
+};
+
+// Cambiar contraseña estando autenticado (Choferes, Coordinadores y Dueño)
+export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'No autorizado' });
+    }
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Debés ingresar tu contraseña actual y la nueva contraseña',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'La nueva contraseña debe tener al menos 6 caracteres',
+      });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    }
+
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'La contraseña actual ingresada es incorrecta',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+      },
+    });
+
+    sendPasswordChangedEmail(user.email).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: '¡Contraseña actualizada exitosamente!',
+    });
+  } catch (error) {
+    console.error('Error en changePassword:', error);
+    return res.status(500).json({ success: false, message: 'Error interno del servidor' });
   }
 };
 

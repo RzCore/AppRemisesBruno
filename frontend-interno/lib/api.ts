@@ -227,6 +227,30 @@ export const authService = {
     }
   },
 
+  changePassword: async (currentPassword: string, newPassword: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post('/auth/change-password', { currentPassword, newPassword });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'Error al cambiar la contraseña',
+      };
+    }
+  },
+
+  forgotPassword: async (email: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post('/auth/forgot-password', { email });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Error al solicitar enlace',
+      };
+    }
+  },
+
   register: async (data: RegisterData): Promise<ApiResponse<AuthResponse>> => {
     try {
       const response = await api.post('/auth/register', data);
