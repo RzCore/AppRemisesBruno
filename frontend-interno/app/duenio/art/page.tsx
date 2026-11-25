@@ -40,6 +40,7 @@ import {
   ShieldCheck,
   Check,
   CheckCircle,
+  Eye,
   X
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -87,6 +88,8 @@ export default function ArtPage() {
 
   // Modal Configurar y Sincronizar Portal Externo (Feleval / SIMAR2)
   const [portalModalArt, setPortalModalArt] = useState<any | null>(null);
+  // Modal Detalle Completo de un Viaje ART (importes, recorrido, observaciones, etc.)
+  const [viajeDetalleModal, setViajeDetalleModal] = useState<any | null>(null);
   const [portalConfigForm, setPortalConfigForm] = useState({
     portalExternoTipo: 'FELEVAL' as 'FELEVAL' | 'SIMAR2',
     portalExternoActivo: false,
@@ -1567,12 +1570,25 @@ export default function ArtPage() {
                           </div>
                         </div>
 
-                        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1 text-xs">
+                        <div
+                          onClick={() => setViajeDetalleModal(v)}
+                          className="bg-slate-50 hover:bg-slate-100 rounded-xl p-2.5 border border-slate-100 space-y-1 text-xs cursor-pointer transition-colors"
+                        >
                           <div className="text-slate-700 break-words">
                             <strong className="text-emerald-700">Orig:</strong> {v.origen}
                           </div>
                           <div className="text-slate-700 break-words">
                             <strong className="text-indigo-700">Dest:</strong> {v.destino}
+                          </div>
+                          <div className="pt-1 flex items-center justify-between text-[11px] border-t border-slate-200/70">
+                            <span className="font-semibold text-emerald-700">
+                              {Number(v.precioArt || v.precio || 0) > 0
+                                ? `Importe: $${Number(v.precioArt || v.precio).toLocaleString('es-AR')}`
+                                : 'Importe: a calcular / por km'}
+                            </span>
+                            <span className="text-primary-600 font-bold flex items-center gap-1">
+                              <Eye className="w-3 h-3" /> Ver detalle
+                            </span>
                           </div>
                         </div>
 
@@ -1684,13 +1700,21 @@ export default function ArtPage() {
                                 );
                               })()}
                             </td>
-                            <td className="px-4 py-3">
+                            <td
+                              onClick={() => setViajeDetalleModal(v)}
+                              className="px-4 py-3 cursor-pointer hover:underline"
+                              title="Ver detalle completo del viaje"
+                            >
                               <div className="font-bold text-slate-900">{v.clienteNombre || 'Sin nombre'}</div>
                               {v.clienteTelefono && (
                                 <div className="text-[11px] text-slate-500">{v.clienteTelefono}</div>
                               )}
                             </td>
-                            <td className="px-4 py-3 max-w-xs">
+                            <td
+                              onClick={() => setViajeDetalleModal(v)}
+                              className="px-4 py-3 max-w-xs cursor-pointer"
+                              title="Ver detalle completo del viaje"
+                            >
                               <div className="text-[11px] text-slate-700 truncate" title={v.origen}>
                                 <strong className="text-emerald-700">Orig:</strong> {v.origen}
                               </div>
@@ -1722,18 +1746,28 @@ export default function ArtPage() {
                               </select>
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-right">
-                              <button
-                                type="button"
-                                disabled={asignandoViajeId === v.id || !selectedCh}
-                                onClick={() => handleAsignarChoferDesdeTabla(v)}
-                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold shadow-xs transition-all"
-                              >
-                                {asignandoViajeId === v.id
-                                  ? 'Guardando...'
-                                  : v.choferId
-                                  ? 'Reasignar'
-                                  : 'Asignar Chofer'}
-                              </button>
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setViajeDetalleModal(v)}
+                                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                                  title="Ver detalle e importes del viaje"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={asignandoViajeId === v.id || !selectedCh}
+                                  onClick={() => handleAsignarChoferDesdeTabla(v)}
+                                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold shadow-xs transition-all"
+                                >
+                                  {asignandoViajeId === v.id
+                                    ? 'Guardando...'
+                                    : v.choferId
+                                    ? 'Reasignar'
+                                    : 'Asignar Chofer'}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -2562,10 +2596,18 @@ export default function ArtPage() {
                           )}
                         </div>
 
-                        <div className="text-xs text-slate-700">
-                          <p className="font-semibold text-slate-900">
-                            {viaje.clienteNombre || `${viaje.cliente?.nombre || ''} ${viaje.cliente?.apellido || ''}`.trim() || 'Pasajero'}
-                          </p>
+                        <div
+                          onClick={() => setViajeDetalleModal(viaje)}
+                          className="text-xs text-slate-700 cursor-pointer group"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-semibold text-slate-900 group-hover:text-primary-600">
+                              {viaje.clienteNombre || `${viaje.cliente?.nombre || ''} ${viaje.cliente?.apellido || ''}`.trim() || 'Pasajero'}
+                            </p>
+                            <span className="text-[11px] font-bold text-primary-600 inline-flex items-center gap-1 shrink-0">
+                              <Eye className="w-3 h-3" /> Detalle
+                            </span>
+                          </div>
                           <p className="text-slate-500 truncate mt-0.5">
                             {viaje.origen} → {viaje.destino}
                           </p>
@@ -2672,9 +2714,16 @@ export default function ArtPage() {
                             <span className="font-semibold text-slate-900 block">
                               {fecha.toLocaleDateString('es-AR')}
                             </span>
-                            <span className="text-[11px] text-slate-500">
+                            <span className="text-[11px] text-slate-500 block">
                               {fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => setViajeDetalleModal(viaje)}
+                              className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-primary-600 hover:text-primary-700 hover:underline"
+                            >
+                              <Eye className="w-3 h-3" /> Ver detalle
+                            </button>
                           </td>
 
                           {/* ART / Siniestro */}
@@ -5418,6 +5467,250 @@ export default function ArtPage() {
           </div>
         </div>
       )}
+
+      {/* ============================================================== */}
+      {/* MODAL: DETALLE COMPLETO DE VIAJE ART (IMPORTES Y DATOS)        */}
+      {/* ============================================================== */}
+      {viajeDetalleModal && (() => {
+        const v = viajeDetalleModal;
+        const artObj = v.artEmpresa || artList.find((a) => a.id === v.artEmpresaId);
+        const artColors = getArtColorClasses(artObj?.nombre, v.artEmpresaId);
+        const peajes = Number(v.montoPeajes || 0);
+        const esperaMin = Math.round(Number(v.tiempoEsperaSegundos || 0) / 60);
+        const km = Number(v.distanciaKmConPasajero || 0);
+        const precioArtBase = Number(v.precioFacturaArt ?? v.precioArt ?? 0);
+        const precioChoferBase = Number(v.pagaChofer ?? v.precio ?? 0);
+        const totalFacturaArt = precioArtBase + peajes;
+        const totalPagaChofer = precioChoferBase + peajes;
+        const gananciaNeta =
+          v.gananciaNeta !== undefined && v.gananciaNeta !== null
+            ? Number(v.gananciaNeta)
+            : Math.max(0, totalFacturaArt - totalPagaChofer);
+        const obsStr = String(v.observaciones || '');
+        const esLocal = obsStr.includes('[LOCAL]');
+        const desdeBase = obsStr.includes('DESDE BASE');
+        const origenSistema = v.externoId?.startsWith('FELEVAL:')
+          ? 'Importado de Feleval'
+          : v.externoId?.startsWith('SIMAR2:')
+          ? 'Importado de SIMAR2'
+          : 'Carga manual';
+        const pasajeroNombre =
+          v.clienteNombre ||
+          `${v.cliente?.nombre || ''} ${v.cliente?.apellido || ''}`.trim() ||
+          'Sin nombre';
+        const pasajeroTel = v.clienteTelefono || v.cliente?.telefono || '';
+        const choferNombre = v.chofer
+          ? `${v.chofer.nombre || ''} ${v.chofer.apellido || ''}`.trim() +
+            (v.chofer.numeroChofer ? ` (#${v.chofer.numeroChofer})` : '')
+          : '';
+
+        return (
+          <div
+            className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto"
+            onClick={() => setViajeDetalleModal(null)}
+          >
+            <div
+              className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden max-h-[92vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 bg-slate-50/70">
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border font-bold text-xs ${artColors.badge}`}>
+                      <span className={`w-2 h-2 rounded-full ${artColors.dot}`} />
+                      ART - {artObj?.nombre || 'Empresa'}
+                    </span>
+                    {v.numeroSiniestro && (
+                      <span className={`px-2 py-0.5 rounded-md border text-xs font-mono font-bold ${artColors.siniestro}`}>
+                        Sin: {v.numeroSiniestro}
+                      </span>
+                    )}
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                      v.estado === 'COMPLETADO' || v.estado === 'FINALIZADO'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : v.estado === 'CANCELADO'
+                        ? 'bg-rose-100 text-rose-800'
+                        : v.estado === 'ACEPTADO' || v.estado === 'EN_CAMINO' || v.estado === 'EN_CURSO'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {v.estado || 'PENDIENTE'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                      {origenSistema}
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                    Detalle del Viaje ART
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViajeDetalleModal(null)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Contenido scrollable */}
+              <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-xs sm:text-sm">
+                {/* Fecha, Turno, Salida y Modalidad */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Fecha</span>
+                    <span className="font-bold text-slate-900 mt-0.5 block">
+                      {v.fecha ? new Date(v.fecha).toLocaleDateString('es-AR') : '-'}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Hora Turno</span>
+                    <span className="font-bold text-indigo-700 mt-0.5 block">
+                      {v.horaTurno || (v.fecha ? new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '-')} hs
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Hora Salida</span>
+                    <span className="font-bold text-amber-700 mt-0.5 block">
+                      {v.horaSalidaChofer ? `${v.horaSalidaChofer} hs` : 'Sin definir'}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Modalidad / Km</span>
+                    <span className="font-bold text-slate-900 mt-0.5 block">
+                      {esLocal ? 'Local (Fijo)' : desdeBase ? 'Por Km (Base)' : 'Por Km'}
+                      {km > 0 ? ` • ${km} km` : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Desglose de Importes */}
+                <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4" /> Importes Cargados
+                    </span>
+                    {artObj && (
+                      <span className="text-[11px] text-emerald-700 font-medium">
+                        Tarifa {artObj.nombre}: ${Number(artObj.valorKm || 0).toLocaleString('es-AR')}/km • Local ${Number(artObj.precioTramo || 0).toLocaleString('es-AR')}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200/70">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Facturar a ART</span>
+                      <span className="text-lg font-black text-emerald-700 block mt-0.5">
+                        {totalFacturaArt > 0 ? `$${totalFacturaArt.toLocaleString('es-AR')}` : 'A calcular'}
+                      </span>
+                      {peajes > 0 && (
+                        <span className="text-[10px] text-slate-500">Incluye ${peajes.toLocaleString('es-AR')} de peajes</span>
+                      )}
+                    </div>
+                    <div className="p-3 rounded-xl bg-white border border-slate-200/70">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Paga al Chofer</span>
+                      <span className="text-lg font-black text-slate-900 block mt-0.5">
+                        {totalPagaChofer > 0 ? `$${totalPagaChofer.toLocaleString('es-AR')}` : 'A calcular'}
+                      </span>
+                      {esperaMin > 0 && (
+                        <span className="text-[10px] text-slate-500">Espera registrada: {esperaMin} min</span>
+                      )}
+                    </div>
+                    <div className="p-3 rounded-xl bg-white border border-slate-200/70">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Ganancia Agencia</span>
+                      <span className="text-lg font-black text-indigo-700 block mt-0.5">
+                        {totalFacturaArt > 0 ? `$${gananciaNeta.toLocaleString('es-AR')}` : '-'}
+                      </span>
+                      {totalFacturaArt === 0 && (
+                        <span className="text-[10px] text-amber-700">Se calcula al cargar/finalizar km</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pasajero y Chofer */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                      <User className="w-3.5 h-3.5" /> Pasajero
+                    </span>
+                    <p className="font-bold text-slate-900">{pasajeroNombre}</p>
+                    {pasajeroTel ? (
+                      <a
+                        href={`tel:${pasajeroTel}`}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:underline"
+                      >
+                        <Phone className="w-3.5 h-3.5" /> {pasajeroTel}
+                      </a>
+                    ) : (
+                      <p className="text-xs text-slate-400">Sin teléfono registrado</p>
+                    )}
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                      <Car className="w-3.5 h-3.5" /> Chofer Asignado
+                    </span>
+                    {choferNombre ? (
+                      <>
+                        <p className="font-bold text-slate-900">{choferNombre}</p>
+                        {v.vehiculo && (
+                          <p className="text-xs text-slate-500">
+                            {v.vehiculo.patente} • {v.vehiculo.marca} {v.vehiculo.modelo}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-xs font-semibold text-amber-700">Sin chofer asignado todavía</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Recorrido completo */}
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-2.5">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5" /> Recorrido
+                  </span>
+                  <div className="space-y-1.5 text-xs sm:text-sm">
+                    <div className="break-words">
+                      <span className="font-bold text-emerald-700">Origen: </span>
+                      <span className="text-slate-800">{v.origen || 'A confirmar'}</span>
+                    </div>
+                    <div className="break-words">
+                      <span className="font-bold text-indigo-700">Destino: </span>
+                      <span className="text-slate-800">{v.destino || 'A confirmar'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Observaciones / Metadata del Portal */}
+                {obsStr && (
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                      <FileText className="w-3.5 h-3.5" /> Observaciones y Datos del Portal
+                    </span>
+                    <p className="text-xs text-slate-700 whitespace-pre-wrap break-words leading-relaxed">
+                      {obsStr}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/70 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViajeDetalleModal(null)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
