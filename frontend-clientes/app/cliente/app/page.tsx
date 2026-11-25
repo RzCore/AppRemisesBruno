@@ -1358,7 +1358,7 @@ export default function ClienteApp() {
           }}
         ></div>
         <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-transparent to-white/90 dark:from-slate-950/70 dark:via-transparent dark:to-slate-950/90"></div>
-        {estadoViaje === 'IDLE' && (
+        {estadoViaje === 'IDLE' && estadoAgencia.abierta && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 p-8 text-center select-none pointer-events-none">
             <Compass className="w-16 h-16 mb-2 text-slate-300 dark:text-slate-600 animate-pulse" />
             <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">¿A dónde quieres ir hoy?</h3>
@@ -1396,11 +1396,16 @@ export default function ClienteApp() {
                       🚗 Reapertura estimada: {estadoAgencia.reaperturaEstimada}
                     </p>
                   )}
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 pt-1">
+                    La carga de viajes se habilitará automáticamente apenas retomemos la atención.
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
+          {estadoAgencia.abierta && (
+            <>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-800 transition-colors">
             <div className="p-4 space-y-3.5">
               
@@ -1665,6 +1670,8 @@ export default function ClienteApp() {
               )}
             </div>
           )}
+            </>
+          )}
         </div>
       )}
 
@@ -1672,7 +1679,7 @@ export default function ClienteApp() {
       <div className="mt-auto z-10 w-full max-w-lg mx-auto p-4 animate-slide-up">
         
         {/* Caso 1: Origen y Destino ingresados pero no cotizados */}
-        {estadoViaje === 'IDLE' && origen && destino && !presupuesto && !isCalculando && (
+        {estadoViaje === 'IDLE' && estadoAgencia.abierta && origen && destino && !presupuesto && !isCalculando && (
           <button 
             onClick={() => calcularPrecio()}
             className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl py-4 shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm"
@@ -1683,7 +1690,7 @@ export default function ClienteApp() {
         )}
 
         {/* Caso 2: Calculando */}
-        {isCalculando && (
+        {isCalculando && estadoAgencia.abierta && (
           <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl text-center space-y-3">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400 mx-auto"></div>
             <p className="text-gray-600 dark:text-slate-300 font-semibold text-sm">Cotizando viaje y buscando mejor ruta...</p>
@@ -1691,7 +1698,7 @@ export default function ClienteApp() {
         )}
 
         {/* Caso 3: Presupuesto Listo para pedir */}
-        {estadoViaje === 'IDLE' && presupuesto && !isCalculando && (
+        {estadoViaje === 'IDLE' && estadoAgencia.abierta && presupuesto && !isCalculando && (
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-800 overflow-hidden transition-colors">
             <div className="p-5 space-y-4">
               
