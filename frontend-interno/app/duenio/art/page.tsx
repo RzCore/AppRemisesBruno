@@ -2579,7 +2579,7 @@ export default function ArtPage() {
                       <input
                         type="number"
                         min="0"
-                        step="50"
+                        step="any"
                         required
                         value={formData.precioTramo}
                         onChange={(e) => setFormData({ ...formData, precioTramo: parseFloat(e.target.value) || 0 })}
@@ -2599,7 +2599,7 @@ export default function ArtPage() {
                       <input
                         type="number"
                         min="0"
-                        step="50"
+                        step="any"
                         required
                         value={formData.valorKm}
                         onChange={(e) => setFormData({ ...formData, valorKm: parseFloat(e.target.value) || 0 })}
@@ -2619,7 +2619,7 @@ export default function ArtPage() {
                       <input
                         type="number"
                         min="0"
-                        step="100"
+                        step="any"
                         required
                         value={formData.valorHoraEspera}
                         onChange={(e) => setFormData({ ...formData, valorHoraEspera: parseFloat(e.target.value) || 0 })}
@@ -2705,7 +2705,7 @@ export default function ArtPage() {
                       <input
                         type="number"
                         min="0"
-                        step="50"
+                        step="any"
                         value={formData.choferPrecioTramo ?? 3500}
                         onChange={(e) =>
                           setFormData({ ...formData, choferPrecioTramo: parseFloat(e.target.value) || 0 })
@@ -2721,7 +2721,7 @@ export default function ArtPage() {
                       <input
                         type="number"
                         min="0"
-                        step="50"
+                        step="any"
                         value={formData.choferValorKm ?? 1200}
                         onChange={(e) =>
                           setFormData({ ...formData, choferValorKm: parseFloat(e.target.value) || 0 })
@@ -2737,7 +2737,7 @@ export default function ArtPage() {
                       <input
                         type="number"
                         min="0"
-                        step="100"
+                        step="any"
                         value={formData.choferValorHoraEspera ?? 10000}
                         onChange={(e) =>
                           setFormData({ ...formData, choferValorHoraEspera: parseFloat(e.target.value) || 0 })
@@ -3462,7 +3462,7 @@ export default function ArtPage() {
                   <span className="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
                   <input
                     type="number"
-                    step="50"
+                    step="any"
                     min="0"
                     value={montoPeajesInput}
                     onChange={(e) => setMontoPeajesInput(e.target.value)}

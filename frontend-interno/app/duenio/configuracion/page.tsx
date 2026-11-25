@@ -292,7 +292,7 @@ export default function ConfiguracionPage() {
                   <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-bold">$</span>
                   <input
                     type="number"
-                    step="50"
+                    step="any"
                     {...register('bajadaBandera', { 
                       required: 'Requerido',
                       min: { value: 0, message: 'Debe ser mayor o igual a 0' } 
@@ -312,7 +312,7 @@ export default function ConfiguracionPage() {
                   <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-bold">$</span>
                   <input
                     type="number"
-                    step="50"
+                    step="any"
                     {...register('valorKm', { 
                       required: 'Requerido',
                       min: { value: 0, message: 'Debe ser mayor o igual a 0' } 
@@ -332,7 +332,7 @@ export default function ConfiguracionPage() {
                   <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-bold">$</span>
                   <input
                     type="number"
-                    step="100"
+                    step="any"
                     {...register('valorHoraEspera', { 
                       required: 'Requerido',
                       min: { value: 0, message: 'Debe ser mayor o igual a 0' } 

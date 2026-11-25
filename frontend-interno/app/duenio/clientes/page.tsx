@@ -1198,7 +1198,7 @@ export default function DuenioClientesPage() {
                   <input
                     type="number"
                     min="0"
-                    step="500"
+                    step="any"
                     placeholder="0 para sin límite"
                     value={configCCForm.limite}
                     onChange={(e) => setConfigCCForm({ ...configCCForm, limite: parseFloat(e.target.value) || 0 })}
@@ -1287,7 +1287,7 @@ export default function DuenioClientesPage() {
                           <input
                             type="number"
                             min="0"
-                            step="100"
+                            step="any"
                             required
                             value={configCCForm.tarifaPrecioTramo}
                             onChange={(e) => setConfigCCForm({ ...configCCForm, tarifaPrecioTramo: parseFloat(e.target.value) || 0 })}
@@ -1306,7 +1306,7 @@ export default function DuenioClientesPage() {
                           <input
                             type="number"
                             min="0"
-                            step="50"
+                            step="any"
                             required
                             value={configCCForm.tarifaValorKm}
                             onChange={(e) => setConfigCCForm({ ...configCCForm, tarifaValorKm: parseFloat(e.target.value) || 0 })}
@@ -1325,7 +1325,7 @@ export default function DuenioClientesPage() {
                           <input
                             type="number"
                             min="0"
-                            step="500"
+                            step="any"
                             value={configCCForm.tarifaValorHoraEspera}
                             onChange={(e) => setConfigCCForm({ ...configCCForm, tarifaValorHoraEspera: parseFloat(e.target.value) || 0 })}
                             className="w-full pl-6 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
