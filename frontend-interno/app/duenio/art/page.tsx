@@ -48,10 +48,16 @@ export default function ArtPage() {
   const router = useRouter();
 
   // Estados generales
-  const [activeTab, setActiveTab] = useState<'tarifas' | 'facturacion' | 'cierres'>('tarifas');
+  const [activeTab, setActiveTab] = useState<'tarifas' | 'pendientes' | 'facturacion' | 'cierres'>('tarifas');
   const [loading, setLoading] = useState(true);
   const [artList, setArtList] = useState<ArtEmpresa[]>([]);
   const [choferesList, setChoferesList] = useState<any[]>([]);
+  const [viajesArtPendientes, setViajesArtPendientes] = useState<any[]>([]);
+  const [choferSeleccionadoPorViaje, setChoferSeleccionadoPorViaje] = useState<Record<string, string>>({});
+  const [horaSalidaPorViaje, setHoraSalidaPorViaje] = useState<Record<string, string>>({});
+  const [asignandoViajeId, setAsignandoViajeId] = useState<string | null>(null);
+  const [filtroArtPendiente, setFiltroArtPendiente] = useState<string>('all');
+  const [filtroEstadoPendiente, setFiltroEstadoPendiente] = useState<'todos' | 'sin_chofer' | 'asignados'>('todos');
   const [remiseriaNombre, setRemiseriaNombre] = useState('Remises Bruno');
 
   // Modal Crear / Editar ART
@@ -137,8 +143,10 @@ export default function ArtPage() {
       const res = await artEmpresaService.sincronizarPortalExterno(portalModalArt.id);
       if (res.success) {
         toast.success(res.message || 'Sincronización completada');
-        cargarDatos();
+        await cargarDatos();
         if (activeTab === 'facturacion') cargarFacturacion();
+        setPortalModalArt(null);
+        setActiveTab('pendientes');
       } else {
         toast.error(res.message || 'Error al sincronizar');
         cargarDatos();
@@ -147,6 +155,33 @@ export default function ArtPage() {
       toast.error('Error de red al sincronizar');
     } finally {
       setSincronizandoPortal(false);
+    }
+  };
+
+  const handleAsignarChoferDesdeTabla = async (viaje: any) => {
+    const choferId = choferSeleccionadoPorViaje[viaje.id] || viaje.choferId || '';
+    const horaSalida = horaSalidaPorViaje[viaje.id] ?? viaje.horaSalidaChofer ?? undefined;
+    if (!choferId) {
+      toast.error('Seleccioná un chofer para asignar este viaje');
+      return;
+    }
+    try {
+      setAsignandoViajeId(viaje.id);
+      const res = await artEmpresaService.reasignarChofer(viaje.id, {
+        nuevoChoferId: choferId,
+        motivo: viaje.choferId ? 'REASIGNADO_POR_DUENIO' : 'ASIGNADO_POR_DUENIO',
+        horaSalidaChofer: horaSalida || undefined
+      });
+      if (res.success) {
+        toast.success('Chofer asignado correctamente');
+        await cargarDatos();
+      } else {
+        toast.error(res.message || 'No se pudo asignar el chofer');
+      }
+    } catch {
+      toast.error('Error al asignar chofer');
+    } finally {
+      setAsignandoViajeId(null);
     }
   };
 
@@ -613,14 +648,18 @@ export default function ArtPage() {
   const cargarDatos = async () => {
     try {
       setLoading(true);
-      const [artRes, remRes, choferRes] = await Promise.all([
+      const [artRes, remRes, choferRes, progRes] = await Promise.all([
         artEmpresaService.getAll(),
         remiseriaService.getAll(),
-        choferService.getAll()
+        choferService.getAll(),
+        artEmpresaService.getViajesProgramados()
       ]);
 
       if (artRes.success && artRes.data) {
         setArtList(artRes.data);
+      }
+      if (progRes.success && progRes.data) {
+        setViajesArtPendientes(progRes.data);
       }
       if (remRes.success && remRes.data && remRes.data.length > 0) {
         const miRem = remRes.data[0];
@@ -1348,10 +1387,10 @@ export default function ArtPage() {
       </div>
 
       {/* Selector de Pestañas (Tabs) */}
-      <div className="no-print flex items-center border-b border-slate-200 bg-white px-6 rounded-2xl shadow-sm">
+      <div className="no-print flex items-center overflow-x-auto border-b border-slate-200 bg-white px-4 sm:px-6 rounded-2xl shadow-sm">
         <button
           onClick={() => setActiveTab('tarifas')}
-          className={`flex items-center gap-2 py-4 px-4 font-semibold text-sm border-b-2 transition-all ${
+          className={`flex items-center gap-2 py-4 px-4 font-semibold text-sm border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'tarifas'
               ? 'border-primary-600 text-primary-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -1362,6 +1401,23 @@ export default function ArtPage() {
           <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 font-medium">
             {artList.length}
           </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('pendientes')}
+          className={`flex items-center gap-2 py-4 px-4 font-semibold text-sm border-b-2 transition-all whitespace-nowrap ${
+            activeTab === 'pendientes'
+              ? 'border-amber-600 text-amber-700 font-bold'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Car className="w-4 h-4 text-amber-600" />
+          Viajes ART por Asignar
+          {viajesArtPendientes.length > 0 && (
+            <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800 font-bold">
+              {viajesArtPendientes.filter((v) => !v.choferId).length} sin chofer / {viajesArtPendientes.length}
+            </span>
+          )}
         </button>
 
         <button
@@ -1398,6 +1454,172 @@ export default function ArtPage() {
           )}
         </button>
       </div>
+
+      {/* ============================================================== */}
+      {/* PESTAÑA 1B: VIAJES ART POR ASIGNAR / PROGRAMADOS (DUEÑO)       */}
+      {/* ============================================================== */}
+      {activeTab === 'pendientes' && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Viajes ART Pendientes y Programados</h3>
+              <p className="text-xs text-slate-500">
+                Asigná o reasigná choferes directamente a los viajes importados de Feleval o cargados manualmente.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={filtroArtPendiente}
+                onChange={(e) => setFiltroArtPendiente(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white"
+              >
+                <option value="all">Todas las ARTs</option>
+                {artList.map((a) => (
+                  <option key={a.id} value={a.id}>{a.nombre}</option>
+                ))}
+              </select>
+              <select
+                value={filtroEstadoPendiente}
+                onChange={(e) => setFiltroEstadoPendiente(e.target.value as any)}
+                className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white"
+              >
+                <option value="todos">Todos</option>
+                <option value="sin_chofer">Sin chofer asignado</option>
+                <option value="asignados">Ya asignados</option>
+              </select>
+            </div>
+          </div>
+
+          {(() => {
+            const listaFiltrada = viajesArtPendientes.filter((v) => {
+              if (filtroArtPendiente !== 'all' && v.artEmpresaId !== filtroArtPendiente) return false;
+              if (filtroEstadoPendiente === 'sin_chofer' && v.choferId) return false;
+              if (filtroEstadoPendiente === 'asignados' && !v.choferId) return false;
+              return true;
+            });
+
+            if (listaFiltrada.length === 0) {
+              return (
+                <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center">
+                  <Car className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No hay viajes ART en esta vista</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Creá un viaje manual o sincronizá desde Feleval para verlos acá.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase">Fecha / Turno</th>
+                        <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase">ART / Siniestro</th>
+                        <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase">Pasajero</th>
+                        <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase">Origen / Destino</th>
+                        <th className="px-4 py-3 text-left font-bold text-slate-500 uppercase">Chofer Asignado</th>
+                        <th className="px-4 py-3 text-right font-bold text-slate-500 uppercase">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {listaFiltrada.map((v) => {
+                        const selectedCh = choferSeleccionadoPorViaje[v.id] ?? v.choferId ?? '';
+                        return (
+                          <tr key={v.id} className="hover:bg-slate-50/60">
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <div className="font-bold text-slate-900">
+                                {new Date(v.fecha).toLocaleDateString('es-AR')}
+                              </div>
+                              <div className="text-[11px] font-bold text-indigo-700">
+                                Turno: {v.horaTurno || new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs
+                              </div>
+                              <div className="mt-1 flex items-center gap-1">
+                                <span className="text-[10px] text-slate-500">Salida:</span>
+                                <input
+                                  type="time"
+                                  value={horaSalidaPorViaje[v.id] ?? v.horaSalidaChofer ?? ''}
+                                  onChange={(e) =>
+                                    setHoraSalidaPorViaje((prev) => ({ ...prev, [v.id]: e.target.value }))
+                                  }
+                                  className="px-1.5 py-0.5 border border-slate-200 rounded text-[10px] font-semibold text-slate-800 bg-white"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className="inline-flex px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px]">
+                                ART - {v.artEmpresa?.nombre || 'Empresa'}
+                              </span>
+                              {v.numeroSiniestro && (
+                                <div className="text-[11px] text-slate-600 font-mono mt-0.5">
+                                  Sin: {v.numeroSiniestro}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-bold text-slate-900">{v.clienteNombre || 'Sin nombre'}</div>
+                              {v.clienteTelefono && (
+                                <div className="text-[11px] text-slate-500">{v.clienteTelefono}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 max-w-xs">
+                              <div className="text-[11px] text-slate-700 truncate" title={v.origen}>
+                                <strong className="text-emerald-700">Orig:</strong> {v.origen}
+                              </div>
+                              <div className="text-[11px] text-slate-700 truncate mt-0.5" title={v.destino}>
+                                <strong className="text-indigo-700">Dest:</strong> {v.destino}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <select
+                                value={selectedCh}
+                                onChange={(e) =>
+                                  setChoferSeleccionadoPorViaje((prev) => ({
+                                    ...prev,
+                                    [v.id]: e.target.value
+                                  }))
+                                }
+                                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold ${
+                                  selectedCh
+                                    ? 'border-emerald-300 bg-emerald-50/40 text-slate-900'
+                                    : 'border-amber-300 bg-amber-50/50 text-amber-900'
+                                }`}
+                              >
+                                <option value="">-- Sin asignar --</option>
+                                {choferesList.map((c: any) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.nombre} {c.apellido} (#{c.numeroChofer})
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-right">
+                              <button
+                                type="button"
+                                disabled={asignandoViajeId === v.id || !selectedCh}
+                                onClick={() => handleAsignarChoferDesdeTabla(v)}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold shadow-xs transition-all"
+                              >
+                                {asignandoViajeId === v.id
+                                  ? 'Guardando...'
+                                  : v.choferId
+                                  ? 'Reasignar'
+                                  : 'Asignar Chofer'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* PESTAÑA 1: GESTIÓN DE TARIFAS ART                              */}

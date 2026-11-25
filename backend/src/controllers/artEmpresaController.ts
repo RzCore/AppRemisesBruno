@@ -1017,7 +1017,7 @@ export const artEmpresaController = {
   async reasignarChoferViajeArt(req: AuthenticatedRequest, res: Response) {
     try {
       const { viajeId } = req.params;
-      const { nuevoChoferId, motivo } = req.body;
+      const { nuevoChoferId, motivo, horaSalidaChofer } = req.body;
 
       if (!nuevoChoferId) {
         return res.status(400).json({ success: false, message: 'Debe especificar el nuevo chofer' });
@@ -1052,6 +1052,7 @@ export const artEmpresaController = {
           choferId: nuevoChoferId,
           vehiculoId: vehiculoIdFinal,
           motivoReasignacion: motivoFinal,
+          ...(horaSalidaChofer ? { horaSalidaChofer: String(horaSalidaChofer).trim() } : {}),
           estado: 'ACEPTADO'
         },
         include: {

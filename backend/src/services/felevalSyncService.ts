@@ -349,161 +349,176 @@ export async function sincronizarArtFeleval(
     let yaExistentes = 0;
     let erroresDetalle = 0;
 
+    // 4b. Pre-filtrar filas nuevas y descargar detalles en paralelo (lotes de 4) para máxima velocidad
+    const pendientesNuevos: Array<{ felevalEventId: string; externoId: string; row: any[] }> = [];
     for (const row of rows) {
-      try {
-        const rawAction = String(row[8] || '');
-        const idMatch = rawAction.match(/\/prestador\/events\/(\d+)/);
-        if (!idMatch) continue;
+      const rawAction = String(row[8] || '');
+      const idMatch = rawAction.match(/\/prestador\/events\/(\d+)/);
+      if (!idMatch) continue;
+      const felevalEventId = idMatch[1];
+      const externoId = `FELEVAL:${felevalEventId}`;
+      pendientesNuevos.push({ felevalEventId, externoId, row });
+    }
 
-        const felevalEventId = idMatch[1];
-        const externoId = `FELEVAL:${felevalEventId}`;
+    const existentesDb = pendientesNuevos.length > 0
+      ? await prisma.viaje.findMany({
+          where: { externoId: { in: pendientesNuevos.map((p) => p.externoId) } },
+          select: { externoId: true }
+        })
+      : [];
+    const existentesSet = new Set(existentesDb.map((e) => e.externoId));
+    const soloNuevos = pendientesNuevos.filter((p) => {
+      if (existentesSet.has(p.externoId)) {
+        yaExistentes++;
+        return false;
+      }
+      return true;
+    });
 
-        // Verificar duplicado antes de pedir el detalle
-        const existente = await prisma.viaje.findUnique({
-          where: { externoId },
-          select: { id: true }
-        });
-        if (existente) {
-          yaExistentes++;
-          continue;
-        }
-
-        // Datos base de la tabla
-        const siniestroTabla = stripHtml(row[0]);
-        const pacienteTabla = stripHtml(row[3]);
-        const fechaTabla = stripHtml(row[4]);
-        const origenTabla = stripHtml(row[5]);
-        const destinoTabla = stripHtml(row[6]);
-        const modoTabla = stripHtml(row[7]);
-
-        // Pedir detalle completo para obtener direcciones sin truncar, DNI, teléfono y observaciones
-        let detail: Record<string, string> = {};
-        try {
-          const resDetail = await fetch(`${baseUrl}/prestador/events/${felevalEventId}`, {
-            headers: {
-              'Cookie': cookiesToHeader(cookieMap),
-              'User-Agent': 'Mozilla/5.0 (compatible; RemisesBrunoSync/1.0)'
-            },
-            signal: AbortSignal.timeout(15000)
-          });
-          if (resDetail.ok) {
-            detail = parseDetailLines(await resDetail.text());
-          }
-        } catch {
-          // Si falla el detalle, continuamos con los datos de la tabla
-        }
-
-        const siniestro = detail['Siniestro - Autorización'] || siniestroTabla || null;
-        const subArt = detail['ART'] || '';
-        const modalidad = detail['Modalidad'] || (modoTabla === 'M' ? 'Modulo' : modoTabla);
-        const retorno = detail['Retorno'] || '';
-        const espera = detail['Espera'] || '';
-        const clienteNombre = (detail['Nombre Completo'] || pacienteTabla || 'Pasajero ART').trim();
-        const obsFeleval = detail['Observaciones para el evento'] || '';
-        const telefono = (detail['Teléfono'] || extractPhoneFromObservaciones(obsFeleval)).trim();
-        const dniRaw = (detail['DNI'] || '').replace(/\D/g, '');
-        const origen = (detail['Dirección Origen'] || origenTabla || 'A confirmar').trim();
-        const destino = (detail['Dirección Destino'] || destinoTabla || 'A confirmar').trim();
-
-        const { fecha, horaTurno, horaSalida } = parseFechaHoraFeleval(fechaTabla);
-        const horaTurnoFinal = detail['Hora Turno'] || horaTurno;
-
-        // Auto-buscar o auto-crear cliente para el pasajero ART
-        let clienteId: string | null = null;
-        const cleanTel = telefono.replace(/\D/g, '');
-        if (cleanTel || dniRaw) {
-          const cli = await prisma.cliente.findFirst({
-            where: {
-              remiseriaId: art.remiseriaId,
-              OR: [
-                ...(cleanTel ? [{ telefono: cleanTel }, { telefono }] : []),
-                ...(dniRaw ? [{ dni: dniRaw }] : [])
-              ]
-            },
-            select: { id: true }
-          });
-          if (cli) clienteId = cli.id;
-        }
-
-        if (!clienteId && clienteNombre) {
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < soloNuevos.length; i += BATCH_SIZE) {
+      const batch = soloNuevos.slice(i, i + BATCH_SIZE);
+      const batchDetails = await Promise.all(
+        batch.map(async (item) => {
+          let detail: Record<string, string> = {};
           try {
-            const partes = clienteNombre.split(/\s+/);
-            const nombreCli = partes[0] || 'Pasajero';
-            const apellidoCli = partes.length > 1 ? partes.slice(1).join(' ') : 'ART';
-            const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-            const dniFinal = dniRaw || `ART${suffix.slice(-8)}`;
-            const telFinal = cleanTel || telefono || `S/T-${suffix.slice(-6)}`;
-            const dummyEmail = `art_${suffix}@cliente.brunoremises.local`;
-            const passwordHash = await bcrypt.hash(dniFinal, 10);
-
-            const nuevoUser = await prisma.user.create({
-              data: { email: dummyEmail, passwordHash, rol: 'CLIENTE' }
+            const resDetail = await fetch(`${baseUrl}/prestador/events/${item.felevalEventId}`, {
+              headers: {
+                'Cookie': cookiesToHeader(cookieMap),
+                'User-Agent': 'Mozilla/5.0 (compatible; RemisesBrunoSync/1.0)'
+              },
+              signal: AbortSignal.timeout(12000)
             });
-            const nuevoCli = await prisma.cliente.create({
-              data: {
-                userId: nuevoUser.id,
-                remiseriaId: art.remiseriaId,
-                nombre: nombreCli,
-                apellido: apellidoCli,
-                dni: dniFinal,
-                telefono: telFinal,
-                email: dummyEmail,
-                direccion: origen,
-                fechaNacimiento: new Date('1990-01-01'),
-                observaciones: `Pasajero Feleval${subArt ? ` (${subArt})` : ''}`
-              }
-            });
-            clienteId = nuevoCli.id;
+            if (resDetail.ok) {
+              detail = parseDetailLines(await resDetail.text());
+            }
           } catch {
-            // Ignorar conflicto de unicidad eventual
+            // Si falla el detalle, continuamos con los datos de la tabla
           }
+          return { ...item, detail };
+        })
+      );
+
+      for (const { felevalEventId, externoId, row, detail } of batchDetails) {
+        try {
+          const siniestroTabla = stripHtml(row[0]);
+          const pacienteTabla = stripHtml(row[3]);
+          const fechaTabla = stripHtml(row[4]);
+          const origenTabla = stripHtml(row[5]);
+          const destinoTabla = stripHtml(row[6]);
+          const modoTabla = stripHtml(row[7]);
+
+          const siniestro = detail['Siniestro - Autorización'] || siniestroTabla || null;
+          const subArt = detail['ART'] || '';
+          const modalidad = detail['Modalidad'] || (modoTabla === 'M' ? 'Modulo' : modoTabla);
+          const retorno = detail['Retorno'] || '';
+          const espera = detail['Espera'] || '';
+          const clienteNombre = (detail['Nombre Completo'] || pacienteTabla || 'Pasajero ART').trim();
+          const obsFeleval = detail['Observaciones para el evento'] || '';
+          const telefono = (detail['Teléfono'] || extractPhoneFromObservaciones(obsFeleval)).trim();
+          const dniRaw = (detail['DNI'] || '').replace(/\D/g, '');
+          const origen = (detail['Dirección Origen'] || origenTabla || 'A confirmar').trim();
+          const destino = (detail['Dirección Destino'] || destinoTabla || 'A confirmar').trim();
+
+          const { fecha, horaTurno, horaSalida } = parseFechaHoraFeleval(fechaTabla);
+          const horaTurnoFinal = detail['Hora Turno'] || horaTurno;
+
+          let clienteId: string | null = null;
+          const cleanTel = telefono.replace(/\D/g, '');
+          if (cleanTel || dniRaw) {
+            const cli = await prisma.cliente.findFirst({
+              where: {
+                remiseriaId: art.remiseriaId,
+                OR: [
+                  ...(cleanTel ? [{ telefono: cleanTel }, { telefono }] : []),
+                  ...(dniRaw ? [{ dni: dniRaw }] : [])
+                ]
+              },
+              select: { id: true }
+            });
+            if (cli) clienteId = cli.id;
+          }
+
+          if (!clienteId && clienteNombre) {
+            try {
+              const partes = clienteNombre.split(/\s+/);
+              const nombreCli = partes[0] || 'Pasajero';
+              const apellidoCli = partes.length > 1 ? partes.slice(1).join(' ') : 'ART';
+              const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+              const dniFinal = dniRaw || `ART${suffix.slice(-8)}`;
+              const telFinal = cleanTel || telefono || `S/T-${suffix.slice(-6)}`;
+              const dummyEmail = `art_${suffix}@cliente.brunoremises.local`;
+              const passwordHash = await bcrypt.hash(dniFinal, 10);
+
+              const nuevoUser = await prisma.user.create({
+                data: { email: dummyEmail, passwordHash, rol: 'CLIENTE' }
+              });
+              const nuevoCli = await prisma.cliente.create({
+                data: {
+                  userId: nuevoUser.id,
+                  remiseriaId: art.remiseriaId,
+                  nombre: nombreCli,
+                  apellido: apellidoCli,
+                  dni: dniFinal,
+                  telefono: telFinal,
+                  email: dummyEmail,
+                  direccion: origen,
+                  fechaNacimiento: new Date('1990-01-01'),
+                  observaciones: `Pasajero Feleval${subArt ? ` (${subArt})` : ''}`
+                }
+              });
+              clienteId = nuevoCli.id;
+            } catch {
+              // Ignorar conflicto de unicidad eventual
+            }
+          }
+
+          const esLocal = /modulo|m[oó]dulo|local/i.test(modalidad) || modoTabla.toUpperCase() === 'M';
+          const precioArt = esLocal ? Number(art.precioTramo || 0) : 0;
+          const precioChofer =
+            art.pagaChoferTipo === 'PERSONALIZADO' && esLocal
+              ? Number(art.choferPrecioTramo || precioArt)
+              : precioArt;
+
+          const metaObs = [
+            `[FELEVAL #${felevalEventId}]`,
+            subArt ? `ART: ${subArt}` : '',
+            modalidad ? `Modalidad: ${modalidad}` : '',
+            retorno ? `Retorno: ${retorno}` : '',
+            espera ? `Espera: ${espera}` : '',
+            obsFeleval
+          ]
+            .filter(Boolean)
+            .join(' | ');
+
+          await prisma.viaje.create({
+            data: {
+              remiseriaId: art.remiseriaId,
+              artEmpresaId: art.id,
+              externoId,
+              clienteId,
+              clienteNombre,
+              clienteTelefono: telefono || null,
+              origen,
+              destino,
+              fecha,
+              horaSalidaChofer: horaSalida,
+              horaTurno: horaTurnoFinal,
+              precio: precioChofer,
+              precioArt: precioArt > 0 ? precioArt : null,
+              numeroSiniestro: siniestro,
+              observaciones: metaObs,
+              prioridad: 'ALTA',
+              estado: 'PENDIENTE',
+              estadoCoordinacion: 'PENDIENTE_CONTACTO'
+            }
+          });
+
+          importados++;
+        } catch (rowErr) {
+          console.error('Error importando fila de Feleval:', rowErr);
+          erroresDetalle++;
         }
-
-        const esLocal = /modulo|m[oó]dulo|local/i.test(modalidad) || modoTabla.toUpperCase() === 'M';
-        const precioArt = esLocal ? Number(art.precioTramo || 0) : 0;
-        const precioChofer =
-          art.pagaChoferTipo === 'PERSONALIZADO' && esLocal
-            ? Number(art.choferPrecioTramo || precioArt)
-            : precioArt;
-
-        const metaObs = [
-          `[FELEVAL #${felevalEventId}]`,
-          subArt ? `ART: ${subArt}` : '',
-          modalidad ? `Modalidad: ${modalidad}` : '',
-          retorno ? `Retorno: ${retorno}` : '',
-          espera ? `Espera: ${espera}` : '',
-          obsFeleval
-        ]
-          .filter(Boolean)
-          .join(' | ');
-
-        await prisma.viaje.create({
-          data: {
-            remiseriaId: art.remiseriaId,
-            artEmpresaId: art.id,
-            externoId,
-            clienteId,
-            clienteNombre,
-            clienteTelefono: telefono || null,
-            origen,
-            destino,
-            fecha,
-            horaSalidaChofer: horaSalida,
-            horaTurno: horaTurnoFinal,
-            precio: precioChofer,
-            precioArt: precioArt > 0 ? precioArt : null,
-            numeroSiniestro: siniestro,
-            observaciones: metaObs,
-            prioridad: 'ALTA',
-            estado: 'PENDIENTE',
-            estadoCoordinacion: 'PENDIENTE_CONTACTO'
-          }
-        });
-
-        importados++;
-      } catch (rowErr) {
-        console.error('Error importando fila de Feleval:', rowErr);
-        erroresDetalle++;
       }
     }
 

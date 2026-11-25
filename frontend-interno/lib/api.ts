@@ -2305,7 +2305,7 @@ export const artEmpresaService = {
 
   sincronizarPortalExterno: async (artId: string): Promise<ApiResponse<any>> => {
     try {
-      const response = await api.post(`/art-empresas/${artId}/portal-sync`);
+      const response = await api.post(`/art-empresas/${artId}/portal-sync`, {}, { timeout: 60000 });
       return handleApiResponse<any>(response);
     } catch (error: any) {
       return {
@@ -2328,8 +2328,8 @@ export const artEmpresaService = {
     }
   },
 
-  // 1. Reasignar chofer por avería antes de salir
-  reasignarChofer: async (viajeId: string, data: { nuevoChoferId: string; motivo?: string }): Promise<ApiResponse<any>> => {
+  // 1. Reasignar chofer por avería antes de salir (o asignar chofer por primera vez desde módulo ART)
+  reasignarChofer: async (viajeId: string, data: { nuevoChoferId: string; motivo?: string; horaSalidaChofer?: string }): Promise<ApiResponse<any>> => {
     try {
       const response = await api.patch(`/art-empresas/viajes/${viajeId}/reasignar-chofer`, data);
       return handleApiResponse<any>(response);

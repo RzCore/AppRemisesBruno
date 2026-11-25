@@ -2592,7 +2592,7 @@ export default function CoordinadorDashboard() {
                                   <span>{viaje.cliente}</span>
                                   {viaje.artEmpresa && (
                                     <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
-                                      ART: {viaje.artEmpresa.nombre}
+                                      ART - {viaje.artEmpresa.nombre}
                                     </span>
                                   )}
                                   {viaje.codigoPin && (
@@ -2601,6 +2601,19 @@ export default function CoordinadorDashboard() {
                                     </span>
                                   )}
                                 </div>
+                                {(viaje.rawViaje?.horaTurno || viaje.artEmpresa) && viaje.rawFecha && (
+                                  <div className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold">
+                                    <span>
+                                      Turno: {new Date(viaje.rawFecha).toLocaleDateString('es-AR')}
+                                      {viaje.rawViaje?.horaTurno ? ` • ${viaje.rawViaje.horaTurno} hs` : ''}
+                                    </span>
+                                    {viaje.rawViaje?.horaSalidaChofer && (
+                                      <span className="text-indigo-600 font-semibold">
+                                        (Sal: {viaje.rawViaje.horaSalidaChofer})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                                 <div className="text-xs text-gray-500 flex items-center space-x-1.5 mt-0.5">
                                   <span className="truncate">{viaje.telefono}</span>
                                   {viaje.telefono && viaje.telefono !== 'S/N' && (
@@ -2754,7 +2767,7 @@ export default function CoordinadorDashboard() {
                                   <span>{viaje.cliente}</span>
                                   {viaje.artEmpresa && (
                                     <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
-                                      ART: {viaje.artEmpresa.nombre}
+                                      ART - {viaje.artEmpresa.nombre}
                                     </span>
                                   )}
                                   {viaje.codigoPin && (
@@ -2763,6 +2776,19 @@ export default function CoordinadorDashboard() {
                                     </span>
                                   )}
                                 </div>
+                                {(viaje.rawViaje?.horaTurno || viaje.artEmpresa) && viaje.rawFecha && (
+                                  <div className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold">
+                                    <span>
+                                      Turno: {new Date(viaje.rawFecha).toLocaleDateString('es-AR')}
+                                      {viaje.rawViaje?.horaTurno ? ` • ${viaje.rawViaje.horaTurno} hs` : ''}
+                                    </span>
+                                    {viaje.rawViaje?.horaSalidaChofer && (
+                                      <span className="text-indigo-600 font-semibold">
+                                        (Sal: {viaje.rawViaje.horaSalidaChofer})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                                 <div className="text-xs text-gray-500 truncate mt-0.5">{viaje.telefono}</div>
                               </td>
                               <td className="px-3 sm:px-4 py-3">
@@ -3295,10 +3321,16 @@ export default function CoordinadorDashboard() {
                                         <span>{viaje.cliente}</span>
                                         {viaje.artEmpresa && (
                                           <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
-                                            ART
+                                            ART - {viaje.artEmpresa.nombre}
                                           </span>
                                         )}
                                       </div>
+                                      {(viaje.rawViaje?.horaTurno || viaje.artEmpresa) && viaje.rawFecha && (
+                                        <div className="mt-0.5 text-[10px] font-bold text-indigo-700">
+                                          Turno: {new Date(viaje.rawFecha).toLocaleDateString('es-AR')}
+                                          {viaje.rawViaje?.horaTurno ? ` • ${viaje.rawViaje.horaTurno} hs` : ''}
+                                        </div>
+                                      )}
                                       <div className="text-xs text-gray-500 flex items-center space-x-1.5 mt-0.5">
                                         <span className="truncate max-w-[90px]">{viaje.telefono}</span>
                                         {viaje.telefono && viaje.telefono !== 'S/N' && (
