@@ -165,7 +165,7 @@ export default function CoordinadorDashboard() {
     apellido: '',
     origen: '',
     destino: '',
-    precio: '3500',
+    precio: '',
     choferId: '',
     observaciones: '',
     prioridad: 'NORMAL' as 'BAJA' | 'NORMAL' | 'ALTA' | 'URGENTE',
@@ -297,7 +297,7 @@ export default function CoordinadorDashboard() {
   const [tripData, setTripData] = useState({
     origen: '',
     destino: '',
-    precio: '1500',
+    precio: '',
     fecha: new Date().toISOString().split('T')[0],
     hora: new Date().toTimeString().slice(0, 5),
     tipoViaje: 'inmediato' as 'inmediato' | 'programado',
@@ -476,8 +476,12 @@ export default function CoordinadorDashboard() {
 
         // Respaldo de alerta visual y sonora por polling si el WebSocket tuvo microcorte
         const idsPrevios = viajesSinAsignarIdsRef.current;
+        const idsActuales = new Set<string>(sinAsignarRes.data.map((v: any) => v.id));
         const nuevosPendientes = sinAsignarRes.data.filter((v: any) => !idsPrevios.has(v.id));
-        viajesSinAsignarIdsRef.current = new Set(sinAsignarRes.data.map((v: any) => v.id));
+        viajesSinAsignarIdsRef.current = idsActuales;
+
+        // Si el viaje del banner naranja ya fue aceptado/asignado/cancelado, ocultar el banner automáticamente
+        setAlertaNuevoViajeBanner((prev: any) => (prev && !idsActuales.has(prev.id) ? null : prev));
 
         if (!primeraCargaSinAsignarRef.current && nuevosPendientes.length > 0) {
           reproducirAlarmaNuevoViaje();
@@ -1130,7 +1134,7 @@ export default function CoordinadorDashboard() {
       const payload = {
         origen: tripData.origen,
         destino: tripData.destino,
-        precio: tripData.precio || '1500',
+        precio: tripData.precio || '0',
         fecha: tripData.tipoViaje === 'inmediato' 
           ? new Date().toISOString() 
           : new Date(`${tripData.fecha}T${tripData.hora}:00`).toISOString(),
@@ -1138,7 +1142,7 @@ export default function CoordinadorDashboard() {
         clienteTelefono: clientData.telefono,
         clienteEmail: clientData.email || '',
         clienteId: clientData.id || null,
-        prioridad: tripData.prioridad,
+        prioridad: 'NORMAL',
         observaciones: tripData.observaciones
       };
 
@@ -1152,7 +1156,7 @@ export default function CoordinadorDashboard() {
         setTripData({
           origen: '',
           destino: '',
-          precio: '1500',
+          precio: '',
           fecha: new Date().toISOString().split('T')[0],
           hora: new Date().toTimeString().slice(0, 5),
           tipoViaje: 'inmediato',
@@ -1161,6 +1165,9 @@ export default function CoordinadorDashboard() {
           artEmpresaId: '',
           numeroSiniestro: ''
         });
+        setOrigenCoords(null);
+        setDestinoCoords(null);
+        setDistanciaEstimada(null);
         fetchData();
       } else {
         toast.error(res.message || 'Error al crear viaje');
@@ -1263,7 +1270,7 @@ export default function CoordinadorDashboard() {
       ...prev,
       origen: viaje.origen || '',
       destino: viaje.destino || '',
-      precio: viaje.precio ? viaje.precio.toString() : '1500',
+      precio: viaje.precio ? viaje.precio.toString() : '',
       fecha: new Date().toISOString().split('T')[0],
       hora: new Date().toTimeString().slice(0, 5),
       tipoViaje: 'inmediato',
@@ -1348,7 +1355,7 @@ export default function CoordinadorDashboard() {
       apellido: '',
       origen: '',
       destino: '',
-      precio: '3500',
+      precio: '',
       choferId: '',
       observaciones: '',
       prioridad: 'NORMAL',
@@ -2604,7 +2611,7 @@ export default function CoordinadorDashboard() {
                                 {viaje.tiempo}
                               </td>
                               <td className="px-3 sm:px-4 py-3 text-right">
-                                {viaje.chofer ? (
+                                {viaje.choferId ? (
                                   <div className="flex flex-col items-end gap-1">
                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 animate-pulse">
                                       <Clock className="w-3 h-3 mr-1" />
@@ -3790,29 +3797,21 @@ export default function CoordinadorDashboard() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-0.5">Precio ($)</label>
-                      <input 
-                        type="number"
-                        value={tripData.precio}
-                        onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
-                        className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold text-emerald-700"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-0.5">Prioridad</label>
-                      <select 
-                        value={tripData.prioridad}
-                        onChange={(e: any) => setTripData({ ...tripData, prioridad: e.target.value })}
-                        className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                      >
-                        <option value="BAJA">Baja</option>
-                        <option value="NORMAL">Normal</option>
-                        <option value="ALTA">Alta</option>
-                        <option value="URGENTE">Urgente</option>
-                      </select>
-                    </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-0.5">Precio ($)</label>
+                    <input 
+                      type="number"
+                      min="0"
+                      value={tripData.precio}
+                      onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
+                      placeholder="Se calcula al ingresar origen y destino..."
+                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold text-emerald-700"
+                    />
+                    {distanciaEstimada !== null && (
+                      <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                        🛣️ Distancia estimada: {distanciaEstimada} km
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -4119,52 +4118,40 @@ export default function CoordinadorDashboard() {
                 </select>
               </div>
 
-              {/* Tarifa y Observaciones */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-gray-700 uppercase">
-                      Tarifa Estimada ($)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={ejecutarCalculoPrecioExpress}
-                      disabled={calculandoPrecioExpress || !expressData.origen || !expressData.destino}
-                      className="text-[10px] text-amber-700 hover:text-amber-900 font-bold underline cursor-pointer disabled:opacity-40"
-                      title="Recalcular tarifa con el origen y destino actuales"
-                    >
-                      {calculandoPrecioExpress ? 'Calculando...' : '⚡ Recalcular'}
-                    </button>
-                  </div>
-                  <input
-                    type="number"
-                    value={expressData.precio}
-                    onChange={(e) => setExpressData({ ...expressData, precio: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-bold text-emerald-700 focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                  />
-                  {calculandoPrecioExpress && (
-                    <p className="text-[11px] text-blue-600 font-medium mt-1 flex items-center">
-                      <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Calculando tarifa...
-                    </p>
-                  )}
-                  {!calculandoPrecioExpress && distanciaExpressEstimada !== null && (
-                    <p className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center">
-                      <span>🛣️ Distancia est.: {distanciaExpressEstimada} km</span>
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Prioridad</label>
-                  <select
-                    value={expressData.prioridad}
-                    onChange={(e: any) => setExpressData({ ...expressData, prioridad: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              {/* Tarifa Estimada */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-gray-700 uppercase">
+                    Tarifa Estimada ($)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={ejecutarCalculoPrecioExpress}
+                    disabled={calculandoPrecioExpress || !expressData.origen || !expressData.destino}
+                    className="text-[10px] text-amber-700 hover:text-amber-900 font-bold underline cursor-pointer disabled:opacity-40"
+                    title="Recalcular tarifa con el origen y destino actuales"
                   >
-                    <option value="NORMAL">Normal</option>
-                    <option value="ALTA">Alta</option>
-                    <option value="URGENTE">Urgente</option>
-                  </select>
+                    {calculandoPrecioExpress ? 'Calculando...' : '⚡ Recalcular'}
+                  </button>
                 </div>
+                <input
+                  type="number"
+                  min="0"
+                  value={expressData.precio}
+                  onChange={(e) => setExpressData({ ...expressData, precio: e.target.value })}
+                  placeholder="Se calcula al ingresar origen y destino..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-bold text-emerald-700 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+                {calculandoPrecioExpress && (
+                  <p className="text-[11px] text-blue-600 font-medium mt-1 flex items-center">
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Calculando tarifa...
+                  </p>
+                )}
+                {!calculandoPrecioExpress && distanciaExpressEstimada !== null && (
+                  <p className="text-[11px] text-emerald-700 font-semibold mt-1 flex items-center">
+                    <span>🛣️ Distancia est.: {distanciaExpressEstimada} km</span>
+                  </p>
+                )}
               </div>
 
               {/* Botones */}

@@ -963,7 +963,7 @@ export const coordinatorDashboardController = {
         data: {
           origen,
           destino,
-          precio: parseFloat(precio),
+          precio: parseFloat(precio) || 0,
           fecha: new Date(fecha),
           clienteNombre,
           clienteTelefono,

@@ -199,12 +199,12 @@ export const batchDispatchService = {
       }
     });
 
-    // 3. Filtrar choferes que ya tienen un viaje activo en curso (ACEPTADO, EN_CAMINO, EN_CURSO)
+    // 3. Filtrar choferes que ya tienen un viaje activo o una oferta pendiente de aceptación
     const viajesActivosChoferes = await prisma.viaje.findMany({
       where: {
         remiseriaId,
         choferId: { not: null },
-        estado: { in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] }
+        estado: { in: ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] }
       },
       select: { choferId: true }
     });
@@ -566,7 +566,7 @@ export const batchDispatchService = {
         data: {
           choferId: chofer.id,
           vehiculoId: finalVehiculoId,
-          estado: 'ACEPTADO'
+          estado: 'PENDIENTE'
         },
         include: {
           cliente: {
@@ -609,13 +609,7 @@ export const batchDispatchService = {
         }
       });
 
-      // Liberar de parada virtual si estaba en cola de base
-      if (chofer.enParadaVirtual) {
-        await prisma.chofer.update({
-          where: { id: chofer.id },
-          data: { enParadaVirtual: false, paradaVirtualIngreso: null }
-        });
-      }
+      // Nota: no sacamos al chofer de la parada virtual todavía; se libera cuando acepte el viaje en su app.
 
       // Registrar auditoría de uso si fue hecho por un coordinador
       if (coordinadorUserId) {
@@ -629,7 +623,8 @@ export const batchDispatchService = {
                 viajeId,
                 choferId,
                 vehiculoId: finalVehiculoId,
-                metodo: 'HUNGARIAN_OPTIMAL'
+                metodo: 'HUNGARIAN_OPTIMAL',
+                requiereAceptacion: true
               })
             }
           });
@@ -640,20 +635,19 @@ export const batchDispatchService = {
 
       // Notificar al Chofer y a la Central en tiempo real vía WebSockets
       if (io) {
-        // Sala de la remisería (central y mapa)
+        // Sala de la remisería (central, mapa y app del chofer para mostrar la oferta)
         io.to(remiseriaId).emit('viaje_estado_actualizado', {
           viajeId,
-          estado: 'ACEPTADO',
-          mensaje: `Viaje asignado óptimamente a ${chofer.nombre} ${chofer.apellido}`
+          estado: 'PENDIENTE',
+          choferId: chofer.id,
+          mensaje: `Viaje ofertado óptimamente a ${chofer.nombre} ${chofer.apellido} (esperando aceptación)`
         });
-
-        io.to(remiseriaId).emit('nuevo_viaje_recibido', viajeActualizado);
       }
 
       resultados.push(viajeActualizado);
     }
 
-    // Notificación especial de lote completado a toda la central
+    // Notificación especial de lote enviado a toda la central
     if (io && resultados.length > 0) {
       io.to(remiseriaId).emit('lote_asignado_completado', {
         totalAsignados: resultados.length,
@@ -665,7 +659,7 @@ export const batchDispatchService = {
       success: true,
       totalAsignados: resultados.length,
       data: resultados,
-      message: `¡Lote aplicado con éxito! Se asignaron ${resultados.length} viajes simultáneamente.`
+      message: `¡Lote enviado! Se ofertaron ${resultados.length} viaje(s) a los choferes (esperando aceptación).`
     };
   }
 };
