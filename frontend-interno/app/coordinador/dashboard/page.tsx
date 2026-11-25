@@ -1697,7 +1697,7 @@ export default function CoordinadorDashboard() {
   const hasAlerts = stats.viajesSinAsignar > 0;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col overflow-x-hidden w-full">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-gray-50 flex flex-col overflow-x-hidden w-full">
       {/* Header */}
       <div className="bg-white shadow-sm border-b shrink-0">
         <div className="w-full px-4 sm:px-6 lg:px-8">
@@ -2005,7 +2005,7 @@ export default function CoordinadorDashboard() {
 
       <div className="flex-1 flex flex-col lg:flex-row min-w-0 min-h-0 w-full overflow-hidden">
         {/* Panel principal - Tablas */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 lg:overflow-hidden">
           {/* Estadísticas rápidas */}
           <div className="bg-white shadow-sm border-b p-3 sm:p-4 shrink-0">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
@@ -2099,16 +2099,16 @@ export default function CoordinadorDashboard() {
           </div>
 
           {/* Contenido de las tablas */}
-          <div className="flex-1 p-3 sm:p-5 lg:p-6 w-full min-w-0">
+          <div className="flex-1 min-h-0 flex flex-col p-3 sm:p-5 lg:p-6 w-full min-w-0 lg:overflow-hidden">
             {activeTab === 'en-curso' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                <div className="flex items-center justify-between mb-4 shrink-0">
                   <h3 className="text-lg font-semibold text-gray-900">Viajes en Curso ({filteredEnCurso.length})</h3>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="overflow-x-auto">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                  <div className="overflow-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
-                      <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                         <tr>
                           <th className="px-3 sm:px-4 py-3 w-36 lg:w-[15%]">Cliente</th>
                           <th className="px-3 sm:px-4 py-3 min-w-[130px] lg:w-[22%]">Origen</th>
@@ -2248,8 +2248,8 @@ export default function CoordinadorDashboard() {
             )}
 
             {activeTab === 'sin-asignar' && (
-              <div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
                   <div className="flex items-center space-x-3">
                     <h3 className="text-lg font-semibold text-gray-900">Viajes Sin Asignar ({filteredSinAsignar.length})</h3>
                     {hasAlerts && (
@@ -2268,10 +2268,10 @@ export default function CoordinadorDashboard() {
                     <span>Despacho Óptimo por Lotes (AI / Uber)</span>
                   </button>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border-2 border-red-200 overflow-hidden">
-                  <div className="overflow-x-auto">
+                <div className="bg-white rounded-xl shadow-sm border-2 border-red-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                  <div className="overflow-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
-                      <thead className="bg-red-50 text-xs font-semibold text-red-700 uppercase tracking-wider">
+                      <thead className="bg-red-50 text-xs font-semibold text-red-700 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(254,202,202,1)]">
                         <tr>
                           <th className="px-3 sm:px-4 py-3 w-40 lg:w-[18%]">Cliente</th>
                           <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[25%]">Origen</th>
@@ -2372,14 +2372,14 @@ export default function CoordinadorDashboard() {
             )}
 
             {activeTab === 'reservados' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                <div className="flex items-center justify-between mb-4 shrink-0">
                   <h3 className="text-lg font-semibold text-gray-900">Viajes Reservados ({filteredReservas.length})</h3>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="overflow-x-auto">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                  <div className="overflow-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
-                      <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                         <tr>
                           <th className="px-3 sm:px-4 py-3 w-40 lg:w-[20%]">Cliente</th>
                           <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[25%]">Origen</th>
@@ -2458,8 +2458,8 @@ export default function CoordinadorDashboard() {
             )}
 
             {activeTab === 'conectados' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                <div className="flex items-center justify-between mb-4 shrink-0">
                   <h3 className="text-lg font-semibold text-gray-900">Choferes Conectados ({filteredChoferes.length})</h3>
                 </div>
                 {filteredChoferes.length === 0 ? (
@@ -2469,7 +2469,8 @@ export default function CoordinadorDashboard() {
                     <p className="text-xs text-gray-400 mt-1">Cuando los choferes inicien sesión en su app, aparecerán listados aquí.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  <div className="overflow-y-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0 pr-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredChoferes.map((chofer) => (
                       <div key={chofer.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="flex items-center justify-between mb-2">
@@ -2541,15 +2542,16 @@ export default function CoordinadorDashboard() {
                         </button>
                       </div>
                     ))}
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
             {activeTab === 'historial' && (
-              <div>
+              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                 {/* Header de la pestaña con filtros y botones */}
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4 shrink-0">
                   <div>
                     <h3 className="text-lg font-bold text-gray-900 flex items-center space-x-2">
                       <span>Viajes Finalizados y Anulados</span>
@@ -2628,7 +2630,7 @@ export default function CoordinadorDashboard() {
                 {subTabHistorial === 'lista' ? (
                   <>
                     {/* Tarjetas resumen KPI */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 shrink-0">
                       <div className="bg-white p-3.5 rounded-xl border border-emerald-200 shadow-sm bg-gradient-to-br from-white to-emerald-50/40">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-semibold text-emerald-800">Finalizados</span>
@@ -2683,7 +2685,7 @@ export default function CoordinadorDashboard() {
                     </div>
 
                     {/* Subfiltros de Estado y Rango de Fecha */}
-                    <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0">
                       {/* Filtro por Estado */}
                       <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 md:pb-0">
                         <span className="text-xs font-semibold text-gray-500 mr-1 shrink-0">Estado:</span>
@@ -2752,10 +2754,10 @@ export default function CoordinadorDashboard() {
                     </div>
 
                     {/* Tabla de Viajes Finalizados y Anulados */}
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                      <div className="overflow-x-auto">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                      <div className="overflow-auto max-h-[55vh] lg:max-h-none lg:flex-1 lg:min-h-0">
                         <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto">
-                          <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                             <tr>
                               <th className="px-3 sm:px-4 py-3 min-w-[95px] w-24">Fecha / Hora</th>
                               <th className="px-3 sm:px-4 py-3 min-w-[130px] w-36">Cliente</th>
@@ -2945,9 +2947,9 @@ export default function CoordinadorDashboard() {
                   </>
                 ) : (
                   /* Vista Analítica de Auditoría de Cancelaciones */
-                  <div className="space-y-4">
+                  <div className="flex flex-col space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                     {/* KPI Cards de Cancelaciones */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
                       <div className="bg-white p-3.5 rounded-xl border border-rose-200 shadow-sm bg-gradient-to-br from-white to-rose-50/40">
                         <span className="text-[11px] font-bold text-rose-800 uppercase">Total Cancelados</span>
                         <div className="text-2xl font-black text-rose-700 mt-1">
@@ -2998,9 +3000,9 @@ export default function CoordinadorDashboard() {
                     </div>
 
                     {/* Ranking de Motivos más frecuentes y Filtros */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                       {/* Top Motivos */}
-                      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm lg:overflow-y-auto">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-3 flex items-center space-x-1.5">
                           <AlertCircle className="h-4 w-4 text-rose-500" />
                           <span>Cuellos de Botella (Ranking de Motivos)</span>
@@ -3034,8 +3036,8 @@ export default function CoordinadorDashboard() {
                       </div>
 
                       {/* Tabla detallada de cancelaciones con filtro rápido */}
-                      <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-                        <div className="p-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
+                      <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:min-h-0">
+                        <div className="p-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
                           <span className="text-xs font-bold text-gray-700">Filtrar por Responsable:</span>
                           <div className="flex items-center space-x-1">
                             {(['TODOS', 'CLIENTE', 'CHOFER', 'COORDINADOR'] as const).map((resp) => (
@@ -3055,9 +3057,9 @@ export default function CoordinadorDashboard() {
                           </div>
                         </div>
 
-                        <div className="overflow-x-auto max-h-80">
+                        <div className="overflow-auto max-h-80 lg:max-h-none lg:flex-1 lg:min-h-0">
                           <table className="w-full text-left text-xs divide-y divide-gray-200">
-                            <thead className="bg-gray-50 text-gray-500 uppercase font-semibold">
+                            <thead className="bg-gray-50 text-gray-500 uppercase font-semibold sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                               <tr>
                                 <th className="px-3 py-2">Fecha/Hora</th>
                                 <th className="px-3 py-2">Pasajero</th>
@@ -3130,7 +3132,7 @@ export default function CoordinadorDashboard() {
 
         {/* Panel lateral derecho - Botones de acción */}
         {isSidebarOpen && (
-          <div className="w-full lg:w-64 xl:w-72 2xl:w-80 bg-white shadow-md border-t lg:border-t-0 lg:border-l shrink-0">
+          <div className="w-full lg:w-64 xl:w-72 2xl:w-80 bg-white shadow-md border-t lg:border-t-0 lg:border-l shrink-0 lg:overflow-y-auto">
             <div className="p-4 sm:p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-md font-bold text-gray-900">Acciones Rápidas</h3>

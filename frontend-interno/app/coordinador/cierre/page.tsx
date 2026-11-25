@@ -177,9 +177,9 @@ export default function CierreCajaPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12 overflow-x-hidden w-full">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-slate-50 pb-12 lg:pb-0 flex flex-col overflow-x-hidden w-full">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
@@ -212,10 +212,10 @@ export default function CierreCajaPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full min-w-0">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 min-w-0">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-6 w-full min-w-0 flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 min-w-0 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
           {/* Columna Izquierda: Selector de Chofer y Parámetros */}
-          <div className="lg:col-span-1 space-y-6 min-w-0">
+          <div className="lg:col-span-1 space-y-6 min-w-0 lg:overflow-y-auto lg:pr-1">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
               <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                 <User className="w-5 h-5 text-blue-500" />
@@ -342,11 +342,11 @@ export default function CierreCajaPage() {
           </div>
 
           {/* Columna Derecha: Viajes Pendientes y Cuadro de Resultados */}
-          <div className="lg:col-span-2 space-y-6 min-w-0">
+          <div className="lg:col-span-2 flex flex-col space-y-6 min-w-0 lg:min-h-0 lg:overflow-hidden">
             {!selectedChoferId ? (
-              <div className="space-y-6">
+              <div className="flex flex-col space-y-6 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                 {/* Resumen del Turno */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm shrink-0">
                   <div className="flex justify-between items-center mb-6">
                     <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                       <Clock className="w-5 h-5 text-indigo-500" />
@@ -400,8 +400,8 @@ export default function CierreCajaPage() {
                 </div>
 
                 {/* Historial de Cierres Hoy */}
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                  <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
                     <h3 className="text-md font-bold text-slate-800 flex items-center gap-2">
                       <FileText className="w-4 h-4 text-slate-400" />
                       Cierres de Caja Procesados Hoy ({resumenTurno?.liquidaciones?.length || 0})
@@ -421,9 +421,9 @@ export default function CierreCajaPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto w-full">
+                    <div className="overflow-auto w-full max-h-[55vh] lg:max-h-none lg:flex-1 lg:min-h-0">
                       <table className="w-full divide-y divide-slate-200 text-left text-xs">
-                        <thead className="bg-slate-50/50">
+                        <thead className="bg-slate-50 sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(226,232,240,1)]">
                           <tr>
                             <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Hora</th>
                             <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Chofer</th>
@@ -479,9 +479,9 @@ export default function CierreCajaPage() {
                 <p className="text-slate-500">Buscando viajes pendientes de liquidar...</p>
               </div>
             ) : pendingData ? (
-              <div className="space-y-6">
+              <div className="flex flex-col space-y-6 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                 {/* Cuadro Resumen Financiero */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm shrink-0">
                   <h3 className="text-lg font-bold text-slate-800 mb-4">Cálculo de Liquidación</h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -549,17 +549,17 @@ export default function CierreCajaPage() {
 
                 {/* Tabla de Viajes */}
                 {pendingData.viajes.length > 0 && (
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                    <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
                       <h3 className="text-md font-bold text-slate-800">Viajes a Liquidar</h3>
                       <span className="px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold">
                         {pendingData.viajes.length} viajes
                       </span>
                     </div>
 
-                    <div className="overflow-x-auto w-full">
+                    <div className="overflow-auto w-full max-h-[55vh] lg:max-h-none lg:flex-1 lg:min-h-0">
                       <table className="w-full divide-y divide-slate-200 text-sm">
-                        <thead className="bg-slate-50/50">
+                        <thead className="bg-slate-50 sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(226,232,240,1)]">
                           <tr>
                             <th className="px-3 sm:px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Fecha/Hora</th>
                             <th className="px-3 sm:px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Cliente</th>
