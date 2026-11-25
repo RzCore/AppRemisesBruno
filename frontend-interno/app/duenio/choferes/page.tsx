@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { choferService, remiseriaService, vehiculoService } from '@/lib/api';
 import { Chofer, CreateChoferData, Remiseria, Vehiculo } from '@/types';
-import { Truck, Plus, Edit, Trash2, Eye, EyeOff, Search, Filter, ArrowLeft, User, Calendar, Phone, Mail, MapPin, FileText, CheckCircle, XCircle, Clock, ChevronRight, ChevronLeft, Check, Sparkles, ShieldCheck, ShieldAlert, Bell } from 'lucide-react';
+import { Truck, Car, Plus, Edit, Trash2, Eye, EyeOff, Search, Filter, ArrowLeft, User, Calendar, Phone, Mail, MapPin, FileText, CheckCircle, XCircle, Clock, ChevronRight, ChevronLeft, ChevronDown, Check, Sparkles, ShieldCheck, ShieldAlert, Bell } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { evaluarDocumentacionClient, getDocumentoBadgeClasses } from '@/lib/documentacionUtils';
 
@@ -31,6 +31,38 @@ export default function ChoferesPage() {
   const [aprobarVehiculoId, setAprobarVehiculoId] = useState<string>('');
   const [motivoRechazoInput, setMotivoRechazoInput] = useState<string>('');
   const [actionSubmitting, setActionSubmitting] = useState<boolean>(false);
+
+  // Alta rápida de vehículo inline dentro del wizard de chofer (2-en-1)
+  const [vehiculoMode, setVehiculoMode] = useState<'existente' | 'nuevo'>('existente');
+  const [mostrarVtosVehiculo, setMostrarVtosVehiculo] = useState<boolean>(false);
+  const [savingChofer, setSavingChofer] = useState<boolean>(false);
+  const [nuevoVehiculo, setNuevoVehiculo] = useState({
+    patente: '',
+    marca: '',
+    modelo: '',
+    anio: String(new Date().getFullYear()),
+    color: '',
+    propietarioTipo: 'AGENCIA' as 'AGENCIA' | 'CHOFER' | 'TERCERO',
+    propietarioNombre: '',
+    vtoSeguro: '',
+    vtoVtv: '',
+    vtoMatafuego: '',
+  });
+
+  // Modal de asignación / cambio rápido de auto desde el listado
+  const [choferParaAuto, setChoferParaAuto] = useState<Chofer | null>(null);
+  const [quickAutoMode, setQuickAutoMode] = useState<'existente' | 'nuevo'>('existente');
+  const [quickVehiculoId, setQuickVehiculoId] = useState<string>('');
+  const [quickAutoForm, setQuickAutoForm] = useState({
+    patente: '',
+    marca: '',
+    modelo: '',
+    anio: String(new Date().getFullYear()),
+    color: '',
+    propietarioTipo: 'AGENCIA' as 'AGENCIA' | 'CHOFER' | 'TERCERO',
+    propietarioNombre: '',
+  });
+  const [quickAutoSaving, setQuickAutoSaving] = useState<boolean>(false);
 
   // Formulario de creación/edición
   const [formData, setFormData] = useState<CreateChoferData>({
@@ -104,25 +136,98 @@ export default function ChoferesPage() {
     }
   };
 
+  const resetNuevoVehiculo = (esPropietario = false) => {
+    setVehiculoMode('existente');
+    setMostrarVtosVehiculo(false);
+    setNuevoVehiculo({
+      patente: '',
+      marca: '',
+      modelo: '',
+      anio: String(new Date().getFullYear()),
+      color: '',
+      propietarioTipo: esPropietario ? 'CHOFER' : 'AGENCIA',
+      propietarioNombre: '',
+      vtoSeguro: '',
+      vtoVtv: '',
+      vtoMatafuego: '',
+    });
+  };
+
+  const resolverPropietarioTexto = (tipo: 'AGENCIA' | 'CHOFER' | 'TERCERO', nombre: string) => {
+    if (tipo === 'AGENCIA') return 'Agencia';
+    if (tipo === 'CHOFER') return 'Chofer';
+    return nombre.trim() || 'Tercero';
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingChofer) return;
+
     try {
-      const response = await choferService.create(formData);
+      setSavingChofer(true);
+      let vehiculoIdFinal = formData.vehiculoId || '';
+      const remiseriaIdFinal = formData.remiseriaId || remiserias[0]?.id || '';
+
+      // Si el dueño eligió cargar el auto nuevo en el mismo paso, lo creamos primero
+      if (vehiculoMode === 'nuevo') {
+        const patenteClean = nuevoVehiculo.patente.trim().toUpperCase();
+        const marcaClean = nuevoVehiculo.marca.trim();
+        const modeloClean = nuevoVehiculo.modelo.trim();
+        const colorClean = nuevoVehiculo.color.trim() || 'No especificado';
+
+        if (!patenteClean || !marcaClean || !modeloClean) {
+          toast.error('Completá patente, marca y modelo del auto nuevo');
+          setSavingChofer(false);
+          return;
+        }
+
+        const vehRes = await vehiculoService.create({
+          patente: patenteClean,
+          marca: marcaClean,
+          modelo: modeloClean,
+          anio: Number(nuevoVehiculo.anio) || new Date().getFullYear(),
+          color: colorClean,
+          tipo: 'SEDAN',
+          capacidad: 4,
+          propietario: resolverPropietarioTexto(nuevoVehiculo.propietarioTipo, nuevoVehiculo.propietarioNombre),
+          vtoSeguro: nuevoVehiculo.vtoSeguro || undefined,
+          vtoVtv: nuevoVehiculo.vtoVtv || undefined,
+          vtoMatafuego: nuevoVehiculo.vtoMatafuego || undefined,
+          remiseriaId: remiseriaIdFinal,
+        });
+
+        if (!vehRes.success || !vehRes.data?.id) {
+          toast.error(vehRes.message || 'No se pudo crear el vehículo');
+          setSavingChofer(false);
+          return;
+        }
+        vehiculoIdFinal = vehRes.data.id;
+      }
+
+      const payload: CreateChoferData = {
+        ...formData,
+        remiseriaId: remiseriaIdFinal,
+        vehiculoId: vehiculoIdFinal || undefined,
+      };
+
+      const response = await choferService.create(payload);
       if (response.success) {
         const emailAcceso = response.data?.email || formData.email || `${(formData.numeroChofer || '').toLowerCase()}@brunoremises.com.ar`;
         const alertas = (response as any).alertasVencimiento || [];
+        const autoMsg = vehiculoMode === 'nuevo' ? ` + Auto ${nuevoVehiculo.patente.trim().toUpperCase()} asignado.` : '';
         if (alertas.length > 0) {
           toast.success(
-            `Chofer creado (Acceso: ${emailAcceso} / Clave: ${formData.dni}). Se alertaron ${alertas.length} documento(s) por vencer.`,
+            `Chofer creado${autoMsg} (Acceso: ${emailAcceso} / Clave: ${formData.dni}). Se alertaron ${alertas.length} documento(s) por vencer.`,
             { duration: 6500 }
           );
         } else {
           toast.success(
-            `Chofer dado de alta. Ingresa con ${emailAcceso} y clave ${formData.dni}`,
+            `Chofer dado de alta${autoMsg} Ingresa con ${emailAcceso} y clave ${formData.dni}`,
             { duration: 6000 }
           );
         }
         setShowCreateModal(false);
+        resetNuevoVehiculo(false);
         setFormData({
           numeroChofer: '',
           nombre: '',
@@ -138,20 +243,62 @@ export default function ChoferesPage() {
           esPropietario: false
         });
         loadChoferes();
+        loadVehiculos();
       } else {
         toast.error(response.message || 'Error al crear chofer');
       }
     } catch (error) {
       console.error('Error creating chofer:', error);
       toast.error('Error al crear chofer');
+    } finally {
+      setSavingChofer(false);
     }
   };
 
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChofer) return;
+    if (!selectedChofer || savingChofer) return;
 
     try {
+      setSavingChofer(true);
+      let vehiculoIdFinal = formData.vehiculoId || '';
+      const remiseriaIdFinal = formData.remiseriaId || selectedChofer.remiseriaId || remiserias[0]?.id || '';
+
+      if (vehiculoMode === 'nuevo') {
+        const patenteClean = nuevoVehiculo.patente.trim().toUpperCase();
+        const marcaClean = nuevoVehiculo.marca.trim();
+        const modeloClean = nuevoVehiculo.modelo.trim();
+        const colorClean = nuevoVehiculo.color.trim() || 'No especificado';
+
+        if (!patenteClean || !marcaClean || !modeloClean) {
+          toast.error('Completá patente, marca y modelo del auto nuevo');
+          setSavingChofer(false);
+          return;
+        }
+
+        const vehRes = await vehiculoService.create({
+          patente: patenteClean,
+          marca: marcaClean,
+          modelo: modeloClean,
+          anio: Number(nuevoVehiculo.anio) || new Date().getFullYear(),
+          color: colorClean,
+          tipo: 'SEDAN',
+          capacidad: 4,
+          propietario: resolverPropietarioTexto(nuevoVehiculo.propietarioTipo, nuevoVehiculo.propietarioNombre),
+          vtoSeguro: nuevoVehiculo.vtoSeguro || undefined,
+          vtoVtv: nuevoVehiculo.vtoVtv || undefined,
+          vtoMatafuego: nuevoVehiculo.vtoMatafuego || undefined,
+          remiseriaId: remiseriaIdFinal,
+        });
+
+        if (!vehRes.success || !vehRes.data?.id) {
+          toast.error(vehRes.message || 'No se pudo crear el vehículo');
+          setSavingChofer(false);
+          return;
+        }
+        vehiculoIdFinal = vehRes.data.id;
+      }
+
       const updateData = {
         numeroChofer: formData.numeroChofer,
         nombre: formData.nombre,
@@ -162,16 +309,21 @@ export default function ChoferesPage() {
         direccion: formData.direccion,
         categoriaLicencia: formData.categoriaLicencia,
         vtoLicencia: formData.vtoLicencia,
-        vehiculoId: formData.vehiculoId,
+        vehiculoId: vehiculoIdFinal,
         esPropietario: formData.esPropietario,
         comisionPorcentaje: formData.comisionPorcentaje
       };
 
       const response = await choferService.update(selectedChofer.id, updateData);
       if (response.success) {
-        toast.success('Chofer actualizado exitosamente');
+        toast.success(
+          vehiculoMode === 'nuevo'
+            ? `Chofer actualizado y auto ${nuevoVehiculo.patente.trim().toUpperCase()} asignado`
+            : 'Chofer actualizado exitosamente'
+        );
         setShowEditModal(false);
         setSelectedChofer(null);
+        resetNuevoVehiculo(false);
         setFormData({
           numeroChofer: '',
           nombre: '',
@@ -187,12 +339,96 @@ export default function ChoferesPage() {
           esPropietario: false
         });
         loadChoferes();
+        loadVehiculos();
       } else {
         toast.error(response.message || 'Error al actualizar chofer');
       }
     } catch (error) {
       console.error('Error updating chofer:', error);
       toast.error('Error al actualizar chofer');
+    } finally {
+      setSavingChofer(false);
+    }
+  };
+
+  const openQuickAutoModal = (chofer: Chofer) => {
+    setChoferParaAuto(chofer);
+    setQuickVehiculoId(chofer.vehiculoId || '');
+    setQuickAutoMode(vehiculos.length === 0 ? 'nuevo' : 'existente');
+    setQuickAutoForm({
+      patente: '',
+      marca: '',
+      modelo: '',
+      anio: String(new Date().getFullYear()),
+      color: '',
+      propietarioTipo: chofer.esPropietario ? 'CHOFER' : 'AGENCIA',
+      propietarioNombre: '',
+    });
+  };
+
+  const handleQuickAutoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!choferParaAuto || quickAutoSaving) return;
+
+    try {
+      setQuickAutoSaving(true);
+      let vehiculoIdFinal = quickVehiculoId;
+
+      if (quickAutoMode === 'nuevo') {
+        const patenteClean = quickAutoForm.patente.trim().toUpperCase();
+        const marcaClean = quickAutoForm.marca.trim();
+        const modeloClean = quickAutoForm.modelo.trim();
+        const colorClean = quickAutoForm.color.trim() || 'No especificado';
+
+        if (!patenteClean || !marcaClean || !modeloClean) {
+          toast.error('Completá patente, marca y modelo');
+          setQuickAutoSaving(false);
+          return;
+        }
+
+        const vehRes = await vehiculoService.create({
+          patente: patenteClean,
+          marca: marcaClean,
+          modelo: modeloClean,
+          anio: Number(quickAutoForm.anio) || new Date().getFullYear(),
+          color: colorClean,
+          tipo: 'SEDAN',
+          capacidad: 4,
+          propietario: resolverPropietarioTexto(quickAutoForm.propietarioTipo, quickAutoForm.propietarioNombre),
+          remiseriaId: choferParaAuto.remiseriaId || remiserias[0]?.id || '',
+        });
+
+        if (!vehRes.success || !vehRes.data?.id) {
+          toast.error(vehRes.message || 'No se pudo crear el vehículo');
+          setQuickAutoSaving(false);
+          return;
+        }
+        vehiculoIdFinal = vehRes.data.id;
+      }
+
+      const res = await choferService.update(choferParaAuto.id, {
+        vehiculoId: vehiculoIdFinal || '',
+      });
+
+      if (res.success) {
+        toast.success(
+          quickAutoMode === 'nuevo'
+            ? `Auto ${quickAutoForm.patente.trim().toUpperCase()} creado y asignado a ${choferParaAuto.nombre}`
+            : vehiculoIdFinal
+            ? `Auto asignado a ${choferParaAuto.nombre}`
+            : `Auto quitado de ${choferParaAuto.nombre}`
+        );
+        setChoferParaAuto(null);
+        loadChoferes();
+        loadVehiculos();
+      } else {
+        toast.error(res.message || 'Error al asignar vehículo');
+      }
+    } catch (error) {
+      console.error('Error en asignación rápida de auto:', error);
+      toast.error('Error al asignar vehículo');
+    } finally {
+      setQuickAutoSaving(false);
     }
   };
 
@@ -245,6 +481,7 @@ export default function ChoferesPage() {
       esPropietario: chofer.esPropietario || false,
       comisionPorcentaje: chofer.comisionPorcentaje !== undefined ? chofer.comisionPorcentaje : 30
     });
+    resetNuevoVehiculo(chofer.esPropietario || false);
     setEditStep(1);
     setShowEditModal(true);
   };
@@ -266,6 +503,7 @@ export default function ChoferesPage() {
       esPropietario: false,
       comisionPorcentaje: 30
     });
+    resetNuevoVehiculo(false);
     setCreateStep(1);
     setShowCreateModal(true);
   };
@@ -279,6 +517,15 @@ export default function ChoferesPage() {
     } else if (step === 2) {
       if (!formData.categoriaLicencia?.trim() || !formData.vtoLicencia?.trim()) {
         toast.error('Completá la categoría y el vencimiento de la licencia');
+        return false;
+      }
+    } else if (step === 3 && vehiculoMode === 'nuevo') {
+      if (!nuevoVehiculo.patente.trim() || !nuevoVehiculo.marca.trim() || !nuevoVehiculo.modelo.trim()) {
+        toast.error('Para cargar el auto nuevo completá patente, marca y modelo');
+        return false;
+      }
+      if (nuevoVehiculo.propietarioTipo === 'TERCERO' && !nuevoVehiculo.propietarioNombre.trim()) {
+        toast.error('Indicá el nombre del dueño del vehículo');
         return false;
       }
     }
@@ -502,9 +749,20 @@ export default function ChoferesPage() {
                         </div>
                         <div>
                           <span className="text-[10px] text-slate-400 font-medium block">Vehículo Asignado</span>
-                          <span className="font-semibold text-slate-800 block mt-0.5 truncate">
-                            {chofer.vehiculo ? `${chofer.vehiculo.patente} (${chofer.vehiculo.modelo})` : 'Sin asignar'}
-                          </span>
+                          <div className="flex items-center justify-between gap-1 mt-0.5">
+                            <span className="font-semibold text-slate-800 truncate">
+                              {chofer.vehiculo ? `${chofer.vehiculo.patente} (${chofer.vehiculo.modelo})` : 'Sin asignar'}
+                            </span>
+                            {chofer.estado !== 'PENDIENTE_APROBACION' && (
+                              <button
+                                type="button"
+                                onClick={() => openQuickAutoModal(chofer)}
+                                className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded-md shrink-0"
+                              >
+                                {chofer.vehiculo ? 'Cambiar' : '+ Auto'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="col-span-2 pt-1 border-t border-slate-200/50 flex items-center justify-between">
                           <span className="text-[10px] text-slate-500 font-medium">
@@ -637,7 +895,7 @@ export default function ChoferesPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-slate-700">
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
                           {chofer.vehiculo ? (
                             <div>
                               <div className="font-semibold">{chofer.vehiculo.patente}</div>
@@ -647,6 +905,16 @@ export default function ChoferesPage() {
                             </div>
                           ) : (
                             <span className="text-slate-400 italic">Sin asignar</span>
+                          )}
+                          {chofer.estado !== 'PENDIENTE_APROBACION' && (
+                            <button
+                              type="button"
+                              onClick={() => openQuickAutoModal(chofer)}
+                              className="text-[11px] font-semibold text-primary-600 hover:text-primary-700 bg-primary-50 hover:bg-primary-100 px-2 py-1 rounded-lg transition-colors"
+                              title={chofer.vehiculo ? 'Cambiar o cargar auto' : 'Asignar o cargar auto'}
+                            >
+                              {chofer.vehiculo ? 'Cambiar' : '+ Asignar'}
+                            </button>
                           )}
                         </div>
                       </td>
@@ -989,7 +1257,13 @@ export default function ChoferesPage() {
                       </label>
                       <div className="space-y-2.5">
                         <div
-                          onClick={() => setFormData({ ...formData, esPropietario: false, comisionPorcentaje: 30 })}
+                          onClick={() => {
+                            setFormData({ ...formData, esPropietario: false, comisionPorcentaje: 30 });
+                            setNuevoVehiculo((prev) => ({
+                              ...prev,
+                              propietarioTipo: prev.propietarioTipo === 'CHOFER' ? 'AGENCIA' : prev.propietarioTipo,
+                            }));
+                          }}
                           className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
                             formData.esPropietario === false
                               ? 'bg-blue-50/50 border-blue-600 shadow-xs'
@@ -1015,7 +1289,13 @@ export default function ChoferesPage() {
                         </div>
 
                         <div
-                          onClick={() => setFormData({ ...formData, esPropietario: true, comisionPorcentaje: 80 })}
+                          onClick={() => {
+                            setFormData({ ...formData, esPropietario: true, comisionPorcentaje: 80 });
+                            setNuevoVehiculo((prev) => ({
+                              ...prev,
+                              propietarioTipo: 'CHOFER',
+                            }));
+                          }}
                           className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
                             formData.esPropietario === true
                               ? 'bg-emerald-50/50 border-emerald-600 shadow-xs'
@@ -1042,22 +1322,208 @@ export default function ChoferesPage() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Vehículo Asignado (opcional)
-                      </label>
-                      <select
-                        value={formData.vehiculoId}
-                        onChange={(e) => setFormData({ ...formData, vehiculoId: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs sm:text-sm bg-white focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">Sin asignar por el momento</option>
-                        {vehiculos.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.patente} • {v.marca} {v.modelo} ({v.propietario === 'Agencia' ? '🏢 Agencia' : v.propietario === 'Chofer' ? '👤 Chofer' : `🚗 Dueño: ${v.propietario}`})
-                          </option>
-                        ))}
-                      </select>
+                    {/* Selector de Vehículo: Existente o Cargar Nuevo en el Acto */}
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Vehículo del Chofer
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setVehiculoMode('existente')}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            vehiculoMode === 'existente'
+                              ? 'bg-white text-primary-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <Car className="w-3.5 h-3.5" />
+                          Auto existente ({vehiculos.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVehiculoMode('nuevo')}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            vehiculoMode === 'nuevo'
+                              ? 'bg-white text-emerald-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Cargar auto nuevo
+                        </button>
+                      </div>
+
+                      {vehiculoMode === 'existente' ? (
+                        <div>
+                          <select
+                            value={formData.vehiculoId}
+                            onChange={(e) => setFormData({ ...formData, vehiculoId: e.target.value })}
+                            className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs sm:text-sm bg-white focus:ring-2 focus:ring-primary-500"
+                          >
+                            <option value="">Sin asignar por el momento</option>
+                            {vehiculos.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.patente} • {v.marca} {v.modelo} ({v.propietario === 'Agencia' ? '🏢 Agencia' : v.propietario === 'Chofer' ? '👤 Chofer' : `🚗 Dueño: ${v.propietario}`})
+                              </option>
+                            ))}
+                          </select>
+                          {vehiculos.length === 0 && (
+                            <p className="text-[11px] text-amber-600 mt-1.5">
+                              Todavía no hay autos cargados. Tocá <strong>&quot;+ Cargar auto nuevo&quot;</strong> arriba para darlo de alta acá mismo.
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                Patente *
+                              </label>
+                              <input
+                                type="text"
+                                value={nuevoVehiculo.patente}
+                                onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, patente: e.target.value.toUpperCase() })}
+                                placeholder="ej. AB123CD"
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold uppercase focus:ring-2 focus:ring-primary-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                Color
+                              </label>
+                              <input
+                                type="text"
+                                value={nuevoVehiculo.color}
+                                onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, color: e.target.value })}
+                                placeholder="ej. Blanco"
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                Marca *
+                              </label>
+                              <input
+                                type="text"
+                                value={nuevoVehiculo.marca}
+                                onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, marca: e.target.value })}
+                                placeholder="ej. Fiat"
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                Modelo *
+                              </label>
+                              <input
+                                type="text"
+                                value={nuevoVehiculo.modelo}
+                                onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, modelo: e.target.value })}
+                                placeholder="ej. Cronos"
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                Año
+                              </label>
+                              <input
+                                type="tel"
+                                inputMode="numeric"
+                                maxLength={4}
+                                value={nuevoVehiculo.anio}
+                                onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, anio: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                                placeholder={String(new Date().getFullYear())}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                              Titular del Auto
+                            </label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {([
+                                { id: 'AGENCIA', label: 'Agencia' },
+                                { id: 'CHOFER', label: 'Chofer' },
+                                { id: 'TERCERO', label: 'Otro dueño' },
+                              ] as const).map((opt) => (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => setNuevoVehiculo({ ...nuevoVehiculo, propietarioTipo: opt.id })}
+                                  className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition-all ${
+                                    nuevoVehiculo.propietarioTipo === opt.id
+                                      ? 'bg-primary-600 text-white border-primary-600'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                            {nuevoVehiculo.propietarioTipo === 'TERCERO' && (
+                              <input
+                                type="text"
+                                value={nuevoVehiculo.propietarioNombre}
+                                onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, propietarioNombre: e.target.value })}
+                                placeholder="Nombre del dueño del auto"
+                                className="w-full mt-2 px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-primary-500"
+                              />
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setMostrarVtosVehiculo(!mostrarVtosVehiculo)}
+                            className="w-full flex items-center justify-between text-[11px] font-semibold text-slate-500 hover:text-slate-700 pt-1"
+                          >
+                            <span>Cargar vencimientos ahora (Seguro / VTV / Matafuego) — opcional</span>
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${mostrarVtosVehiculo ? 'rotate-180' : ''}`} />
+                          </button>
+
+                          {mostrarVtosVehiculo && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Vto. Seguro</label>
+                                <input
+                                  type="date"
+                                  value={nuevoVehiculo.vtoSeguro}
+                                  onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, vtoSeguro: e.target.value })}
+                                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Vto. VTV</label>
+                                <input
+                                  type="date"
+                                  value={nuevoVehiculo.vtoVtv}
+                                  onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, vtoVtv: e.target.value })}
+                                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Vto. Matafuego</label>
+                                <input
+                                  type="date"
+                                  value={nuevoVehiculo.vtoMatafuego}
+                                  onChange={(e) => setNuevoVehiculo({ ...nuevoVehiculo, vtoMatafuego: e.target.value })}
+                                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/60 flex items-center justify-between text-xs">
@@ -1125,7 +1591,9 @@ export default function ChoferesPage() {
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 text-xs">
                       <span className="text-[10px] text-slate-400 font-bold uppercase block">Vehículo Asignado</span>
                       <span className="font-semibold text-slate-800 block mt-0.5">
-                        {formData.vehiculoId
+                        {vehiculoMode === 'nuevo'
+                          ? `🆕 Auto nuevo a crear: ${nuevoVehiculo.patente.toUpperCase()} • ${nuevoVehiculo.marca} ${nuevoVehiculo.modelo} (${nuevoVehiculo.anio || new Date().getFullYear()}${nuevoVehiculo.color ? `, ${nuevoVehiculo.color}` : ''}) — Titular: ${resolverPropietarioTexto(nuevoVehiculo.propietarioTipo, nuevoVehiculo.propietarioNombre)}`
+                          : formData.vehiculoId
                           ? (() => {
                               const veh = vehiculos.find((v) => v.id === formData.vehiculoId);
                               return veh ? `${veh.patente} • ${veh.marca} ${veh.modelo} (Titular: ${veh.propietario})` : 'Vehículo seleccionado';
@@ -1203,10 +1671,19 @@ export default function ChoferesPage() {
                   ) : (
                     <button
                       type="submit"
-                      className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all ml-auto"
+                      disabled={savingChofer}
+                      className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all ml-auto disabled:opacity-50"
                     >
                       <Sparkles className="w-4 h-4" />
-                      {isEdit ? 'Confirmar y Actualizar Chofer' : 'Confirmar y Crear Chofer'}
+                      {savingChofer
+                        ? 'Guardando...'
+                        : isEdit
+                        ? vehiculoMode === 'nuevo'
+                          ? 'Crear Auto y Actualizar Chofer'
+                          : 'Confirmar y Actualizar Chofer'
+                        : vehiculoMode === 'nuevo'
+                        ? 'Crear Chofer y Auto'
+                        : 'Confirmar y Crear Chofer'}
                     </button>
                   )}
                 </div>
@@ -1402,6 +1879,200 @@ export default function ChoferesPage() {
                 >
                   <XCircle className="w-4 h-4" />
                   {actionSubmitting ? 'Rechazando...' : 'Confirmar Rechazo'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Asignación / Carga Rápida de Auto */}
+      {choferParaAuto && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs overflow-y-auto h-full w-full z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-5 pb-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-primary-100 text-primary-700 flex items-center justify-center shrink-0">
+                  <Car className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-900 truncate">
+                    Vehículo para {choferParaAuto.nombre}
+                  </h3>
+                  <p className="text-xs text-slate-500 truncate">
+                    #{choferParaAuto.numeroChofer} • {choferParaAuto.vehiculo ? `Actual: ${choferParaAuto.vehiculo.patente}` : 'Sin auto asignado'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChoferParaAuto(null)}
+                className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickAutoSubmit} className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setQuickAutoMode('existente')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                    quickAutoMode === 'existente'
+                      ? 'bg-white text-primary-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Auto existente ({vehiculos.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickAutoMode('nuevo')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                    quickAutoMode === 'nuevo'
+                      ? 'bg-white text-emerald-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  + Cargar auto nuevo
+                </button>
+              </div>
+
+              {quickAutoMode === 'existente' ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Seleccioná el vehículo
+                  </label>
+                  <select
+                    value={quickVehiculoId}
+                    onChange={(e) => setQuickVehiculoId(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Sin vehículo asignado</option>
+                    {vehiculos.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.patente} • {v.marca} {v.modelo} ({v.propietario})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Patente *</label>
+                      <input
+                        type="text"
+                        required
+                        value={quickAutoForm.patente}
+                        onChange={(e) => setQuickAutoForm({ ...quickAutoForm, patente: e.target.value.toUpperCase() })}
+                        placeholder="ej. AB123CD"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-bold uppercase focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Color</label>
+                      <input
+                        type="text"
+                        value={quickAutoForm.color}
+                        onChange={(e) => setQuickAutoForm({ ...quickAutoForm, color: e.target.value })}
+                        placeholder="ej. Blanco"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Marca *</label>
+                      <input
+                        type="text"
+                        required
+                        value={quickAutoForm.marca}
+                        onChange={(e) => setQuickAutoForm({ ...quickAutoForm, marca: e.target.value })}
+                        placeholder="Fiat"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Modelo *</label>
+                      <input
+                        type="text"
+                        required
+                        value={quickAutoForm.modelo}
+                        onChange={(e) => setQuickAutoForm({ ...quickAutoForm, modelo: e.target.value })}
+                        placeholder="Cronos"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Año</label>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={quickAutoForm.anio}
+                        onChange={(e) => setQuickAutoForm({ ...quickAutoForm, anio: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                        placeholder={String(new Date().getFullYear())}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Titular</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([
+                        { id: 'AGENCIA', label: 'Agencia' },
+                        { id: 'CHOFER', label: 'Chofer' },
+                        { id: 'TERCERO', label: 'Otro dueño' },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setQuickAutoForm({ ...quickAutoForm, propietarioTipo: opt.id })}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition-all ${
+                            quickAutoForm.propietarioTipo === opt.id
+                              ? 'bg-primary-600 text-white border-primary-600'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {quickAutoForm.propietarioTipo === 'TERCERO' && (
+                      <input
+                        type="text"
+                        required
+                        value={quickAutoForm.propietarioNombre}
+                        onChange={(e) => setQuickAutoForm({ ...quickAutoForm, propietarioNombre: e.target.value })}
+                        placeholder="Nombre del dueño del auto"
+                        className="w-full mt-2 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setChoferParaAuto(null)}
+                  disabled={quickAutoSaving}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 text-xs font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={quickAutoSaving}
+                  className="px-5 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold shadow-sm disabled:opacity-50"
+                >
+                  {quickAutoSaving
+                    ? 'Guardando...'
+                    : quickAutoMode === 'nuevo'
+                    ? 'Crear Auto y Asignar'
+                    : 'Guardar Asignación'}
                 </button>
               </div>
             </form>
