@@ -35,10 +35,10 @@ export const ThemeModuleProvider: React.FC<ThemeModuleProviderProps> = ({ childr
   const [systemIsDark, setSystemIsDark] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // Determinar si la ruta actual pertenece a chofer o cliente
+  // Determinar si la ruta actual pertenece a chofer, cliente o dueño
   const isAllowedModule = useCallback((path?: string | null) => {
     if (!path) return true;
-    return path.startsWith('/chofer') || path.startsWith('/cliente');
+    return path.startsWith('/chofer') || path.startsWith('/cliente') || path.startsWith('/duenio');
   }, []);
 
   // Inicializar preferencia y detector de sistema

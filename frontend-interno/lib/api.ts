@@ -89,8 +89,17 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    const responseMsg = String(error.response?.data?.message || error.response?.data?.error || '').toLowerCase();
+    const isAuthTokenError =
+      error.response?.status === 401 ||
+      (error.response?.status === 403 &&
+        (responseMsg.includes('token') ||
+          responseMsg.includes('expir') ||
+          responseMsg.includes('sesi') ||
+          responseMsg.includes('autentic')));
+
     if (
-      (error.response?.status === 401 || error.response?.status === 403) &&
+      isAuthTokenError &&
       !originalRequest._retry &&
       !originalRequest.url?.includes('/auth/login') &&
       !originalRequest.url?.includes('/auth/refresh')
@@ -107,8 +116,13 @@ api.interceptors.response.use(
           });
 
           const { accessToken } = response.data.data;
-          if (typeof window !== 'undefined' && sessionStorage.getItem('interno_refreshToken')) {
+          if (typeof window !== 'undefined') {
             sessionStorage.setItem('interno_accessToken', accessToken);
+            const hostname = window.location.hostname.toLowerCase();
+            const domainPart = hostname.includes('brunoremises.com.ar') ? '; domain=.brunoremises.com.ar' : '';
+            const expires = '; expires=' + new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toUTCString();
+            const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+            document.cookie = `bruno_interno_access_token=${encodeURIComponent(accessToken)}${expires}${domainPart}; path=/; SameSite=Lax${secure}`;
           }
           localStorage.setItem('interno_accessToken', accessToken);
 

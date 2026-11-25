@@ -59,47 +59,248 @@
 }
 
 /* ==========================================================
-   Estilos de Modo Oscuro EXCLUSIVOS para Choferes y Clientes
+   Estilos de Modo Oscuro para Choferes, Clientes y Dueño
    ========================================================== */
 
 .dark .chofer-module,
-.dark .cliente-module {
+.dark .cliente-module,
+.dark .duenio-module {
   color-scheme: dark;
 }
 
-/* Mapas Leaflet en Modo Nocturno para conducción y uso con poca luz */
+/* Mapas Leaflet en Modo Nocturno */
 .dark .chofer-module .leaflet-tile,
-.dark .cliente-module .leaflet-tile {
+.dark .cliente-module .leaflet-tile,
+.dark .duenio-module .leaflet-tile {
   filter: brightness(0.65) invert(1) contrast(2.6) hue-rotate(200deg) saturate(0.35) brightness(0.75);
 }
 
 .dark .chofer-module .leaflet-container,
-.dark .cliente-module .leaflet-container {
+.dark .cliente-module .leaflet-container,
+.dark .duenio-module .leaflet-container {
   background: #090d16 !important;
 }
 
 .dark .chofer-module .leaflet-popup-content-wrapper,
-.dark .cliente-module .leaflet-popup-content-wrapper {
+.dark .cliente-module .leaflet-popup-content-wrapper,
+.dark .duenio-module .leaflet-popup-content-wrapper {
   background: #1e293b !important;
   color: #f8fafc !important;
   border: 1px solid #334155;
 }
 
 .dark .chofer-module .leaflet-popup-tip,
-.dark .cliente-module .leaflet-popup-tip {
+.dark .cliente-module .leaflet-popup-tip,
+.dark .duenio-module .leaflet-popup-tip {
   background: #1e293b !important;
 }
 
 .dark .chofer-module .leaflet-control-zoom a,
-.dark .cliente-module .leaflet-control-zoom a {
+.dark .cliente-module .leaflet-control-zoom a,
+.dark .duenio-module .leaflet-control-zoom a {
   background-color: #1e293b !important;
   border-color: #334155 !important;
   color: #e2e8f0 !important;
 }
 
 .dark .chofer-module .leaflet-control-zoom a:hover,
-.dark .cliente-module .leaflet-control-zoom a:hover {
+.dark .cliente-module .leaflet-control-zoom a:hover,
+.dark .duenio-module .leaflet-control-zoom a:hover {
   background-color: #334155 !important;
+}
+
+/* ==========================================================
+   Adaptación global a Modo Oscuro para subpáginas del Dueño
+   ========================================================== */
+.dark .duenio-module main .bg-white {
+  background-color: #0f172a;
+}
+
+.dark .duenio-module main .bg-slate-50,
+.dark .duenio-module main .bg-slate-50\/50,
+.dark .duenio-module main .bg-slate-50\/80,
+.dark .duenio-module main .bg-gray-50 {
+  background-color: #1e293b;
+}
+
+.dark .duenio-module main .bg-slate-100,
+.dark .duenio-module main .bg-gray-100 {
+  background-color: #1e293b;
+}
+
+.dark .duenio-module main .bg-slate-200,
+.dark .duenio-module main .bg-gray-200 {
+  background-color: #334155;
+}
+
+.dark .duenio-module main .hover\:bg-slate-50:hover,
+.dark .duenio-module main .hover\:bg-gray-50:hover,
+.dark .duenio-module main .hover\:bg-slate-100:hover,
+.dark .duenio-module main .hover\:bg-gray-100:hover {
+  background-color: #1e293b;
+}
+
+.dark .duenio-module main .text-slate-900,
+.dark .duenio-module main .text-gray-900 {
+  color: #f8fafc;
+}
+
+.dark .duenio-module main .text-slate-800,
+.dark .duenio-module main .text-gray-800 {
+  color: #f1f5f9;
+}
+
+.dark .duenio-module main .text-slate-700,
+.dark .duenio-module main .text-gray-700 {
+  color: #e2e8f0;
+}
+
+.dark .duenio-module main .text-slate-600,
+.dark .duenio-module main .text-gray-600 {
+  color: #cbd5e1;
+}
+
+.dark .duenio-module main .text-slate-500,
+.dark .duenio-module main .text-gray-500 {
+  color: #94a3b8;
+}
+
+.dark .duenio-module main .border-slate-100,
+.dark .duenio-module main .border-slate-200,
+.dark .duenio-module main .border-slate-300,
+.dark .duenio-module main .border-gray-100,
+.dark .duenio-module main .border-gray-200,
+.dark .duenio-module main .border-gray-300 {
+  border-color: #1e293b;
+}
+
+.dark .duenio-module main .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .duenio-module main .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+.dark .duenio-module main .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .duenio-module main .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b;
+}
+
+/* Badges y contenedores tintados suaves en modo oscuro */
+.dark .duenio-module main .bg-primary-50,
+.dark .duenio-module main .bg-blue-50 {
+  background-color: rgba(37, 99, 235, 0.16);
+}
+.dark .duenio-module main .bg-blue-100,
+.dark .duenio-module main .bg-primary-100 {
+  background-color: rgba(37, 99, 235, 0.24);
+}
+.dark .duenio-module main .bg-emerald-50,
+.dark .duenio-module main .bg-green-50 {
+  background-color: rgba(16, 185, 129, 0.14);
+}
+.dark .duenio-module main .bg-emerald-100,
+.dark .duenio-module main .bg-green-100 {
+  background-color: rgba(16, 185, 129, 0.22);
+}
+.dark .duenio-module main .bg-amber-50,
+.dark .duenio-module main .bg-yellow-50 {
+  background-color: rgba(245, 158, 11, 0.14);
+}
+.dark .duenio-module main .bg-amber-100,
+.dark .duenio-module main .bg-yellow-100 {
+  background-color: rgba(245, 158, 11, 0.22);
+}
+.dark .duenio-module main .bg-red-50,
+.dark .duenio-module main .bg-rose-50 {
+  background-color: rgba(239, 68, 68, 0.14);
+}
+.dark .duenio-module main .bg-red-100,
+.dark .duenio-module main .bg-rose-100 {
+  background-color: rgba(239, 68, 68, 0.22);
+}
+.dark .duenio-module main .bg-violet-50,
+.dark .duenio-module main .bg-purple-50,
+.dark .duenio-module main .bg-indigo-50 {
+  background-color: rgba(139, 92, 246, 0.15);
+}
+.dark .duenio-module main .bg-violet-100,
+.dark .duenio-module main .bg-purple-100,
+.dark .duenio-module main .bg-indigo-100 {
+  background-color: rgba(139, 92, 246, 0.24);
+}
+
+/* Textos oscuros sobre fondos tintados en modo oscuro */
+.dark .duenio-module main .text-blue-800,
+.dark .duenio-module main .text-blue-900,
+.dark .duenio-module main .text-primary-700,
+.dark .duenio-module main .text-primary-800 {
+  color: #93c5fd;
+}
+.dark .duenio-module main .text-emerald-800,
+.dark .duenio-module main .text-emerald-900,
+.dark .duenio-module main .text-green-800,
+.dark .duenio-module main .text-green-900 {
+  color: #6ee7b7;
+}
+.dark .duenio-module main .text-amber-800,
+.dark .duenio-module main .text-amber-900,
+.dark .duenio-module main .text-yellow-800,
+.dark .duenio-module main .text-yellow-900 {
+  color: #fcd34d;
+}
+.dark .duenio-module main .text-red-800,
+.dark .duenio-module main .text-red-900,
+.dark .duenio-module main .text-rose-800,
+.dark .duenio-module main .text-rose-900 {
+  color: #fca5a5;
+}
+.dark .duenio-module main .text-violet-800,
+.dark .duenio-module main .text-purple-800,
+.dark .duenio-module main .text-indigo-800 {
+  color: #c4b5fd;
+}
+
+/* Bordes tintados en modo oscuro */
+.dark .duenio-module main .border-blue-100,
+.dark .duenio-module main .border-blue-200,
+.dark .duenio-module main .border-primary-100,
+.dark .duenio-module main .border-primary-200 {
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.dark .duenio-module main .border-emerald-100,
+.dark .duenio-module main .border-emerald-200,
+.dark .duenio-module main .border-green-200 {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.dark .duenio-module main .border-amber-100,
+.dark .duenio-module main .border-amber-200,
+.dark .duenio-module main .border-yellow-200 {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.dark .duenio-module main .border-red-100,
+.dark .duenio-module main .border-red-200,
+.dark .duenio-module main .border-rose-200 {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.dark .duenio-module main .border-violet-200,
+.dark .duenio-module main .border-purple-200,
+.dark .duenio-module main .border-indigo-200 {
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+/* Inputs, selects y textareas dentro del módulo del dueño en modo oscuro */
+.dark .duenio-module main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark .duenio-module main select,
+.dark .duenio-module main textarea {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
+.dark .duenio-module main input::placeholder,
+.dark .duenio-module main textarea::placeholder {
+  color: #64748b;
+}
+
+.dark .duenio-module main option {
+  background-color: #0f172a;
+  color: #f1f5f9;
 }
 
 /* Ocultar barra de scroll en la App del Chofer (scroll funcional pero invisible) */
