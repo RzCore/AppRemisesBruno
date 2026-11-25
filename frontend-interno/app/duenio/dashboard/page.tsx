@@ -200,7 +200,7 @@ export default function DuenioDashboard() {
       return {
         totalFacturado: diarioData?.resumen?.totalFacturado || 0,
         viajesCompletados: diarioData?.resumen?.viajesCompletados || 0,
-        viajesPendientes: diarioData?.resumen?.viajesPendientes || 0,
+        viajesPendientes: diarioData?.resumen?.viajesEnCurso || 0,
         ticketPromedio: diarioData?.resumen?.ticketPromedio || 0,
         subtitle: 'Recaudación de hoy',
         tasaCancelacion: diarioData?.resumen?.tasaCancelacion || 0,
@@ -210,7 +210,7 @@ export default function DuenioDashboard() {
       return {
         totalFacturado: semanalData?.totalSemana || 0,
         viajesCompletados: semanalData?.viajesCompletados || 0,
-        viajesPendientes: diarioData?.resumen?.viajesPendientes || 0,
+        viajesPendientes: diarioData?.resumen?.viajesEnCurso || 0,
         ticketPromedio: (semanalData?.viajesCompletados || 0) > 0
           ? (semanalData?.totalSemana || 0) / semanalData.viajesCompletados
           : 0,
@@ -221,7 +221,7 @@ export default function DuenioDashboard() {
     return {
       totalFacturado: mensualData?.totalMes || 0,
       viajesCompletados: mensualData?.viajesCompletados || 0,
-      viajesPendientes: diarioData?.resumen?.viajesPendientes || 0,
+      viajesPendientes: diarioData?.resumen?.viajesEnCurso || 0,
       ticketPromedio: mensualData?.ticketPromedio || 0,
       subtitle: 'Acumulado del mes',
       variacion: 0,

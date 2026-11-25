@@ -111,7 +111,8 @@ export const reportesController = {
       // Cálculos
       const completados = viajes.filter(v => v.estado === 'COMPLETADO');
       const cancelados = viajes.filter(v => v.estado === 'CANCELADO');
-      const pendientes = viajes.filter(v => v.estado === 'PENDIENTE' || v.estado === 'EN_CURSO');
+      const enCursoAhora = viajes.filter(v => v.estado === 'EN_CAMINO' || v.estado === 'EN_CURSO');
+      const pendientes = viajes.filter(v => v.estado === 'PENDIENTE' || v.estado === 'ACEPTADO');
 
       const totalFacturado = completados.reduce((sum, v) => sum + Number(v.precio), 0);
       const ticketPromedio = completados.length > 0 ? totalFacturado / completados.length : 0;
@@ -124,6 +125,7 @@ export const reportesController = {
             totalFacturado,
             viajesCompletados: completados.length,
             viajesCancelados: cancelados.length,
+            viajesEnCurso: enCursoAhora.length,
             viajesPendientes: pendientes.length,
             ticketPromedio,
             tasaCancelacion
