@@ -55,4 +55,8 @@ router.patch('/cierres/:id/factura', artEmpresaController.registrarFacturaCierre
 router.patch('/cierres/:id/cobro', artEmpresaController.marcarCierreCobrado);
 router.delete('/cierres/:id', artEmpresaController.anularCierreFacturacion);
 
+// 8. Sincronización automática/manual con portal externo (Feleval)
+router.put('/:id/portal-config', artEmpresaController.configurarPortalExterno);
+router.post('/:id/portal-sync', artEmpresaController.sincronizarPortalExterno);
+
 export default router;

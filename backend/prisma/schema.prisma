@@ -448,6 +448,9 @@ model Viaje {
   cierreFacturacionArtId String?
   cierreFacturacionArt   CierreFacturacionArt? @relation(fields: [cierreFacturacionArtId], references: [id])
 
+  // ID externo para deduplicación de viajes importados desde portales ART (ej. 'FELEVAL:2085980')
+  externoId              String?   @unique
+
   @@index([remiseriaId, estado])
   @@index([choferId, estado])
   @@index([clienteId])
@@ -535,6 +538,17 @@ model ArtEmpresa {
   // Período de Cierre de Facturación acordado con la ART
   periodoFacturacion    String      @default("MENSUAL") // "SEMANAL" | "QUINCENAL" | "MENSUAL"
   diaCorteFacturacion   Int?
+
+  // Sincronización automática con portal externo (ej. Feleval)
+  portalExternoTipo          String?   // 'FELEVAL'
+  portalExternoUrl           String?   // 'https://app.feleval.com.ar'
+  portalExternoEmail         String?
+  portalExternoPasswordEnc   String?
+  portalExternoActivo        Boolean   @default(false)
+  portalExternoEmailAlerta   String?   @default("rizzofs@gmail.com")
+  portalExternoUltimaSync    DateTime?
+  portalExternoUltimoEstado  String?   // 'OK' | 'ERROR_CLAVE' | 'ERROR_CONEXION'
+  portalExternoUltimoMensaje String?
 
   // Relación con Cierres de Facturación
   cierresFacturacion    CierreFacturacionArt[]

@@ -2282,6 +2282,40 @@ export const artEmpresaService = {
     }
   },
 
+  configurarPortalExterno: async (
+    artId: string,
+    payload: {
+      portalExternoActivo: boolean;
+      portalExternoEmail: string;
+      portalExternoPassword?: string;
+      portalExternoEmailAlerta?: string;
+      portalExternoUrl?: string;
+    }
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.put(`/art-empresas/${artId}/portal-config`, payload);
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al guardar configuración del portal',
+      };
+    }
+  },
+
+  sincronizarPortalExterno: async (artId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post(`/art-empresas/${artId}/portal-sync`);
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al sincronizar viajes desde el portal',
+        data: error.response?.data?.data,
+      };
+    }
+  },
+
   getViajesProgramados: async (params?: { estado?: string; fechaDesde?: string; choferId?: string }): Promise<ApiResponse<any[]>> => {
     try {
       const response = await api.get('/art-empresas/viajes/programados', { params });

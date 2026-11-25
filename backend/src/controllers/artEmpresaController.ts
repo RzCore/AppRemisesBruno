@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
+import { encryptPortalPassword, sincronizarArtFeleval } from '../services/felevalSyncService';
 
 async function resolveRemiseriaId(req: AuthenticatedRequest): Promise<string | null> {
   const userId = req.user?.id;
@@ -1743,6 +1744,82 @@ export const artEmpresaController = {
     } catch (error) {
       console.error('Error al anular cierre de facturación:', error);
       return res.status(500).json({ success: false, message: 'Error al anular cierre' });
+    }
+  },
+
+  // 8a. Configurar sincronización con portal externo (Feleval)
+  async configurarPortalExterno(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const remiseriaId = await resolveRemiseriaId(req);
+
+      const art = await prisma.artEmpresa.findUnique({ where: { id } });
+      if (!art || (remiseriaId && art.remiseriaId !== remiseriaId)) {
+        return res.status(404).json({ success: false, message: 'ART / Empresa no encontrada' });
+      }
+
+      const {
+        portalExternoActivo,
+        portalExternoEmail,
+        portalExternoPassword,
+        portalExternoEmailAlerta,
+        portalExternoUrl
+      } = req.body;
+
+      const dataUpdate: any = {
+        portalExternoTipo: 'FELEVAL',
+        portalExternoUrl: portalExternoUrl?.trim() || 'https://app.feleval.com.ar',
+        portalExternoActivo: Boolean(portalExternoActivo),
+        portalExternoEmail: portalExternoEmail !== undefined ? portalExternoEmail.trim() : art.portalExternoEmail,
+        portalExternoEmailAlerta: portalExternoEmailAlerta?.trim() || 'rizzofs@gmail.com'
+      };
+
+      if (portalExternoPassword && String(portalExternoPassword).trim().length > 0) {
+        dataUpdate.portalExternoPasswordEnc = encryptPortalPassword(String(portalExternoPassword).trim());
+        // Si actualiza clave, limpiar estado de error de clave previo
+        if (art.portalExternoUltimoEstado === 'ERROR_CLAVE') {
+          dataUpdate.portalExternoUltimoEstado = null;
+          dataUpdate.portalExternoUltimoMensaje = 'Contraseña actualizada. Pendiente de sincronización.';
+        }
+      }
+
+      const updated = await prisma.artEmpresa.update({
+        where: { id },
+        data: dataUpdate
+      });
+
+      const { portalExternoPasswordEnc, ...safeArt } = updated;
+      return res.json({
+        success: true,
+        data: { ...safeArt, tienePasswordPortal: Boolean(portalExternoPasswordEnc) },
+        message: 'Configuración de sincronización guardada correctamente'
+      });
+    } catch (error) {
+      console.error('Error al configurar portal externo ART:', error);
+      return res.status(500).json({ success: false, message: 'Error al guardar configuración del portal' });
+    }
+  },
+
+  // 8b. Ejecutar sincronización manual inmediata con Feleval
+  async sincronizarPortalExterno(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const remiseriaId = await resolveRemiseriaId(req);
+
+      const art = await prisma.artEmpresa.findUnique({ where: { id } });
+      if (!art || (remiseriaId && art.remiseriaId !== remiseriaId)) {
+        return res.status(404).json({ success: false, message: 'ART / Empresa no encontrada' });
+      }
+
+      const result = await sincronizarArtFeleval(id, { enviarAlertaSiempre: true });
+      return res.status(result.success ? 200 : 400).json({
+        success: result.success,
+        data: result,
+        message: result.mensaje
+      });
+    } catch (error) {
+      console.error('Error al sincronizar portal externo ART:', error);
+      return res.status(500).json({ success: false, message: 'Error al ejecutar sincronización' });
     }
   }
 };

@@ -78,6 +78,78 @@ export default function ArtPage() {
     activo: true,
   });
 
+  // Modal Configurar y Sincronizar Portal Externo (Feleval)
+  const [portalModalArt, setPortalModalArt] = useState<any | null>(null);
+  const [portalConfigForm, setPortalConfigForm] = useState({
+    portalExternoActivo: false,
+    portalExternoEmail: '',
+    portalExternoPassword: '',
+    portalExternoEmailAlerta: 'rizzofs@gmail.com',
+    portalExternoUrl: 'https://app.feleval.com.ar'
+  });
+  const [savingPortalConfig, setSavingPortalConfig] = useState(false);
+  const [sincronizandoPortal, setSincronizandoPortal] = useState(false);
+
+  const abrirModalPortal = (art: any) => {
+    setPortalModalArt(art);
+    setPortalConfigForm({
+      portalExternoActivo: Boolean(art.portalExternoActivo),
+      portalExternoEmail: art.portalExternoEmail || '',
+      portalExternoPassword: '',
+      portalExternoEmailAlerta: art.portalExternoEmailAlerta || 'rizzofs@gmail.com',
+      portalExternoUrl: art.portalExternoUrl || 'https://app.feleval.com.ar'
+    });
+  };
+
+  const handleGuardarPortalConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalModalArt) return;
+    try {
+      setSavingPortalConfig(true);
+      const res = await artEmpresaService.configurarPortalExterno(portalModalArt.id, {
+        portalExternoActivo: portalConfigForm.portalExternoActivo,
+        portalExternoEmail: portalConfigForm.portalExternoEmail.trim(),
+        ...(portalConfigForm.portalExternoPassword.trim()
+          ? { portalExternoPassword: portalConfigForm.portalExternoPassword.trim() }
+          : {}),
+        portalExternoEmailAlerta: portalConfigForm.portalExternoEmailAlerta.trim() || 'rizzofs@gmail.com',
+        portalExternoUrl: portalConfigForm.portalExternoUrl.trim() || 'https://app.feleval.com.ar'
+      });
+      if (res.success) {
+        toast.success('Configuración de sincronización guardada');
+        setPortalModalArt(res.data || portalModalArt);
+        setPortalConfigForm((prev) => ({ ...prev, portalExternoPassword: '' }));
+        cargarDatos();
+      } else {
+        toast.error(res.message || 'No se pudo guardar la configuración');
+      }
+    } catch {
+      toast.error('Error al guardar configuración');
+    } finally {
+      setSavingPortalConfig(false);
+    }
+  };
+
+  const handleSincronizarPortalAhora = async () => {
+    if (!portalModalArt) return;
+    try {
+      setSincronizandoPortal(true);
+      const res = await artEmpresaService.sincronizarPortalExterno(portalModalArt.id);
+      if (res.success) {
+        toast.success(res.message || 'Sincronización completada');
+        cargarDatos();
+        if (activeTab === 'facturacion') cargarFacturacion();
+      } else {
+        toast.error(res.message || 'Error al sincronizar');
+        cargarDatos();
+      }
+    } catch {
+      toast.error('Error de red al sincronizar');
+    } finally {
+      setSincronizandoPortal(false);
+    }
+  };
+
   // Modal Reasignar / Editar ART en viaje
   const [modalViajeArtOpen, setModalViajeArtOpen] = useState(false);
 
@@ -1554,6 +1626,25 @@ export default function ArtPage() {
                     >
                       <FileText className="w-3.5 h-3.5" />
                       Facturar
+                    </button>
+
+                    <button
+                      onClick={() => abrirModalPortal(art)}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors border ${
+                        (art as any).portalExternoUltimoEstado === 'ERROR_CLAVE'
+                          ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                          : (art as any).portalExternoActivo
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                      title="Configurar y sincronizar viajes desde Feleval"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      {(art as any).portalExternoUltimoEstado === 'ERROR_CLAVE'
+                        ? 'Clave vencida'
+                        : (art as any).portalExternoActivo
+                        ? 'Sync 23:59'
+                        : 'Sync Portal'}
                     </button>
 
                     <button
@@ -4756,6 +4847,154 @@ export default function ArtPage() {
                     {creandoViajeArt ? 'Creando viaje...' : 'Crear y Asignar al Chofer'}
                   </button>
                 )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: SINCRONIZACIÓN AUTOMÁTICA CON PORTAL FELEVAL            */}
+      {/* ============================================================== */}
+      {portalModalArt && (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-700">
+                  <RefreshCw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Sincronización Portal Feleval</h3>
+                  <p className="text-xs text-slate-500">{portalModalArt.nombre} • Automática diaria a las 23:59 hs</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPortalModalArt(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarPortalConfig} className="p-6 space-y-4">
+              {portalModalArt.portalExternoUltimoEstado && (
+                <div
+                  className={`p-3 rounded-xl border text-xs ${
+                    portalModalArt.portalExternoUltimoEstado === 'OK'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-red-50 border-red-200 text-red-800'
+                  }`}
+                >
+                  <div className="font-bold">
+                    {portalModalArt.portalExternoUltimoEstado === 'OK'
+                      ? 'Última sincronización exitosa'
+                      : portalModalArt.portalExternoUltimoEstado === 'ERROR_CLAVE'
+                      ? '⚠️ Clave vencida o incorrecta (alerta enviada por email)'
+                      : 'Error de conexión'}
+                  </div>
+                  {portalModalArt.portalExternoUltimoMensaje && (
+                    <p className="text-[11px] mt-0.5">{portalModalArt.portalExternoUltimoMensaje}</p>
+                  )}
+                  {portalModalArt.portalExternoUltimaSync && (
+                    <p className="text-[10px] opacity-75 mt-1">
+                      {new Date(portalModalArt.portalExternoUltimaSync).toLocaleString('es-AR')}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <label className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                <div>
+                  <span className="text-xs font-bold text-slate-900 block">Activar sincronización diaria (23:59 hs)</span>
+                  <span className="text-[11px] text-slate-500">Importa los viajes pendientes sin duplicarlos.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={portalConfigForm.portalExternoActivo}
+                  onChange={(e) =>
+                    setPortalConfigForm((prev) => ({ ...prev, portalExternoActivo: e.target.checked }))
+                  }
+                  className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+              </label>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Email de acceso a Feleval</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="usuario@ejemplo.com"
+                  value={portalConfigForm.portalExternoEmail}
+                  onChange={(e) =>
+                    setPortalConfigForm((prev) => ({ ...prev, portalExternoEmail: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Contraseña de Feleval
+                </label>
+                <input
+                  type="password"
+                  placeholder="Dejar vacío para mantener la contraseña guardada"
+                  value={portalConfigForm.portalExternoPassword}
+                  onChange={(e) =>
+                    setPortalConfigForm((prev) => ({ ...prev, portalExternoPassword: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Se guarda cifrada en el servidor. Cuando Feleval pida cambiar la clave, actualizala acá.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Email de alerta si vence la contraseña
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="rizzofs@gmail.com"
+                  value={portalConfigForm.portalExternoEmailAlerta}
+                  onChange={(e) =>
+                    setPortalConfigForm((prev) => ({ ...prev, portalExternoEmailAlerta: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={sincronizandoPortal || savingPortalConfig}
+                  onClick={handleSincronizarPortalAhora}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${sincronizandoPortal ? 'animate-spin' : ''}`} />
+                  {sincronizandoPortal ? 'Sincronizando...' : 'Sincronizar ahora'}
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPortalModalArt(null)}
+                    className="px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingPortalConfig}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs"
+                  >
+                    {savingPortalConfig ? 'Guardando...' : 'Guardar Config'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

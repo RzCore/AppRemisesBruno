@@ -9,6 +9,7 @@ import http from 'http';
 import { initSocket } from './lib/socket';
 import { iniciarServicioRecordatorioART } from './services/artReminderService';
 import { iniciarServicioReservasAutomaticas } from './services/reservaSchedulerService';
+import { iniciarServicioSyncFeleval } from './services/felevalSyncService';
 
 // Importar rutas
 import authRoutes from './routes/auth';
@@ -39,6 +40,9 @@ iniciarServicioRecordatorioART();
 
 // Iniciar disparador automático de reservas únicas y periódicas
 iniciarServicioReservasAutomaticas();
+
+// Iniciar sincronización diaria automática con portal Feleval (23:59 hs AR)
+iniciarServicioSyncFeleval();
 
 const PORT = process.env.PORT || 3001;
 
