@@ -157,9 +157,9 @@ export default function GestionarChoferes() {
   };
 
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-gray-50 flex flex-col overflow-x-hidden w-full">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden w-full">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b shrink-0">
+      <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-4">
             <div className="flex items-center">
@@ -179,9 +179,9 @@ export default function GestionarChoferes() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-6 w-full min-w-0 flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full min-w-0">
         {/* Estadísticas rápidas */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 shrink-0">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
               <div className="p-2 bg-green-100 rounded-lg">
@@ -240,7 +240,7 @@ export default function GestionarChoferes() {
         </div>
 
         {/* Filtros y búsqueda */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6 shrink-0">
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1">
               <div className="relative">
@@ -272,14 +272,14 @@ export default function GestionarChoferes() {
         </div>
 
         {/* Lista de choferes */}
-        <div className="bg-white rounded-lg shadow flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 shrink-0">
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="p-6 border-b border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900">
               Choferes ({choferesFiltrados.length})
             </h3>
           </div>
           
-          <div className="divide-y divide-gray-200 overflow-y-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
+          <div className="divide-y divide-gray-200 overflow-y-auto max-h-[65vh]">
             {choferesFiltrados.map((chofer) => (
               <div key={chofer.id} className="p-6 hover:bg-gray-50">
                 <div className="flex items-center justify-between">

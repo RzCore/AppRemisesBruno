@@ -119,8 +119,14 @@ export default function CoordinadorDashboard() {
   const router = useRouter();
   useAppTracking('COORDINADOR_DASHBOARD_ACCESS');
   
+  const ITEMS_PER_PAGE = 50;
   const [activeTab, setActiveTab] = useState('en-curso');
   const [searchTerm, setSearchTerm] = useState('');
+  const [filtroFecha, setFiltroFecha] = useState('');
+  const [filtroMovil, setFiltroMovil] = useState('');
+  const filtroFechaRef = useRef('');
+  const filtroMovilRef = useRef('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [choferesConectados, setChoferesConectados] = useState<any[]>([]);
   const [todosLosChoferes, setTodosLosChoferes] = useState<any[]>([]);
@@ -319,6 +325,32 @@ export default function CoordinadorDashboard() {
 
   const fetchData = async () => {
     try {
+      const historialParams: {
+        fechaDesde?: string;
+        fechaHasta?: string;
+        choferId?: string;
+        vehiculoId?: string;
+        limit?: number;
+      } = {};
+
+      if (filtroFechaRef.current) {
+        const [y, m, d] = filtroFechaRef.current.split('-').map(Number);
+        if (y && m && d) {
+          historialParams.fechaDesde = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+          historialParams.fechaHasta = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+          historialParams.limit = 1000;
+        }
+      }
+      if (filtroMovilRef.current) {
+        if (filtroMovilRef.current.startsWith('chofer:')) {
+          historialParams.choferId = filtroMovilRef.current.replace('chofer:', '');
+          historialParams.limit = 1000;
+        } else if (filtroMovilRef.current.startsWith('veh:')) {
+          historialParams.vehiculoId = filtroMovilRef.current.replace('veh:', '');
+          historialParams.limit = 1000;
+        }
+      }
+
       // Ejecutar todas las consultas en paralelo y de forma resiliente (allSettled)
       // para que un fallo/timeout aislado (ej. historial) nunca impida ver viajes sin asignar
       const [
@@ -336,7 +368,7 @@ export default function CoordinadorDashboard() {
         coordinadorDashboardService.getViajesEnCurso(),
         coordinadorDashboardService.getViajesSinAsignar(),
         coordinadorDashboardService.getViajesReservados(),
-        coordinadorDashboardService.getViajesHistorial(),
+        coordinadorDashboardService.getViajesHistorial(Object.keys(historialParams).length > 0 ? historialParams : undefined),
         coordinadorDashboardService.getChoferesTiempoReal(),
         choferService.getAll(),
         vehiculoService.getAll(),
@@ -407,7 +439,10 @@ export default function CoordinadorDashboard() {
           precio: v.precio,
           observaciones: v.observaciones,
           chofer: choferName,
+          choferId: v.choferId || v.chofer?.id || '',
+          numeroChofer: v.chofer?.numeroChofer || '',
           vehiculo: vehiculoName,
+          vehiculoId: v.vehiculoId || vehObj?.id || '',
           estado: estadoLabel,
           estadoRaw: v.estado,
           tiempo: formattedTime,
@@ -464,6 +499,7 @@ export default function CoordinadorDashboard() {
             origen: r.origen,
             destino: r.destino,
             fecha: formattedDate,
+            rawFecha: r.fechaInicio,
             hora: r.horaInicio,
             horaSalidaChofer: r.horaSalidaChofer,
             horaTurno: r.horaTurno,
@@ -471,6 +507,8 @@ export default function CoordinadorDashboard() {
             artNombre: r.artEmpresa?.nombre,
             numeroSiniestro: r.numeroSiniestro,
             chofer: r.chofer,
+            choferId: r.chofer?.id || '',
+            vehiculoId: r.chofer?.vehiculo?.id || '',
             tipo: isArt ? 'ART Programado' : (r.tipo === 'PERIODICA' ? 'Periódica' : 'Única')
           };
         }));
@@ -870,6 +908,23 @@ export default function CoordinadorDashboard() {
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Sincronizar filtros de fecha y móvil y recargar historial filtrado (solo cuando cambian)
+  const isFirstFilterRenderRef = useRef(true);
+  useEffect(() => {
+    filtroFechaRef.current = filtroFecha;
+    filtroMovilRef.current = filtroMovil;
+    if (isFirstFilterRenderRef.current) {
+      isFirstFilterRenderRef.current = false;
+      return;
+    }
+    fetchData();
+  }, [filtroFecha, filtroMovil]);
+
+  // Volver a página 1 al cambiar de pestaña o filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, subTabHistorial, searchTerm, filtroFecha, filtroMovil, historialFiltroEstado, historialFiltroFecha, filtroCanceladoPor]);
 
   // Efecto para buscar autocompletado de origen
   useEffect(() => {
@@ -1596,16 +1651,59 @@ export default function CoordinadorDashboard() {
 
   const selectedViajeObj = viajesSinAsignar.find((v) => v.id === selectedViajeId);
 
-  const filterList = (items: any[]) => {
-    if (!searchTerm.trim()) return items;
+  const formatLocalYMD = (dateVal: any) => {
+    if (!dateVal) return '';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const matchesFechaFiltro = (rawDate: any) => {
+    if (!filtroFecha) return true;
+    if (!rawDate) return false;
+    return formatLocalYMD(rawDate) === filtroFecha;
+  };
+
+  const matchesMovilFiltro = (item: any) => {
+    if (!filtroMovil) return true;
+    if (filtroMovil.startsWith('chofer:')) {
+      const targetChoferId = filtroMovil.replace('chofer:', '');
+      const itemChoferId = item.choferId || item.chofer?.id || item.rawViaje?.choferId || item.rawViaje?.chofer?.id || (item.estado && !item.origen ? item.id : '');
+      return itemChoferId === targetChoferId;
+    }
+    if (filtroMovil.startsWith('veh:')) {
+      const targetVehId = filtroMovil.replace('veh:', '');
+      const itemVehId = item.vehiculoId || item.vehiculo?.id || item.rawViaje?.vehiculoId || item.rawViaje?.vehiculo?.id || item.rawViaje?.chofer?.vehiculo?.id || '';
+      return itemVehId === targetVehId;
+    }
+    return true;
+  };
+
+  const filterList = (items: any[], options?: { applyDate?: boolean; applyMovil?: boolean }) => {
+    const applyDate = options?.applyDate ?? true;
+    const applyMovil = options?.applyMovil ?? true;
+    let filtered = items;
+
+    if (applyDate && filtroFecha) {
+      filtered = filtered.filter((item: any) => matchesFechaFiltro(item.rawFecha || item.fechaInicio || item.fecha));
+    }
+
+    if (applyMovil && filtroMovil) {
+      filtered = filtered.filter((item: any) => matchesMovilFiltro(item));
+    }
+
+    if (!searchTerm.trim()) return filtered;
     const term = searchTerm.toLowerCase();
-    return items.filter((item: any) => {
+    return filtered.filter((item: any) => {
       const cliente = (item.cliente || '').toLowerCase();
       const telefono = (item.telefono || '').toLowerCase();
       const origen = (item.origen || '').toLowerCase();
       const destino = (item.destino || '').toLowerCase();
-      const chofer = (item.chofer || `${item.nombre || ''} ${item.apellido || ''}`).toLowerCase();
-      const vehiculo = (item.vehiculo || (item.vehiculo?.patente ? `${item.vehiculo.patente} ${item.vehiculo.marca} ${item.vehiculo.modelo}` : '')).toLowerCase();
+      const chofer = (typeof item.chofer === 'string' ? item.chofer : `${item.chofer?.nombre || item.nombre || ''} ${item.chofer?.apellido || item.apellido || ''}`).toLowerCase();
+      const vehiculo = (typeof item.vehiculo === 'string' ? item.vehiculo : (item.vehiculo?.patente ? `${item.vehiculo.patente} ${item.vehiculo.marca} ${item.vehiculo.modelo}` : '')).toLowerCase();
       return (
         cliente.includes(term) ||
         telefono.includes(term) ||
@@ -1624,7 +1722,9 @@ export default function CoordinadorDashboard() {
       filtered = filtered.filter((v) => v.estadoRaw === historialFiltroEstado);
     }
 
-    if (historialFiltroFecha !== 'todos') {
+    if (filtroFecha) {
+      filtered = filtered.filter((v) => matchesFechaFiltro(v.rawFecha));
+    } else if (historialFiltroFecha !== 'todos') {
       const now = new Date();
       filtered = filtered.filter((v) => {
         if (!v.rawFecha) return true;
@@ -1640,6 +1740,10 @@ export default function CoordinadorDashboard() {
         }
         return true;
       });
+    }
+
+    if (filtroMovil) {
+      filtered = filtered.filter((v) => matchesMovilFiltro(v));
     }
 
     if (searchTerm.trim()) {
@@ -1671,11 +1775,133 @@ export default function CoordinadorDashboard() {
     return filtered;
   };
 
-  const filteredEnCurso = filterList(viajesEnCurso);
-  const filteredSinAsignar = filterList(viajesSinAsignar);
-  const filteredReservas = filterList(reservas);
-  const filteredChoferes = filterList(choferesConectados);
+  const filteredEnCurso = filterList(viajesEnCurso, { applyDate: true, applyMovil: true });
+  const filteredSinAsignar = filterList(viajesSinAsignar, { applyDate: true, applyMovil: false });
+  const filteredReservas = filterList(reservas, { applyDate: true, applyMovil: true });
+  const filteredChoferes = filterList(choferesConectados, { applyDate: false, applyMovil: true });
   const filteredHistorial = filterHistorial(viajesHistorial);
+  const filteredAuditoriaViajes = (auditoriaData?.viajes || []).filter((v: any) => {
+    if (filtroFecha && !matchesFechaFiltro(v.fecha)) return false;
+    if (filtroMovil && !matchesMovilFiltro(v)) return false;
+    return true;
+  });
+
+  const paginateItems = <T,>(items: T[]) => {
+    const totalPages = Math.max(1, Math.ceil(items.length / ITEMS_PER_PAGE));
+    const safePage = Math.min(currentPage, totalPages);
+    const startIdx = (safePage - 1) * ITEMS_PER_PAGE;
+    return items.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+  };
+
+  const paginatedEnCurso = paginateItems(filteredEnCurso);
+  const paginatedSinAsignar = paginateItems(filteredSinAsignar);
+  const paginatedReservas = paginateItems(filteredReservas);
+  const paginatedHistorial = paginateItems(filteredHistorial);
+  const paginatedAuditoriaViajes = paginateItems(filteredAuditoriaViajes);
+
+  const movilOptions = (() => {
+    const usedVehIds = new Set<string>();
+    const choferOpts = [...todosLosChoferes]
+      .sort((a, b) => {
+        const numA = Number(a.numeroChofer) || 999999;
+        const numB = Number(b.numeroChofer) || 999999;
+        if (numA !== numB) return numA - numB;
+        return `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`);
+      })
+      .map((c: any) => {
+        if (c.vehiculo?.id) usedVehIds.add(c.vehiculo.id);
+        const numLabel = c.numeroChofer ? `Móvil #${c.numeroChofer} - ` : '';
+        const vehLabel = c.vehiculo?.patente ? ` (${c.vehiculo.patente})` : '';
+        return {
+          value: `chofer:${c.id}`,
+          label: `${numLabel}${c.nombre} ${c.apellido}${vehLabel}`,
+        };
+      });
+
+    const extraVehOpts = todosLosVehiculos
+      .filter((v: any) => !usedVehIds.has(v.id))
+      .map((v: any) => ({
+        value: `veh:${v.id}`,
+        label: `Vehículo ${v.patente} (${v.marca} ${v.modelo})`,
+      }));
+
+    return [...choferOpts, ...extraVehOpts];
+  })();
+
+  const renderPagination = (totalItems: number) => {
+    if (totalItems === 0) return null;
+    const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+    const safePage = Math.min(currentPage, totalPages);
+    const startItem = (safePage - 1) * ITEMS_PER_PAGE + 1;
+    const endItem = Math.min(safePage * ITEMS_PER_PAGE, totalItems);
+
+    const getVisiblePages = () => {
+      if (totalPages <= 7) {
+        return Array.from({ length: totalPages }, (_, i) => i + 1);
+      }
+      const pages: (number | string)[] = [1];
+      if (safePage > 3) pages.push('...');
+      const start = Math.max(2, safePage - 1);
+      const end = Math.min(totalPages - 1, safePage + 1);
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (safePage < totalPages - 2) pages.push('...');
+      pages.push(totalPages);
+      return pages;
+    };
+
+    return (
+      <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-gray-600">
+        <div>
+          Mostrando <span className="font-semibold text-gray-900">{startItem}</span>–<span className="font-semibold text-gray-900">{endItem}</span> de{' '}
+          <span className="font-semibold text-gray-900">{totalItems}</span> viajes
+          <span className="text-gray-400 ml-1">(máx. {ITEMS_PER_PAGE} por hoja)</span>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Anterior
+            </button>
+
+            {getVisiblePages().map((page, idx) =>
+              typeof page === 'number' ? (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setCurrentPage(page)}
+                  className={`min-w-[28px] px-2 py-1 rounded-md font-semibold transition-colors ${
+                    page === safePage
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {page}
+                </button>
+              ) : (
+                <span key={`ellipsis-${idx}`} className="px-1 text-gray-400">
+                  ...
+                </span>
+              )
+            )}
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="px-2.5 py-1 rounded-md border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Siguiente
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const historialTotalCount = filteredHistorial.length;
   const historialCompletadosCount = filteredHistorial.filter((v) => v.estadoRaw === 'COMPLETADO').length;
@@ -1697,7 +1923,7 @@ export default function CoordinadorDashboard() {
   const hasAlerts = stats.viajesSinAsignar > 0;
 
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-gray-50 flex flex-col overflow-x-hidden w-full">
+    <div className="min-h-screen bg-gray-50 flex flex-col overflow-x-hidden w-full">
       {/* Header */}
       <div className="bg-white shadow-sm border-b shrink-0">
         <div className="w-full px-4 sm:px-6 lg:px-8">
@@ -2003,9 +2229,9 @@ export default function CoordinadorDashboard() {
         </div>
       )}
 
-      <div className="flex-1 flex flex-col lg:flex-row min-w-0 min-h-0 w-full overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row min-w-0 w-full">
         {/* Panel principal - Tablas */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 lg:overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0">
           {/* Estadísticas rápidas */}
           <div className="bg-white shadow-sm border-b p-3 sm:p-4 shrink-0">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
@@ -2060,12 +2286,53 @@ export default function CoordinadorDashboard() {
                 </div>
               </div>
               
-              <div className="flex gap-2">
-                <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white">
-                  <option>Hoy</option>
-                  <option>Esta semana</option>
-                  <option>Este mes</option>
-                </select>
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                {/* Selector de Fecha */}
+                <div className="relative flex items-center">
+                  <Calendar className="absolute left-2.5 text-gray-400 h-4 w-4 pointer-events-none" />
+                  <input
+                    type="date"
+                    value={filtroFecha}
+                    onChange={(e) => setFiltroFecha(e.target.value)}
+                    title="Consultar viajes de una fecha específica"
+                    className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white text-gray-700"
+                  />
+                </div>
+
+                {/* Selector de Móvil / Chofer */}
+                <div className="relative flex items-center min-w-[180px] sm:min-w-[210px]">
+                  <Car className="absolute left-2.5 text-gray-400 h-4 w-4 pointer-events-none" />
+                  <select
+                    value={filtroMovil}
+                    onChange={(e) => setFiltroMovil(e.target.value)}
+                    title="Filtrar viajes por móvil / chofer"
+                    className="w-full pl-8 pr-7 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white text-gray-700"
+                  >
+                    <option value="">Todos los móviles</option>
+                    {movilOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Limpiar filtros */}
+                {(filtroFecha || filtroMovil || searchTerm) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiltroFecha('');
+                      setFiltroMovil('');
+                      setSearchTerm('');
+                    }}
+                    className="px-3 py-2 text-xs font-semibold text-gray-600 hover:text-red-700 bg-gray-100 hover:bg-red-50 border border-gray-200 hover:border-red-200 rounded-lg transition-colors flex items-center gap-1 shrink-0"
+                    title="Limpiar filtros de búsqueda, fecha y móvil"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Limpiar</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -2099,14 +2366,14 @@ export default function CoordinadorDashboard() {
           </div>
 
           {/* Contenido de las tablas */}
-          <div className="flex-1 min-h-0 flex flex-col p-3 sm:p-5 lg:p-6 w-full min-w-0 lg:overflow-hidden">
+          <div className="flex-1 p-3 sm:p-5 lg:p-6 w-full min-w-0">
             {activeTab === 'en-curso' && (
-              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-                <div className="flex items-center justify-between mb-4 shrink-0">
+              <div>
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Viajes en Curso ({filteredEnCurso.length})</h3>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
-                  <div className="overflow-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-auto max-h-[68vh]">
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
                       <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                         <tr>
@@ -2130,7 +2397,7 @@ export default function CoordinadorDashboard() {
                             </td>
                           </tr>
                         ) : (
-                          filteredEnCurso.map((viaje) => (
+                          paginatedEnCurso.map((viaje) => (
                             <tr key={viaje.id} className="hover:bg-gray-50 transition-colors">
                               <td className="px-3 sm:px-4 py-3">
                                 <div className="font-medium text-gray-900 text-xs sm:text-sm truncate flex items-center" title={viaje.cliente}>
@@ -2243,13 +2510,14 @@ export default function CoordinadorDashboard() {
                       </tbody>
                     </table>
                   </div>
+                  {renderPagination(filteredEnCurso.length)}
                 </div>
               </div>
             )}
 
             {activeTab === 'sin-asignar' && (
-              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                   <div className="flex items-center space-x-3">
                     <h3 className="text-lg font-semibold text-gray-900">Viajes Sin Asignar ({filteredSinAsignar.length})</h3>
                     {hasAlerts && (
@@ -2268,8 +2536,8 @@ export default function CoordinadorDashboard() {
                     <span>Despacho Óptimo por Lotes (AI / Uber)</span>
                   </button>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border-2 border-red-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
-                  <div className="overflow-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
+                <div className="bg-white rounded-xl shadow-sm border-2 border-red-200 overflow-hidden">
+                  <div className="overflow-auto max-h-[68vh]">
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
                       <thead className="bg-red-50 text-xs font-semibold text-red-700 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(254,202,202,1)]">
                         <tr>
@@ -2291,7 +2559,7 @@ export default function CoordinadorDashboard() {
                             </td>
                           </tr>
                         ) : (
-                          filteredSinAsignar.map((viaje) => (
+                          paginatedSinAsignar.map((viaje) => (
                             <tr key={viaje.id} className="hover:bg-red-50/30 transition-colors">
                               <td className="px-3 sm:px-4 py-3">
                                 <div className="font-medium text-gray-900 text-xs sm:text-sm truncate flex items-center" title={viaje.cliente}>
@@ -2367,17 +2635,18 @@ export default function CoordinadorDashboard() {
                       </tbody>
                     </table>
                   </div>
+                  {renderPagination(filteredSinAsignar.length)}
                 </div>
               </div>
             )}
 
             {activeTab === 'reservados' && (
-              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-                <div className="flex items-center justify-between mb-4 shrink-0">
+              <div>
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Viajes Reservados ({filteredReservas.length})</h3>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
-                  <div className="overflow-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-auto max-h-[68vh]">
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
                       <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                         <tr>
@@ -2399,7 +2668,7 @@ export default function CoordinadorDashboard() {
                             </td>
                           </tr>
                         ) : (
-                          filteredReservas.map((reserva) => (
+                          paginatedReservas.map((reserva) => (
                             <tr key={reserva.id} className={`hover:bg-gray-50 transition-colors ${reserva.isViajeArt ? 'bg-amber-50/40 border-l-4 border-l-amber-500' : ''}`}>
                               <td className="px-3 sm:px-4 py-3 font-medium text-gray-900 text-xs sm:text-sm">
                                 <div>{reserva.cliente}</div>
@@ -2453,13 +2722,14 @@ export default function CoordinadorDashboard() {
                       </tbody>
                     </table>
                   </div>
+                  {renderPagination(filteredReservas.length)}
                 </div>
               </div>
             )}
 
             {activeTab === 'conectados' && (
-              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-                <div className="flex items-center justify-between mb-4 shrink-0">
+              <div>
+                <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Choferes Conectados ({filteredChoferes.length})</h3>
                 </div>
                 {filteredChoferes.length === 0 ? (
@@ -2469,7 +2739,7 @@ export default function CoordinadorDashboard() {
                     <p className="text-xs text-gray-400 mt-1">Cuando los choferes inicien sesión en su app, aparecerán listados aquí.</p>
                   </div>
                 ) : (
-                  <div className="overflow-y-auto max-h-[60vh] lg:max-h-none lg:flex-1 lg:min-h-0 pr-1">
+                  <div className="overflow-y-auto max-h-[68vh] pr-1">
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredChoferes.map((chofer) => (
                       <div key={chofer.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
@@ -2549,9 +2819,9 @@ export default function CoordinadorDashboard() {
             )}
 
             {activeTab === 'historial' && (
-              <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+              <div>
                 {/* Header de la pestaña con filtros y botones */}
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4 shrink-0">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
                   <div>
                     <h3 className="text-lg font-bold text-gray-900 flex items-center space-x-2">
                       <span>Viajes Finalizados y Anulados</span>
@@ -2729,6 +2999,11 @@ export default function CoordinadorDashboard() {
                       {/* Filtro por Período de Fecha */}
                       <div className="flex items-center space-x-1 overflow-x-auto">
                         <span className="text-xs font-semibold text-gray-500 mr-1 shrink-0">Fecha:</span>
+                        {filtroFecha && (
+                          <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
+                            {filtroFecha.split('-').reverse().join('/')}
+                          </span>
+                        )}
                         {(
                           [
                             { id: 'hoy', label: 'Hoy' },
@@ -2740,9 +3015,12 @@ export default function CoordinadorDashboard() {
                           <button
                             key={f.id}
                             type="button"
-                            onClick={() => setHistorialFiltroFecha(f.id)}
+                            onClick={() => {
+                              setFiltroFecha('');
+                              setHistorialFiltroFecha(f.id);
+                            }}
                             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors shrink-0 ${
-                              historialFiltroFecha === f.id
+                              !filtroFecha && historialFiltroFecha === f.id
                                 ? 'bg-blue-600 text-white font-bold'
                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}
@@ -2754,8 +3032,8 @@ export default function CoordinadorDashboard() {
                     </div>
 
                     {/* Tabla de Viajes Finalizados y Anulados */}
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
-                      <div className="overflow-auto max-h-[55vh] lg:max-h-none lg:flex-1 lg:min-h-0">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                      <div className="overflow-auto max-h-[68vh]">
                         <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto">
                           <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                             <tr>
@@ -2780,7 +3058,7 @@ export default function CoordinadorDashboard() {
                                 </td>
                               </tr>
                             ) : (
-                              filteredHistorial.map((viaje) => {
+                              paginatedHistorial.map((viaje) => {
                                 const isCompletado = viaje.estadoRaw === 'COMPLETADO';
                                 const isCancelado = viaje.estadoRaw === 'CANCELADO';
 
@@ -2943,13 +3221,14 @@ export default function CoordinadorDashboard() {
                           </tbody>
                         </table>
                       </div>
+                      {renderPagination(filteredHistorial.length)}
                     </div>
                   </>
                 ) : (
                   /* Vista Analítica de Auditoría de Cancelaciones */
-                  <div className="flex flex-col space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                  <div className="space-y-4">
                     {/* KPI Cards de Cancelaciones */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                       <div className="bg-white p-3.5 rounded-xl border border-rose-200 shadow-sm bg-gradient-to-br from-white to-rose-50/40">
                         <span className="text-[11px] font-bold text-rose-800 uppercase">Total Cancelados</span>
                         <div className="text-2xl font-black text-rose-700 mt-1">
@@ -3000,9 +3279,9 @@ export default function CoordinadorDashboard() {
                     </div>
 
                     {/* Ranking de Motivos más frecuentes y Filtros */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                       {/* Top Motivos */}
-                      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm lg:overflow-y-auto">
+                      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-3 flex items-center space-x-1.5">
                           <AlertCircle className="h-4 w-4 text-rose-500" />
                           <span>Cuellos de Botella (Ranking de Motivos)</span>
@@ -3036,8 +3315,8 @@ export default function CoordinadorDashboard() {
                       </div>
 
                       {/* Tabla detallada de cancelaciones con filtro rápido */}
-                      <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:min-h-0">
-                        <div className="p-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                      <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                        <div className="p-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-bold text-gray-700">Filtrar por Responsable:</span>
                           <div className="flex items-center space-x-1">
                             {(['TODOS', 'CLIENTE', 'CHOFER', 'COORDINADOR'] as const).map((resp) => (
@@ -3057,7 +3336,7 @@ export default function CoordinadorDashboard() {
                           </div>
                         </div>
 
-                        <div className="overflow-auto max-h-80 lg:max-h-none lg:flex-1 lg:min-h-0">
+                        <div className="overflow-auto max-h-[60vh]">
                           <table className="w-full text-left text-xs divide-y divide-gray-200">
                             <thead className="bg-gray-50 text-gray-500 uppercase font-semibold sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                               <tr>
@@ -3077,14 +3356,14 @@ export default function CoordinadorDashboard() {
                                     <span>Cargando auditoría...</span>
                                   </td>
                                 </tr>
-                              ) : (auditoriaData?.viajes || []).length === 0 ? (
+                              ) : filteredAuditoriaViajes.length === 0 ? (
                                 <tr>
                                   <td colSpan={6} className="py-8 text-center text-gray-400">
                                     No hay cancelaciones para el filtro seleccionado.
                                   </td>
                                 </tr>
                               ) : (
-                                (auditoriaData?.viajes || []).map((v: any) => (
+                                paginatedAuditoriaViajes.map((v: any) => (
                                   <tr key={v.id} className="hover:bg-rose-50/30 transition-colors">
                                     <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-600">
                                       {new Date(v.fecha).toLocaleDateString()} {new Date(v.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -3121,6 +3400,7 @@ export default function CoordinadorDashboard() {
                             </tbody>
                           </table>
                         </div>
+                        {renderPagination(filteredAuditoriaViajes.length)}
                       </div>
                     </div>
                   </div>
@@ -3132,7 +3412,7 @@ export default function CoordinadorDashboard() {
 
         {/* Panel lateral derecho - Botones de acción */}
         {isSidebarOpen && (
-          <div className="w-full lg:w-64 xl:w-72 2xl:w-80 bg-white shadow-md border-t lg:border-t-0 lg:border-l shrink-0 lg:overflow-y-auto">
+          <div className="w-full lg:w-64 xl:w-72 2xl:w-80 bg-white shadow-md border-t lg:border-t-0 lg:border-l shrink-0">
             <div className="p-4 sm:p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-md font-bold text-gray-900">Acciones Rápidas</h3>

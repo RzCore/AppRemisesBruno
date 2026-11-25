@@ -1394,6 +1394,8 @@ export const coordinadorDashboardService = {
     estado?: string;
     fechaDesde?: string;
     fechaHasta?: string;
+    choferId?: string;
+    vehiculoId?: string;
     limit?: number;
   }): Promise<ApiResponse<any[]>> => {
     try {
@@ -1401,6 +1403,8 @@ export const coordinadorDashboardService = {
       if (params?.estado) queryParams.append('estado', params.estado);
       if (params?.fechaDesde) queryParams.append('fechaDesde', params.fechaDesde);
       if (params?.fechaHasta) queryParams.append('fechaHasta', params.fechaHasta);
+      if (params?.choferId) queryParams.append('choferId', params.choferId);
+      if (params?.vehiculoId) queryParams.append('vehiculoId', params.vehiculoId);
       if (params?.limit) queryParams.append('limit', params.limit.toString());
       const query = queryParams.toString() ? `?${queryParams.toString()}` : '';
 

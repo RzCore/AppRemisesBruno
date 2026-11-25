@@ -325,7 +325,7 @@ export const coordinatorDashboardController = {
         });
       }
 
-      const { estado, fechaDesde, fechaHasta, limit } = req.query;
+      const { estado, fechaDesde, fechaHasta, limit, choferId, vehiculoId } = req.query;
 
       const whereClause: any = {
         remiseriaId,
@@ -336,6 +336,17 @@ export const coordinatorDashboardController = {
 
       if (estado && typeof estado === 'string' && ['COMPLETADO', 'CANCELADO'].includes(estado.toUpperCase())) {
         whereClause.estado = estado.toUpperCase();
+      }
+
+      if (choferId && typeof choferId === 'string' && choferId.trim() !== '') {
+        whereClause.choferId = choferId.trim();
+      }
+
+      if (vehiculoId && typeof vehiculoId === 'string' && vehiculoId.trim() !== '') {
+        whereClause.OR = [
+          { vehiculoId: vehiculoId.trim() },
+          { chofer: { vehiculo: { id: vehiculoId.trim() } } }
+        ];
       }
 
       if (fechaDesde || fechaHasta) {
@@ -371,6 +382,7 @@ export const coordinatorDashboardController = {
               id: true,
               nombre: true,
               apellido: true,
+              numeroChofer: true,
               telefono: true,
               vehiculo: {
                 select: {
