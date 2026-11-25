@@ -1461,6 +1461,116 @@ export const coordinatorDashboardController = {
     }
   },
 
+  // Actualizar reserva existente
+  async updateReserva(req: AuthenticatedRequest, res: Response) {
+    try {
+      const coordinadorId = req.user?.id;
+      const { id } = req.params;
+      const {
+        clienteNombre,
+        clienteTelefono,
+        clienteEmail,
+        origen,
+        destino,
+        fechaInicio,
+        fechaFin,
+        horaInicio,
+        horaFin,
+        diasSemana,
+        tipo,
+        observaciones
+      } = req.body;
+
+      if (!coordinadorId) {
+        return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      const coordinador = await prisma.coordinador.findFirst({
+        where: { userId: coordinadorId }
+      });
+
+      if (!coordinador) {
+        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      }
+
+      const existente = await prisma.reserva.findFirst({
+        where: { id, remiseriaId: coordinador.remiseriaId }
+      });
+
+      if (!existente) {
+        return res.status(404).json({ success: false, message: 'Reserva no encontrada' });
+      }
+
+      const reservaActualizada = await prisma.reserva.update({
+        where: { id },
+        data: {
+          ...(clienteNombre !== undefined ? { clienteNombre } : {}),
+          ...(clienteTelefono !== undefined ? { clienteTelefono } : {}),
+          ...(clienteEmail !== undefined ? { clienteEmail } : {}),
+          ...(origen !== undefined ? { origen } : {}),
+          ...(destino !== undefined ? { destino } : {}),
+          ...(fechaInicio ? { fechaInicio: new Date(fechaInicio) } : {}),
+          fechaFin: fechaFin ? new Date(fechaFin) : null,
+          ...(horaInicio !== undefined ? { horaInicio } : {}),
+          horaFin: horaFin || null,
+          diasSemana: diasSemana ? JSON.stringify(diasSemana) : null,
+          ...(tipo !== undefined ? { tipo } : {}),
+          observaciones: observaciones ?? null,
+        }
+      });
+
+      res.json({
+        success: true,
+        data: reservaActualizada,
+        message: 'Reserva actualizada exitosamente'
+      });
+    } catch (error) {
+      console.error('Error updating reserva:', error);
+      res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  },
+
+  // Eliminar / cancelar reserva
+  async deleteReserva(req: AuthenticatedRequest, res: Response) {
+    try {
+      const coordinadorId = req.user?.id;
+      const { id } = req.params;
+
+      if (!coordinadorId) {
+        return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      const coordinador = await prisma.coordinador.findFirst({
+        where: { userId: coordinadorId }
+      });
+
+      if (!coordinador) {
+        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      }
+
+      const existente = await prisma.reserva.findFirst({
+        where: { id, remiseriaId: coordinador.remiseriaId }
+      });
+
+      if (!existente) {
+        return res.status(404).json({ success: false, message: 'Reserva no encontrada' });
+      }
+
+      await prisma.reserva.update({
+        where: { id },
+        data: { estado: 'CANCELADA' }
+      });
+
+      res.json({
+        success: true,
+        message: 'Reserva eliminada exitosamente'
+      });
+    } catch (error) {
+      console.error('Error deleting reserva:', error);
+      res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  },
+
   // Obtener vehículos en tiempo real
   async getVehiculosTiempoReal(req: AuthenticatedRequest, res: Response) {
     try {

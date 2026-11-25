@@ -1161,6 +1161,17 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
 
+    // Parsear fechas en zona horaria Argentina (UTC-3) cuando llegan como YYYY-MM-DD
+    const fechaInicioDate =
+      typeof fechaInicio === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaInicio)
+        ? new Date(`${fechaInicio}T${horaInicio || '12:00'}:00-03:00`)
+        : new Date(fechaInicio);
+    const fechaFinDate = fechaFin
+      ? typeof fechaFin === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaFin)
+        ? new Date(`${fechaFin}T${horaFin || '23:59'}:00-03:00`)
+        : new Date(fechaFin)
+      : null;
+
     // Crear reserva
     const reserva = await prisma.reserva.create({
       data: {
@@ -1169,10 +1180,10 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
         clienteEmail: req.user?.cliente?.email || '',
         origen,
         destino,
-        fechaInicio: new Date(fechaInicio),
+        fechaInicio: fechaInicioDate,
         horaInicio,
         tipo: tipoReserva === 'unica' ? 'UNICA' : 'PERIODICA',
-        fechaFin: fechaFin ? new Date(fechaFin) : null,
+        fechaFin: fechaFinDate,
         diasSemana: diasSemana ? diasSemana.join(',') : null,
         horaFin,
         estado: 'ACTIVA',

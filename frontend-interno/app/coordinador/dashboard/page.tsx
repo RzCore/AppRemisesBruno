@@ -51,7 +51,9 @@ import {
   ShieldAlert,
   HelpCircle,
   Check,
-  Power
+  Power,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -281,9 +283,26 @@ export default function CoordinadorDashboard() {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalStep, setModalStep] = useState(1); // 1 = DNI, 2 = Complete details, 3 = Trip details
+  const [modalMode, setModalMode] = useState<'viaje' | 'reserva'>('viaje');
+  const [editingReservaId, setEditingReservaId] = useState<string | null>(null);
+  const [modalStep, setModalStep] = useState(1); // 1 = DNI, 2 = Complete details, 3 = Trip/Reserva details
   const [dniSearch, setDniSearch] = useState('');
   const [buscandoDni, setBuscandoDni] = useState(false);
+  const [reservaData, setReservaData] = useState({
+    tipo: 'UNICA' as 'UNICA' | 'PERIODICA',
+    fechaInicio: new Date().toISOString().split('T')[0],
+    horaInicio: '08:00',
+    fechaFin: '',
+    horaFin: '',
+    diasSemana: [] as string[],
+  });
+
+  const openStepModal = (mode: 'viaje' | 'reserva') => {
+    setEditingReservaId(null);
+    setModalMode(mode);
+    setModalStep(1);
+    setIsModalOpen(true);
+  };
   
   const [clientData, setClientData] = useState({
     id: '',
@@ -504,7 +523,11 @@ export default function CoordinadorDashboard() {
             destino: r.destino,
             fecha: formattedDate,
             rawFecha: r.fechaInicio,
+            rawFechaFin: r.fechaFin || null,
             hora: r.horaInicio,
+            horaFin: r.horaFin || '',
+            diasSemana: r.diasSemana || null,
+            observaciones: r.observaciones || '',
             horaSalidaChofer: r.horaSalidaChofer,
             horaTurno: r.horaTurno,
             isViajeArt: isArt,
@@ -513,6 +536,7 @@ export default function CoordinadorDashboard() {
             chofer: r.chofer,
             choferId: r.chofer?.id || '',
             vehiculoId: r.chofer?.vehiculo?.id || '',
+            tipoRaw: r.tipo || 'UNICA',
             tipo: isArt ? 'ART Programado' : (r.tipo === 'PERIODICA' ? 'Periódica' : 'Única')
           };
         }));
@@ -1176,6 +1200,157 @@ export default function CoordinadorDashboard() {
       toast.error('Error al crear viaje');
     } finally {
       setCreandoViaje(false);
+    }
+  };
+
+  const handleCrearReserva = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tripData.origen || !tripData.destino) {
+      toast.error('Complete origen y destino');
+      return;
+    }
+    if (!reservaData.fechaInicio || !reservaData.horaInicio) {
+      toast.error('Seleccione fecha y hora de la reserva');
+      return;
+    }
+    setCreandoViaje(true);
+    try {
+      const fechaInicioIso = new Date(`${reservaData.fechaInicio}T${reservaData.horaInicio}:00`).toISOString();
+      const fechaFinIso =
+        reservaData.tipo === 'PERIODICA' && reservaData.fechaFin
+          ? new Date(`${reservaData.fechaFin}T${reservaData.horaFin || '23:59'}:00`).toISOString()
+          : undefined;
+
+      const payloadReserva = {
+        clienteNombre: `${clientData.nombre} ${clientData.apellido}`.trim(),
+        clienteTelefono: clientData.telefono,
+        clienteEmail: clientData.email || undefined,
+        origen: tripData.origen,
+        destino: tripData.destino,
+        fechaInicio: fechaInicioIso,
+        fechaFin: fechaFinIso,
+        horaInicio: reservaData.horaInicio,
+        horaFin: reservaData.tipo === 'PERIODICA' ? reservaData.horaFin || undefined : undefined,
+        diasSemana: reservaData.tipo === 'PERIODICA' ? reservaData.diasSemana : undefined,
+        tipo: reservaData.tipo,
+        observaciones: tripData.observaciones || undefined,
+      };
+
+      const res = editingReservaId
+        ? await coordinadorDashboardService.updateReserva(editingReservaId, payloadReserva)
+        : await coordinadorDashboardService.createReserva(payloadReserva);
+
+      if (res.success) {
+        toast.success(editingReservaId ? 'Reserva actualizada exitosamente' : 'Reserva creada exitosamente');
+        setIsModalOpen(false);
+        setEditingReservaId(null);
+        setModalStep(1);
+        setDniSearch('');
+        setClientData({ id: '', nombre: '', apellido: '', telefono: '', email: '', direccion: '' });
+        setTripData({
+          origen: '',
+          destino: '',
+          precio: '',
+          fecha: new Date().toISOString().split('T')[0],
+          hora: new Date().toTimeString().slice(0, 5),
+          tipoViaje: 'inmediato',
+          observaciones: '',
+          prioridad: 'NORMAL',
+          artEmpresaId: '',
+          numeroSiniestro: ''
+        });
+        setReservaData({
+          tipo: 'UNICA',
+          fechaInicio: new Date().toISOString().split('T')[0],
+          horaInicio: '08:00',
+          fechaFin: '',
+          horaFin: '',
+          diasSemana: [],
+        });
+        setOrigenCoords(null);
+        setDestinoCoords(null);
+        setDistanciaEstimada(null);
+        setActiveTab('reservados');
+        fetchData();
+      } else {
+        toast.error(res.message || 'Error al guardar la reserva');
+      }
+    } catch (err) {
+      toast.error('Error al guardar la reserva');
+    } finally {
+      setCreandoViaje(false);
+    }
+  };
+
+  const abrirEditarReserva = (reserva: any) => {
+    const partesNombre = String(reserva.cliente || '').trim().split(' ');
+    const nombre = partesNombre[0] || '';
+    const apellido = partesNombre.slice(1).join(' ');
+    let diasParsed: string[] = [];
+    if (reserva.diasSemana) {
+      const mapaDias: Record<string, string> = {
+        '0': '0', DOMINGO: '0',
+        '1': '1', LUNES: '1',
+        '2': '2', MARTES: '2',
+        '3': '3', MIERCOLES: '3', MIÉRCOLES: '3',
+        '4': '4', JUEVES: '4',
+        '5': '5', VIERNES: '5',
+        '6': '6', SABADO: '6', SÁBADO: '6',
+      };
+      let rawList: string[] = [];
+      try {
+        const parsed = typeof reserva.diasSemana === 'string' ? JSON.parse(reserva.diasSemana) : reserva.diasSemana;
+        if (Array.isArray(parsed)) rawList = parsed.map((x) => String(x).trim());
+      } catch {
+        rawList = String(reserva.diasSemana).split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      diasParsed = rawList.map((d) => mapaDias[d.toUpperCase()]).filter(Boolean);
+    }
+
+    setEditingReservaId(reserva.id);
+    setModalMode('reserva');
+    setClientData({
+      id: '',
+      nombre,
+      apellido,
+      telefono: reserva.telefono || '',
+      email: '',
+      direccion: '',
+    });
+    setTripData((prev) => ({
+      ...prev,
+      origen: reserva.origen || '',
+      destino: reserva.destino || '',
+      observaciones: reserva.observaciones || '',
+    }));
+    setIsOrigenSelected(true);
+    setIsDestinoSelected(true);
+    setReservaData({
+      tipo: reserva.tipoRaw === 'PERIODICA' ? 'PERIODICA' : 'UNICA',
+      fechaInicio: formatLocalYMD(reserva.rawFecha) || new Date().toISOString().split('T')[0],
+      horaInicio: reserva.hora || '08:00',
+      fechaFin: reserva.rawFechaFin ? formatLocalYMD(reserva.rawFechaFin) : '',
+      horaFin: reserva.horaFin || '',
+      diasSemana: diasParsed,
+    });
+    setModalStep(3);
+    setIsModalOpen(true);
+  };
+
+  const handleEliminarReserva = async (reserva: any) => {
+    if (!confirm(`¿Seguro que deseas eliminar la reserva de ${reserva.cliente} (${reserva.fecha} ${reserva.hora})?`)) {
+      return;
+    }
+    try {
+      const res = await coordinadorDashboardService.deleteReserva(reserva.id);
+      if (res.success) {
+        toast.success('Reserva eliminada');
+        fetchData();
+      } else {
+        toast.error(res.message || 'No se pudo eliminar la reserva');
+      }
+    } catch {
+      toast.error('Error al eliminar la reserva');
     }
   };
 
@@ -1991,10 +2166,7 @@ export default function CoordinadorDashboard() {
               {/* Botón Nuevo Viaje Rápido */}
               <button 
                 type="button"
-                onClick={() => {
-                  setModalStep(1);
-                  setIsModalOpen(true);
-                }}
+                onClick={() => openStepModal('viaje')}
                 className="bg-green-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg flex items-center space-x-1.5 hover:bg-green-700 transition-colors text-xs sm:text-sm font-semibold shadow-sm"
               >
                 <Plus className="h-4 w-4" />
@@ -2657,18 +2829,19 @@ export default function CoordinadorDashboard() {
                     <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
                       <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(229,231,235,1)]">
                         <tr>
-                          <th className="px-3 sm:px-4 py-3 w-40 lg:w-[20%]">Cliente</th>
-                          <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[25%]">Origen</th>
-                          <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[25%]">Destino</th>
-                          <th className="px-3 sm:px-4 py-3 w-28 lg:w-[15%]">Fecha</th>
+                          <th className="px-3 sm:px-4 py-3 w-40 lg:w-[18%]">Cliente</th>
+                          <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[22%]">Origen</th>
+                          <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[22%]">Destino</th>
+                          <th className="px-3 sm:px-4 py-3 w-28 lg:w-[12%]">Fecha</th>
                           <th className="px-3 sm:px-4 py-3 w-20 lg:w-[8%]">Hora</th>
-                          <th className="px-3 sm:px-4 py-3 w-24 lg:w-[7%]">Tipo</th>
+                          <th className="px-3 sm:px-4 py-3 w-24 lg:w-[8%]">Tipo</th>
+                          <th className="px-3 sm:px-4 py-3 w-28 lg:w-[10%] text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {filteredReservas.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                            <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
                               <Calendar className="h-8 w-8 mx-auto mb-2 text-gray-400" />
                               <p className="font-semibold text-gray-700">No hay reservas programadas</p>
                               <p className="text-xs text-gray-400 mt-1">Los viajes agendados con anticipación aparecerán aquí.</p>
@@ -2721,6 +2894,30 @@ export default function CoordinadorDashboard() {
                                   <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                                     {reserva.tipo}
                                   </span>
+                                )}
+                              </td>
+                              <td className="px-3 sm:px-4 py-3 text-right whitespace-nowrap">
+                                {reserva.isViajeArt ? (
+                                  <span className="text-[11px] text-gray-400 italic">Gestión Dueño</span>
+                                ) : (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => abrirEditarReserva(reserva)}
+                                      className="p-1.5 text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors"
+                                      title="Editar reserva"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEliminarReserva(reserva)}
+                                      className="p-1.5 text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors"
+                                      title="Eliminar reserva"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
                                 )}
                               </td>
                             </tr>
@@ -3465,10 +3662,7 @@ export default function CoordinadorDashboard() {
 
                 <button 
                   type="button"
-                  onClick={() => {
-                    setModalStep(1);
-                    setIsModalOpen(true);
-                  }}
+                  onClick={() => openStepModal('viaje')}
                   className="w-full bg-green-600 text-white px-4 py-2.5 rounded-xl flex items-center space-x-3 hover:bg-green-700 transition-colors shadow-sm font-medium text-sm"
                 >
                   <Plus className="h-4 w-4" />
@@ -3497,13 +3691,14 @@ export default function CoordinadorDashboard() {
                   <span>Despacho Óptimo (Lote)</span>
                 </button>
 
-                <Link 
-                  href="/coordinador/reservas"
+                <button 
+                  type="button"
+                  onClick={() => openStepModal('reserva')}
                   className="w-full bg-blue-600 text-white px-4 py-2.5 rounded-xl flex items-center space-x-3 hover:bg-blue-700 transition-colors shadow-sm font-medium text-sm"
                 >
                   <Calendar className="h-4 w-4" />
                   <span>Nueva Reserva</span>
-                </Link>
+                </button>
 
                 <Link 
                   href="/coordinador/choferes"
@@ -3542,14 +3737,26 @@ export default function CoordinadorDashboard() {
         )}
       </div>
 
-      {/* Modal Paso a Paso - Nuevo Viaje */}
+      {/* Modal Paso a Paso - Nuevo Viaje / Nueva Reserva */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-gray-100 transform transition-all">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-gray-100 transform transition-all my-auto">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 rounded-t-2xl text-white flex justify-between items-center">
               <div>
-                <h3 className="text-xl font-bold">Nuevo Viaje</h3>
-                <p className="text-xs text-blue-100">Crear viaje manual - Paso {modalStep} de 3</p>
+                <h3 className="text-xl font-bold">
+                  {modalMode === 'reserva'
+                    ? editingReservaId
+                      ? 'Editar Reserva'
+                      : 'Nueva Reserva'
+                    : 'Nuevo Viaje'}
+                </h3>
+                <p className="text-xs text-blue-100">
+                  {modalMode === 'reserva'
+                    ? editingReservaId
+                      ? 'Modificar datos de la reserva'
+                      : `Programar reserva manual - Paso ${modalStep} de 3`
+                    : `Crear viaje manual - Paso ${modalStep} de 3`}
+                </p>
               </div>
               <button 
                 type="button"
@@ -3700,7 +3907,7 @@ export default function CoordinadorDashboard() {
               )}
 
               {modalStep === 3 && (
-                <form onSubmit={handleCrearViaje} className="space-y-3">
+                <form onSubmit={modalMode === 'reserva' ? handleCrearReserva : handleCrearViaje} className="space-y-3">
                   <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200 flex justify-between items-center text-xs">
                     <div>
                       <span className="font-semibold text-gray-800">{clientData.nombre} {clientData.apellido}</span>
@@ -3797,22 +4004,139 @@ export default function CoordinadorDashboard() {
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-0.5">Precio ($)</label>
-                    <input 
-                      type="number"
-                      min="0"
-                      value={tripData.precio}
-                      onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
-                      placeholder="Se calcula al ingresar origen y destino..."
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold text-emerald-700"
-                    />
-                    {distanciaEstimada !== null && (
-                      <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                        🛣️ Distancia estimada: {distanciaEstimada} km
-                      </p>
-                    )}
-                  </div>
+                  {modalMode === 'viaje' ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-0.5">Precio ($)</label>
+                      <input 
+                        type="number"
+                        min="0"
+                        value={tripData.precio}
+                        onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
+                        placeholder="Se calcula al ingresar origen y destino..."
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold text-emerald-700"
+                      />
+                      {distanciaEstimada !== null && (
+                        <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                          🛣️ Distancia estimada: {distanciaEstimada} km
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3 pt-1">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Tipo de Reserva</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setReservaData((prev) => ({ ...prev, tipo: 'UNICA' }))}
+                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                              reservaData.tipo === 'UNICA'
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            Reserva Única
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReservaData((prev) => ({ ...prev, tipo: 'PERIODICA' }))}
+                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                              reservaData.tipo === 'PERIODICA'
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            Reserva Periódica
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Fecha de Inicio *</label>
+                          <input
+                            type="date"
+                            required
+                            value={reservaData.fechaInicio}
+                            onChange={(e) => setReservaData((prev) => ({ ...prev, fechaInicio: e.target.value }))}
+                            className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-0.5">Hora de Inicio *</label>
+                          <input
+                            type="time"
+                            required
+                            value={reservaData.horaInicio}
+                            onChange={(e) => setReservaData((prev) => ({ ...prev, horaInicio: e.target.value }))}
+                            className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {reservaData.tipo === 'PERIODICA' && (
+                        <div className="p-3 bg-blue-50/70 rounded-xl border border-blue-100 space-y-2.5">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-0.5">Fecha de Fin</label>
+                              <input
+                                type="date"
+                                value={reservaData.fechaFin}
+                                onChange={(e) => setReservaData((prev) => ({ ...prev, fechaFin: e.target.value }))}
+                                className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-0.5">Hora Fin (opc.)</label>
+                              <input
+                                type="time"
+                                value={reservaData.horaFin}
+                                onChange={(e) => setReservaData((prev) => ({ ...prev, horaFin: e.target.value }))}
+                                className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs bg-white"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Días de la Semana</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { value: '1', label: 'Lun' },
+                                { value: '2', label: 'Mar' },
+                                { value: '3', label: 'Mié' },
+                                { value: '4', label: 'Jue' },
+                                { value: '5', label: 'Vie' },
+                                { value: '6', label: 'Sáb' },
+                                { value: '0', label: 'Dom' },
+                              ].map((d) => {
+                                const selected = reservaData.diasSemana.includes(d.value);
+                                return (
+                                  <button
+                                    key={d.value}
+                                    type="button"
+                                    onClick={() =>
+                                      setReservaData((prev) => ({
+                                        ...prev,
+                                        diasSemana: selected
+                                          ? prev.diasSemana.filter((x) => x !== d.value)
+                                          : [...prev.diasSemana, d.value],
+                                      }))
+                                    }
+                                    className={`px-2 py-1 rounded text-[11px] font-semibold border transition-colors ${
+                                      selected
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {d.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-0.5">Observaciones</label>
@@ -3836,9 +4160,9 @@ export default function CoordinadorDashboard() {
                     <button 
                       type="submit" 
                       disabled={creandoViaje}
-                      className="bg-green-600 text-white px-5 py-2 rounded-xl text-xs font-bold hover:bg-green-700 transition-colors flex items-center space-x-1"
+                      className={`${modalMode === 'reserva' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'} text-white px-5 py-2 rounded-xl text-xs font-bold transition-colors flex items-center space-x-1`}
                     >
-                      {creandoViaje ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span>Confirmar y Despachar</span>}
+                      {creandoViaje ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span>{modalMode === 'reserva' ? (editingReservaId ? 'Guardar Cambios' : 'Guardar Reserva') : 'Confirmar y Despachar'}</span>}
                     </button>
                   </div>
                 </form>

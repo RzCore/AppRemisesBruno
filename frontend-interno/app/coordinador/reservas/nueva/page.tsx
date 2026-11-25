@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
+import { coordinadorDashboardService } from '@/lib/api';
 import { 
   ArrowLeft, 
   Save, 
@@ -84,11 +85,32 @@ export default function NuevaReserva() {
     setIsLoading(true);
 
     try {
-      // Aquí irá la llamada a la API
-      console.log('Datos de la reserva:', formData);
-      
-      toast.success('Reserva creada exitosamente');
-      router.push('/coordinador/dashboard');
+      const fechaInicioIso = new Date(`${formData.fechaInicio}T${formData.horaInicio || '00:00'}:00`).toISOString();
+      const fechaFinIso =
+        formData.tipoReserva === 'periodica' && formData.fechaFin
+          ? new Date(`${formData.fechaFin}T${formData.horaFin || '23:59'}:00`).toISOString()
+          : undefined;
+
+      const res = await coordinadorDashboardService.createReserva({
+        clienteNombre: formData.nombreCliente.trim(),
+        clienteTelefono: formData.telefonoCliente.trim(),
+        origen: formData.direccionOrigen.trim(),
+        destino: formData.direccionDestino.trim(),
+        fechaInicio: fechaInicioIso,
+        fechaFin: fechaFinIso,
+        horaInicio: formData.horaInicio,
+        horaFin: formData.tipoReserva === 'periodica' ? formData.horaFin || undefined : undefined,
+        diasSemana: formData.tipoReserva === 'periodica' ? formData.diasSemana || [] : undefined,
+        tipo: formData.tipoReserva === 'periodica' ? 'PERIODICA' : 'UNICA',
+        observaciones: formData.observaciones.trim() || undefined,
+      });
+
+      if (res.success) {
+        toast.success('Reserva creada exitosamente');
+        router.push('/coordinador/dashboard');
+      } else {
+        toast.error(res.message || 'Error al crear la reserva');
+      }
     } catch (error) {
       toast.error('Error al crear la reserva');
       console.error('Error:', error);

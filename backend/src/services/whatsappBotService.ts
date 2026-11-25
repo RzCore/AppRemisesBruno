@@ -14,7 +14,9 @@ type EstadoConversacion =
   | 'IDLE'
   | 'ESPERANDO_DNI_REGISTRO'
   | 'ESPERANDO_NOMBRE_REGISTRO'
+  | 'ESPERANDO_TIPO_RESERVA'
   | 'ESPERANDO_FECHA_HORA_RESERVA'
+  | 'ESPERANDO_DIAS_HORA_PERIODICA'
   | 'ESPERANDO_ORIGEN'
   | 'CONFIRMANDO_AUDIO_ORIGEN'
   | 'ESPERANDO_DESTINO'
@@ -29,6 +31,9 @@ interface SesionClienteWhatsApp {
   dniTemporal?: string;
   nombreTemporal?: string;
   esReserva?: boolean;
+  tipoReserva?: 'UNICA' | 'PERIODICA';
+  diasSemanaReserva?: string[];
+  diasSemanaTexto?: string;
   fechaHoraReserva?: Date;
   fechaHoraTexto?: string;
   horaInicioStr?: string;
@@ -710,6 +715,129 @@ function formatearFechaLegible(fechaUtc: Date): { fechaTexto: string; horaStr: s
   const fechaTexto = `${weekdayCapitalized} ${map.day}/${map.month} a las ${horaStr} hs`;
 
   return { fechaTexto, horaStr };
+}
+
+function parsearDiasYHoraPeriodica(input: string):
+  | { diasNumeros: string[]; diasTexto: string; horaStr: string; fechaInicio: Date; resumenTexto: string }
+  | { error: string } {
+  const txt = input
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // 1. Extraer hora (ej. 00:30, 8:00, 8 hs, 22 horas, 8 y media)
+  let hora: number | null = null;
+  let minuto = 0;
+
+  const matchHHMM = txt.match(/\b(\d{1,2})\s*[:.]\s*(\d{2})\b/);
+  if (matchHHMM) {
+    hora = parseInt(matchHHMM[1], 10);
+    minuto = parseInt(matchHHMM[2], 10);
+  } else {
+    const matchYMedia = txt.match(/\b(\d{1,2})\s+y\s+media\b/);
+    const matchYCuarto = txt.match(/\b(\d{1,2})\s+y\s+cuarto\b/);
+    const matchHs = txt.match(/\b(?:a\s+las\s+)?(\d{1,2})\s*(?:hs|h|horas?|hrs?)\b/);
+    const matchALas = txt.match(/\ba\s+las\s+(\d{1,2})\b/);
+    if (matchYMedia) {
+      hora = parseInt(matchYMedia[1], 10);
+      minuto = 30;
+    } else if (matchYCuarto) {
+      hora = parseInt(matchYCuarto[1], 10);
+      minuto = 15;
+    } else if (matchHs) {
+      hora = parseInt(matchHs[1], 10);
+    } else if (matchALas) {
+      hora = parseInt(matchALas[1], 10);
+    }
+  }
+
+  if (hora === null || hora < 0 || hora > 23 || minuto < 0 || minuto > 59) {
+    return {
+      error:
+        '⚠️ No pudimos reconocer el horario.\n\nEscribí los días y la hora juntos, por ejemplo:\n• *Lunes a Viernes 07:30*\n• *Viernes, Sábado y Domingo 00:30*\n• *Martes y Jueves 18:00*',
+    };
+  }
+
+  // 2. Extraer días de la semana (0=Dom, 1=Lun, ..., 6=Sab)
+  const diasSet = new Set<string>();
+  if (txt.includes('todos los dias') || txt.includes('diario') || txt.includes('diariamente')) {
+    ['1', '2', '3', '4', '5', '6', '0'].forEach((d) => diasSet.add(d));
+  }
+  if (txt.includes('lunes a viernes') || txt.includes('lun a vie') || txt.includes('dias habiles')) {
+    ['1', '2', '3', '4', '5'].forEach((d) => diasSet.add(d));
+  }
+  if (txt.includes('lunes a sabado') || txt.includes('lun a sab')) {
+    ['1', '2', '3', '4', '5', '6'].forEach((d) => diasSet.add(d));
+  }
+  if (txt.includes('fin de semana') || txt.includes('fines de semana')) {
+    diasSet.add('6');
+    diasSet.add('0');
+  }
+
+  const patronesDias: Array<{ num: string; regex: RegExp }> = [
+    { num: '1', regex: /\b(lunes|lun)\b/ },
+    { num: '2', regex: /\b(martes|mar)\b/ },
+    { num: '3', regex: /\b(miercoles|mie)\b/ },
+    { num: '4', regex: /\b(jueves|jue)\b/ },
+    { num: '5', regex: /\b(viernes|vie)\b/ },
+    { num: '6', regex: /\b(sabados?|sab)\b/ },
+    { num: '0', regex: /\b(domingos?|dom)\b/ },
+  ];
+  for (const p of patronesDias) {
+    if (p.regex.test(txt)) diasSet.add(p.num);
+  }
+
+  if (diasSet.size === 0) {
+    return {
+      error:
+        '⚠️ No pudimos reconocer qué días de la semana querés repetir la reserva.\n\nPor ejemplo escribí:\n• *Lunes a Viernes 07:30*\n• *Viernes, Sábado y Domingo 00:30*\n• *Lunes, Miércoles y Viernes 14:00*',
+    };
+  }
+
+  const ordenVisual = ['1', '2', '3', '4', '5', '6', '0'];
+  const nombresDia: Record<string, string> = {
+    '1': 'Lunes',
+    '2': 'Martes',
+    '3': 'Miércoles',
+    '4': 'Jueves',
+    '5': 'Viernes',
+    '6': 'Sábado',
+    '0': 'Domingo',
+  };
+  const diasNumeros = ordenVisual.filter((d) => diasSet.has(d));
+  const diasTexto = diasNumeros.map((d) => nombresDia[d]).join(', ');
+  const horaStr = `${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}`;
+
+  // Calcular próxima ocurrencia en hora Argentina (UTC-3) como fechaInicio
+  const ahoraMs = Date.now();
+  const argOffsetMs = 3 * 60 * 60 * 1000;
+  let fechaInicio = new Date(ahoraMs);
+  for (let offset = 0; offset <= 7; offset++) {
+    const argCand = new Date(ahoraMs - argOffsetMs + offset * 24 * 60 * 60 * 1000);
+    const dow = String(argCand.getUTCDay());
+    if (!diasSet.has(dow)) continue;
+    const occUtc = Date.UTC(
+      argCand.getUTCFullYear(),
+      argCand.getUTCMonth(),
+      argCand.getUTCDate(),
+      hora + 3,
+      minuto,
+      0,
+      0
+    );
+    if (occUtc > ahoraMs) {
+      fechaInicio = new Date(occUtc);
+      break;
+    }
+  }
+
+  return {
+    diasNumeros,
+    diasTexto,
+    horaStr,
+    fechaInicio,
+    resumenTexto: `🔁 ${diasTexto} a las ${horaStr} hs`,
+  };
 }
 
 function parsearFechaHoraReserva(input: string): { fecha: Date; fechaTexto: string; horaStr: string } | { error: string } {
@@ -1463,6 +1591,27 @@ export const whatsappBotService = {
         );
       }
 
+      if (sesion.estado === 'ESPERANDO_DIAS_HORA_PERIODICA') {
+        const parsedPer = parsearDiasYHoraPeriodica(transcripcion);
+        if ('error' in parsedPer) {
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            `🎙️ *Te escuchamos:* _"${transcripcion}"_\n\n${parsedPer.error}`
+          );
+        }
+        sesion.tipoReserva = 'PERIODICA';
+        sesion.diasSemanaReserva = parsedPer.diasNumeros;
+        sesion.diasSemanaTexto = parsedPer.diasTexto;
+        sesion.fechaHoraReserva = parsedPer.fechaInicio;
+        sesion.fechaHoraTexto = parsedPer.resumenTexto;
+        sesion.horaInicioStr = parsedPer.horaStr;
+        sesion.estado = 'ESPERANDO_ORIGEN';
+        return await whatsappService.enviarTexto(
+          cleanFrom,
+          `🎙️ *Te escuchamos:* _"${transcripcion}"_\n\n🔁 *Reserva periódica:* ${parsedPer.resumenTexto}\n\n📍 *¿Dónde te pasamos a buscar?*\nPodés escribir la dirección o mandar otro audio diciendo el lugar:`
+        );
+      }
+
       if (sesion.estado === 'ESPERANDO_FECHA_HORA_RESERVA') {
         const parseResult = parsearFechaHoraReserva(transcripcion);
         if ('error' in parseResult) {
@@ -1487,7 +1636,7 @@ export const whatsappBotService = {
     // ==============================================================================
     switch (sesion.estado) {
       case 'IDLE': {
-        // Disparador: Reservar para más tarde
+        // Disparador: Reservar para más tarde (única o periódica)
         if (
           actionId === 'BTN_RESERVAR' ||
           textoLower.includes('reserva') ||
@@ -1499,10 +1648,17 @@ export const whatsappBotService = {
           textoLower.includes('otro momento')
         ) {
           sesion.esReserva = true;
-          sesion.estado = 'ESPERANDO_FECHA_HORA_RESERVA';
-          return await whatsappService.enviarTexto(
+          sesion.tipoReserva = undefined;
+          sesion.diasSemanaReserva = undefined;
+          sesion.diasSemanaTexto = undefined;
+          sesion.estado = 'ESPERANDO_TIPO_RESERVA';
+          return await whatsappService.enviarBotones(
             cleanFrom,
-            `📅 *¿Para qué día y hora necesitás el remís?*\n\nPodés escribir por ejemplo:\n• *'Hoy 23:30'*\n• *'Mañana 08:00'*\n• *'Lunes 07:30'*\n• *'25/11 14:00'*\n\n_(O podés mandarnos un audio diciendo el día y la hora)_`
+            `📅 *¿Qué tipo de reserva querés programar?*\n\n• *Reserva Única:* para un día y horario puntual.\n• *Reserva Periódica:* se repite automáticamente los días de la semana que elijas (ej. Lunes a Viernes 07:30).`,
+            [
+              { id: 'BTN_RESERVA_UNICA', title: '📅 Reserva Única' },
+              { id: 'BTN_RESERVA_PERIODICA', title: '🔁 Reserva Periódica' },
+            ]
           );
         }
 
@@ -1567,6 +1723,58 @@ export const whatsappBotService = {
           { id: 'BTN_RESERVAR', title: '📅 Reservar Viaje' },
           { id: 'BTN_ESTADO', title: '📍 Estado / Ayuda' },
         ]);
+      }
+
+      case 'ESPERANDO_TIPO_RESERVA': {
+        if (
+          actionId === 'BTN_RESERVA_PERIODICA' ||
+          textoLower.includes('periodic') ||
+          textoLower.includes('periódic') ||
+          textoLower.includes('repetir') ||
+          textoLower.includes('semanal') ||
+          textoLower.includes('todos los')
+        ) {
+          sesion.tipoReserva = 'PERIODICA';
+          sesion.estado = 'ESPERANDO_DIAS_HORA_PERIODICA';
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            `🔁 *Reserva Periódica*\n\nIndicá *qué días de la semana y a qué hora* necesitás el remís.\n\nPor ejemplo:\n• *Lunes a Viernes 07:30*\n• *Viernes, Sábado y Domingo 00:30*\n• *Martes y Jueves 14:00*\n\n_(Se generará automáticamente 15 minutos antes de cada horario)_`
+          );
+        }
+
+        sesion.tipoReserva = 'UNICA';
+        sesion.estado = 'ESPERANDO_FECHA_HORA_RESERVA';
+        return await whatsappService.enviarTexto(
+          cleanFrom,
+          `📅 *¿Para qué día y hora necesitás el remís?*\n\nPodés escribir por ejemplo:\n• *'Hoy 23:30'*\n• *'Mañana 08:00'*\n• *'Lunes 07:30'*\n• *'25/11 14:00'*\n\n_(O podés mandarnos un audio diciendo el día y la hora)_`
+        );
+      }
+
+      case 'ESPERANDO_DIAS_HORA_PERIODICA': {
+        if (!texto || texto.trim().length < 3) {
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            '⚠️ Por favor indicá los días y la hora (ej: *Lunes a Viernes 07:30* o *Viernes, Sábado y Domingo 00:30*).'
+          );
+        }
+
+        const parsedPer = parsearDiasYHoraPeriodica(texto);
+        if ('error' in parsedPer) {
+          return await whatsappService.enviarTexto(cleanFrom, parsedPer.error);
+        }
+
+        sesion.tipoReserva = 'PERIODICA';
+        sesion.diasSemanaReserva = parsedPer.diasNumeros;
+        sesion.diasSemanaTexto = parsedPer.diasTexto;
+        sesion.fechaHoraReserva = parsedPer.fechaInicio;
+        sesion.fechaHoraTexto = parsedPer.resumenTexto;
+        sesion.horaInicioStr = parsedPer.horaStr;
+        sesion.estado = 'ESPERANDO_ORIGEN';
+
+        return await whatsappService.enviarTexto(
+          cleanFrom,
+          `🔁 *Reserva periódica configurada:*\n${parsedPer.resumenTexto}\n\n📍 *¿Dónde te pasamos a buscar?*\nPodés:\n1. 📎 Compartir tu *ubicación GPS* desde el clip de WhatsApp.\n2. ✍️ O escribir la dirección (ej: *Rivadavia 250*).\n3. 🎙️ O mandar un *audio*.`
+        );
       }
 
       case 'ESPERANDO_FECHA_HORA_RESERVA': {
@@ -2200,7 +2408,14 @@ export const whatsappBotService = {
           ? `${sesion.destinoLat},${sesion.destinoLon}`
           : undefined;
 
-      // 1. Guardar en la tabla Reserva (para que aparezca en el tab Reservados de la Central)
+      const esPeriodica = sesion.tipoReserva === 'PERIODICA';
+      const diasSemanaJson =
+        esPeriodica && sesion.diasSemanaReserva && sesion.diasSemanaReserva.length > 0
+          ? JSON.stringify(sesion.diasSemanaReserva)
+          : null;
+
+      // 1. Guardar en la tabla Reserva (para que aparezca en el tab Reservados de la Central
+      //    y el servicio automático dispare cada viaje 15 minutos antes del horario pactado)
       const reserva = await prisma.reserva.create({
         data: {
           clienteNombre,
@@ -2210,49 +2425,28 @@ export const whatsappBotService = {
           destino,
           fechaInicio,
           horaInicio,
-          tipo: 'UNICA',
+          tipo: esPeriodica ? 'PERIODICA' : 'UNICA',
+          diasSemana: diasSemanaJson,
           estado: 'ACTIVA',
-          observaciones: `Reserva programada por WhatsApp Bot para ${fechaTexto}. Est: $${precio.toLocaleString('es-AR')}`,
+          observaciones: `Reserva ${esPeriodica ? 'periódica ' : ''}programada por WhatsApp Bot (${fechaTexto}). Est: $${precio.toLocaleString('es-AR')}`,
           remiseriaId,
           clienteId: clienteExistente?.id || null,
-        },
-      });
-
-      // 2. Registrar también el Viaje programado con la fecha de la reserva
-      const viaje = await prisma.viaje.create({
-        data: {
-          origen,
-          destino,
-          precio,
-          fecha: fechaInicio,
-          estado: 'PENDIENTE',
-          observaciones: `Viaje Reservado por WhatsApp para: ${fechaTexto} (Reserva #${reserva.id.slice(-4).toUpperCase()})`,
-          clienteId: clienteExistente?.id || null,
-          clienteNombre,
-          clienteTelefono: cleanFrom,
-          remiseriaId,
-          origenDetallado,
-          destinoDetallado,
-          trackingToken,
-          codigoPin,
-          metodoPago: 'EFECTIVO',
         },
       });
 
       // Resetear estado de la sesión
       resetSesion(cleanFrom);
 
-      // 3. Notificar en tiempo real por WebSocket a la central del Coordinador
+      // 2. Notificar en tiempo real por WebSocket a la central del Coordinador
       try {
         const { getIO } = await import('../lib/socket');
         const io = getIO();
         io.to(remiseriaId).emit('nueva_reserva_recibida', reserva);
-        io.to(remiseriaId).emit('nuevo_viaje_recibido', viaje);
       } catch (sErr) {
         console.warn('Socket aviso WhatsApp nueva reserva:', sErr);
       }
 
-      // 4. Confirmar al pasajero por WhatsApp (con saludo de cumpleaños si corresponde)
+      // 3. Confirmar al pasajero por WhatsApp (con saludo de cumpleaños si corresponde)
       let prefijoCumpleReserva = '';
       if (esCumpleaniosCliente(clienteExistente)) {
         const claveCumple = obtenerClaveCumpleHoy(cleanFrom);
@@ -2268,17 +2462,16 @@ export const whatsappBotService = {
 
       const confirmacionTexto =
         prefijoCumpleReserva +
-        `📅 *¡Reserva agendada con éxito!*\n\n` +
-        `Tu viaje quedó registrado en nuestra central:\n` +
+        `📅 *¡Reserva ${esPeriodica ? 'periódica ' : ''}agendada con éxito!*\n\n` +
+        `Tu ${esPeriodica ? 'programación semanal' : 'viaje'} quedó registrado en nuestra central:\n` +
         `━━━━━━━━━━━━━━━━━━━\n` +
-        `🗓️ *Fecha y Hora:* *${fechaTexto}*\n` +
+        `🗓️ *${esPeriodica ? 'Días y Hora' : 'Fecha y Hora'}:* *${fechaTexto}*\n` +
         `🟢 *Origen:* ${origen}\n` +
         `🔴 *Destino:* ${destino}\n` +
         `📏 *Distancia:* ~${sesion.distanciaKm || 2.5} km\n` +
         `💵 *Precio estimado:* *$${precio.toLocaleString('es-AR')}*\n` +
-        `🔒 *PIN de seguridad:* *${codigoPin}*\n` +
         `━━━━━━━━━━━━━━━━━━━\n\n` +
-        `La central asignará tu móvil con anticipación y te avisaremos por WhatsApp en cuanto el chofer salga a buscarte.\n\n` +
+        `Nuestro sistema generará tu pedido automáticamente *15 minutos antes* de cada horario y te avisaremos por WhatsApp en cuanto el chofer salga a buscarte.\n\n` +
         `📲 _Descargá nuestra App en_ *${APP_CLIENTES_URL}* _para seguir tus viajes y pedir remís aunque algún día se caiga WhatsApp._`;
 
       await whatsappService.enviarBotones(cleanFrom, confirmacionTexto, [
@@ -2287,7 +2480,7 @@ export const whatsappBotService = {
         { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
       ]);
 
-      return { success: true, reservaId: reserva.id, viajeId: viaje.id };
+      return { success: true, reservaId: reserva.id };
     } catch (err: any) {
       console.error('Error creando reserva desde WhatsApp:', err);
       resetSesion(cleanFrom);

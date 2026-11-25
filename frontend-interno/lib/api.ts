@@ -1516,6 +1516,30 @@ export const coordinadorDashboardService = {
     }
   },
 
+  updateReserva: async (id: string, data: any): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.patch(`/coordinator-dashboard/reservas/${id}`, data);
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al actualizar reserva',
+      };
+    }
+  },
+
+  deleteReserva: async (id: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.delete(`/coordinator-dashboard/reservas/${id}`);
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al eliminar reserva',
+      };
+    }
+  },
+
   // Datos de la Remisería asignada al coordinador
   getMiRemiseria: async (): Promise<ApiResponse<Remiseria>> => {
     try {

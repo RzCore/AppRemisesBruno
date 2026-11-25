@@ -41,6 +41,12 @@ router.get('/geocode', coordinatorDashboardController.geocode);
 // Crear nueva reserva
 router.post('/reservas', coordinatorDashboardController.createReserva);
 
+// Actualizar una reserva existente
+router.patch('/reservas/:id', coordinatorDashboardController.updateReserva);
+
+// Eliminar / cancelar una reserva
+router.delete('/reservas/:id', coordinatorDashboardController.deleteReserva);
+
 // Obtener remisería del coordinador
 router.get('/mi-remiseria', coordinatorDashboardController.getMiRemiseria);
 

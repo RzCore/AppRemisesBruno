@@ -8,6 +8,7 @@ import { validationResult } from 'express-validator';
 import http from 'http';
 import { initSocket } from './lib/socket';
 import { iniciarServicioRecordatorioART } from './services/artReminderService';
+import { iniciarServicioReservasAutomaticas } from './services/reservaSchedulerService';
 
 // Importar rutas
 import authRoutes from './routes/auth';
@@ -35,6 +36,9 @@ initSocket(server);
 
 // Iniciar monitoreo y recordatorio automático de salida para viajes de ART
 iniciarServicioRecordatorioART();
+
+// Iniciar disparador automático de reservas únicas y periódicas
+iniciarServicioReservasAutomaticas();
 
 const PORT = process.env.PORT || 3001;
 
