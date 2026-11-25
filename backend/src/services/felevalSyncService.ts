@@ -2,6 +2,12 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { sendFelevalPasswordAlertEmail } from '../lib/mailer';
+import {
+  calcularDistanciaHaversineKm,
+  DEFAULT_BASE_LAT,
+  DEFAULT_BASE_LON,
+  RADIO_URBANO_BASE_KM
+} from '../lib/pricingUtils';
 
 const FELEVAL_BASE_URL = 'https://app.feleval.com.ar';
 const ALGO = 'aes-256-gcm';
@@ -46,6 +52,153 @@ function stripHtml(html: string): string {
     .replace(/&#39;/gi, "'")
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+async function geocodeNominatimSimple(address: string): Promise<{ lat: number; lon: number } | null> {
+  if (!address || address.length < 4) return null;
+  try {
+    const q = address.toLowerCase().includes('argentina') ? address : `${address}, Argentina`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=${encodeURIComponent(q)}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'RemisesBrunoSync/1.0 (notificaciones@rzcore.dev)' },
+      signal: AbortSignal.timeout(4500)
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as any[];
+    if (Array.isArray(data) && data.length > 0 && data[0].lat && data[0].lon) {
+      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+    }
+  } catch {
+    // fallback silencioso
+  }
+  return null;
+}
+
+async function calcularTramoOsrm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): Promise<{ km: number; minutos: number }> {
+  const lineal = calcularDistanciaHaversineKm(lat1, lon1, lat2, lon2);
+  if (lineal < 0.05) return { km: 0, minutos: 0 };
+
+  try {
+    const url = `http://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      if (data?.routes?.[0]) {
+        const km = Math.round((data.routes[0].distance / 1000) * 10) / 10;
+        const minutos = Math.ceil(data.routes[0].duration / 60);
+        return { km, minutos };
+      }
+    }
+  } catch {
+    // fallback Haversine
+  }
+  const kmEst = Math.round(lineal * 1.2 * 10) / 10;
+  // ~65 km/h promedio en ruta, ~30 km/h en ciudad
+  const vel = kmEst > 12 ? 65 : 30;
+  const minutos = Math.ceil((kmEst / vel) * 60);
+  return { km: kmEst, minutos };
+}
+
+function restarMinutosHora(horaTurno: string, minutosAntes: number): string {
+  const [hStr, mStr] = horaTurno.split(':');
+  const h = parseInt(hStr || '8', 10);
+  const m = parseInt(mStr || '0', 10);
+  let totalMin = h * 60 + m - minutosAntes;
+  if (totalMin < 0) totalMin += 24 * 60;
+  // Redondear hacia abajo a múltiplos de 5 minutos para llegar con margen
+  totalMin = Math.floor(totalMin / 5) * 5;
+  const hh = Math.floor(totalMin / 60) % 24;
+  const mm = totalMin % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+async function calcularLogisticaFeleval(params: {
+  origen: string;
+  destino: string;
+  horaTurno: string;
+  modalidad: string;
+  modoTabla: string;
+  baseLat: number;
+  baseLon: number;
+}): Promise<{
+  esLocal: boolean;
+  cobrarDesdeBase: boolean;
+  distanciaKm: number;
+  horaSalida: string;
+  minutosTotales: number;
+}> {
+  const { origen, destino, horaTurno, modalidad, modoTabla, baseLat, baseLon } = params;
+
+  const textoLocalChivilcoy =
+    /chivilcoy/i.test(origen) && /chivilcoy/i.test(destino);
+
+  const [geoO, geoD] = await Promise.all([
+    geocodeNominatimSimple(origen),
+    geocodeNominatimSimple(destino)
+  ]);
+
+  if (geoO && geoD) {
+    const distBaseOrigenLineal = calcularDistanciaHaversineKm(baseLat, baseLon, geoO.lat, geoO.lon);
+    const distBaseDestinoLineal = calcularDistanciaHaversineKm(baseLat, baseLon, geoD.lat, geoD.lon);
+    const origenFueraDeBase = distBaseOrigenLineal > RADIO_URBANO_BASE_KM;
+    const destinoFueraDeBase = distBaseDestinoLineal > RADIO_URBANO_BASE_KM;
+    const esLocalGeo = !origenFueraDeBase && !destinoFueraDeBase;
+
+    const tramoViaje = await calcularTramoOsrm(geoO.lat, geoO.lon, geoD.lat, geoD.lon);
+
+    if (origenFueraDeBase) {
+      // Móvil sale de la base a buscar al pasajero a otra localidad y lo lleva al destino
+      const tramoBaseOrigen = await calcularTramoOsrm(baseLat, baseLon, geoO.lat, geoO.lon);
+      const kmTotales = Math.round((tramoBaseOrigen.km + tramoViaje.km) * 10) / 10;
+      const minutosAntes = Math.max(30, tramoBaseOrigen.minutos + tramoViaje.minutos + 20);
+      return {
+        esLocal: false,
+        cobrarDesdeBase: true,
+        distanciaKm: kmTotales,
+        horaSalida: restarMinutosHora(horaTurno, minutosAntes),
+        minutosTotales: minutosAntes
+      };
+    }
+
+    if (destinoFueraDeBase || !esLocalGeo) {
+      // Sale de Chivilcoy hacia otra localidad
+      const minutosAntes = Math.max(30, tramoViaje.minutos + 20);
+      return {
+        esLocal: false,
+        cobrarDesdeBase: false,
+        distanciaKm: tramoViaje.km,
+        horaSalida: restarMinutosHora(horaTurno, minutosAntes),
+        minutosTotales: minutosAntes
+      };
+    }
+
+    // Viaje local dentro de Chivilcoy
+    const minutosAntes = Math.max(25, tramoViaje.minutos + 15);
+    return {
+      esLocal: true,
+      cobrarDesdeBase: false,
+      distanciaKm: tramoViaje.km,
+      horaSalida: restarMinutosHora(horaTurno, minutosAntes),
+      minutosTotales: minutosAntes
+    };
+  }
+
+  // Fallback si Nominatim no pudo geocodificar alguna dirección rural
+  const esLocalFallback =
+    textoLocalChivilcoy && (/modulo|m[oó]dulo|local/i.test(modalidad) || modoTabla.toUpperCase() === 'M');
+  const minutosAntes = esLocalFallback ? 30 : 90;
+  return {
+    esLocal: esLocalFallback,
+    cobrarDesdeBase: !/chivilcoy/i.test(origen),
+    distanciaKm: 0,
+    horaSalida: restarMinutosHora(horaTurno, minutosAntes),
+    minutosTotales: minutosAntes
+  };
 }
 
 function parseFechaHoraFeleval(fechaCol: string): { fecha: Date; horaTurno: string; horaSalida: string } {
@@ -151,7 +304,8 @@ export async function sincronizarArtFeleval(
   options?: { enviarAlertaSiempre?: boolean }
 ): Promise<FelevalSyncResult> {
   const art = await prisma.artEmpresa.findUnique({
-    where: { id: artEmpresaId }
+    where: { id: artEmpresaId },
+    include: { remiseria: { select: { latitud: true, longitud: true } } }
   });
 
   if (!art) {
@@ -420,8 +574,20 @@ export async function sincronizarArtFeleval(
           const origen = (detail['Dirección Origen'] || origenTabla || 'A confirmar').trim();
           const destino = (detail['Dirección Destino'] || destinoTabla || 'A confirmar').trim();
 
-          const { fecha, horaTurno, horaSalida } = parseFechaHoraFeleval(fechaTabla);
+          const { fecha, horaTurno } = parseFechaHoraFeleval(fechaTabla);
           const horaTurnoFinal = detail['Hora Turno'] || horaTurno;
+
+          const baseLat = typeof art.remiseria?.latitud === 'number' ? art.remiseria.latitud : DEFAULT_BASE_LAT;
+          const baseLon = typeof art.remiseria?.longitud === 'number' ? art.remiseria.longitud : DEFAULT_BASE_LON;
+          const logistica = await calcularLogisticaFeleval({
+            origen,
+            destino,
+            horaTurno: horaTurnoFinal,
+            modalidad,
+            modoTabla,
+            baseLat,
+            baseLon
+          });
 
           let clienteId: string | null = null;
           const cleanTel = telefono.replace(/\D/g, '');
@@ -473,15 +639,24 @@ export async function sincronizarArtFeleval(
             }
           }
 
-          const esLocal = /modulo|m[oó]dulo|local/i.test(modalidad) || modoTabla.toUpperCase() === 'M';
-          const precioArt = esLocal ? Number(art.precioTramo || 0) : 0;
+          const esLocal = logistica.esLocal;
+          const precioArt = esLocal
+            ? Number(art.precioTramo || 0)
+            : logistica.distanciaKm > 0
+            ? Math.round(logistica.distanciaKm * Number(art.valorKm || 0))
+            : 0;
           const precioChofer =
-            art.pagaChoferTipo === 'PERSONALIZADO' && esLocal
-              ? Number(art.choferPrecioTramo || precioArt)
+            art.pagaChoferTipo === 'PERSONALIZADO'
+              ? esLocal
+                ? Number(art.choferPrecioTramo || precioArt)
+                : logistica.distanciaKm > 0
+                ? Math.round(logistica.distanciaKm * Number(art.choferValorKm || 0))
+                : 0
               : precioArt;
 
           const metaObs = [
             `[FELEVAL #${felevalEventId}]`,
+            esLocal ? '[LOCAL]' : logistica.cobrarDesdeBase ? '[POR KM - DESDE BASE]' : '[POR KM]',
             subArt ? `ART: ${subArt}` : '',
             modalidad ? `Modalidad: ${modalidad}` : '',
             retorno ? `Retorno: ${retorno}` : '',
@@ -502,8 +677,9 @@ export async function sincronizarArtFeleval(
               origen,
               destino,
               fecha,
-              horaSalidaChofer: horaSalida,
+              horaSalidaChofer: logistica.horaSalida,
               horaTurno: horaTurnoFinal,
+              distanciaKmConPasajero: logistica.distanciaKm,
               precio: precioChofer,
               precioArt: precioArt > 0 ? precioArt : null,
               numeroSiniestro: siniestro,
