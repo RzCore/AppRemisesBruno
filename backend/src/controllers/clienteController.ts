@@ -384,6 +384,34 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
         typeof direccionesFrecuentes === 'object'
           ? JSON.stringify(direccionesFrecuentes)
           : direccionesFrecuentes;
+
+      // Si el domicilio principal actual es vacío o un placeholder genérico (ej. "Bragado, Buenos Aires" o "Chivilcoy, Buenos Aires"),
+      // sincronizarlo automáticamente con la dirección "Casa" o la primera dirección frecuente cargada.
+      const dirActual = (updateData.direccion ?? cliente.direccion ?? '').trim().toLowerCase();
+      const esPlaceholder =
+        !dirActual ||
+        dirActual === 'bragado, buenos aires' ||
+        dirActual === 'chivilcoy, buenos aires' ||
+        dirActual === 'sin especificar';
+
+      if (esPlaceholder && direccion === undefined) {
+        try {
+          const lista =
+            typeof direccionesFrecuentes === 'string'
+              ? JSON.parse(direccionesFrecuentes)
+              : direccionesFrecuentes;
+          if (Array.isArray(lista) && lista.length > 0) {
+            const casa =
+              lista.find((d: any) => String(d?.alias || '').toLowerCase() === 'casa' && d?.direccion) ||
+              lista.find((d: any) => d?.direccion);
+            if (casa?.direccion) {
+              updateData.direccion = String(casa.direccion).trim();
+            }
+          }
+        } catch {
+          // ignorar si no es JSON válido
+        }
+      }
     }
 
     // Actualizar campos del cliente (y email de usuario si cambió)

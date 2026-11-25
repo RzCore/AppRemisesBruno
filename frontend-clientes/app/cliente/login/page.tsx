@@ -49,6 +49,7 @@ export default function ClienteLoginPage() {
   const [nuevoApellido, setNuevoApellido] = useState('');
   const [nuevoDni, setNuevoDni] = useState('');
   const [nuevoTelefono, setNuevoTelefono] = useState('');
+  const [nuevaDireccion, setNuevaDireccion] = useState('');
   const [nuevoPin, setNuevoPin] = useState('');
 
   // Temporizador de reenvío de código WhatsApp
@@ -224,6 +225,7 @@ export default function ClienteLoginPage() {
         nombre: cleanNom,
         apellido: cleanApe,
         telefono: cleanT,
+        direccion: nuevaDireccion.trim() || undefined,
         pin: cleanP || undefined
       });
 
@@ -562,6 +564,20 @@ export default function ClienteLoginPage() {
                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Domicilio (Opcional)
+                </label>
+                <input
+                  type="text"
+                  maxLength={150}
+                  value={nuevaDireccion}
+                  onChange={(e) => setNuevaDireccion(e.target.value)}
+                  placeholder="Ej: Av. Soárez 150, Chivilcoy"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
               </div>
 
               <div>

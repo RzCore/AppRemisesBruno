@@ -112,14 +112,21 @@
 /* ==========================================================
    Adaptación global a Modo Oscuro para subpáginas del Dueño
    ========================================================== */
-.dark .duenio-module main .bg-white {
+.dark .duenio-module main .bg-white,
+.dark .duenio-module main .bg-white\/95,
+.dark .duenio-module main .bg-white\/90,
+.dark .duenio-module main .bg-white\/80 {
   background-color: #0f172a;
 }
 
 .dark .duenio-module main .bg-slate-50,
 .dark .duenio-module main .bg-slate-50\/50,
+.dark .duenio-module main .bg-slate-50\/60,
+.dark .duenio-module main .bg-slate-50\/70,
 .dark .duenio-module main .bg-slate-50\/80,
-.dark .duenio-module main .bg-gray-50 {
+.dark .duenio-module main .bg-gray-50,
+.dark .duenio-module main .bg-gray-50\/50,
+.dark .duenio-module main .bg-gray-50\/80 {
   background-color: #1e293b;
 }
 
@@ -133,11 +140,52 @@
   background-color: #334155;
 }
 
+.dark .duenio-module main .hover\:bg-white:hover,
 .dark .duenio-module main .hover\:bg-slate-50:hover,
+.dark .duenio-module main .hover\:bg-slate-50\/50:hover,
+.dark .duenio-module main .hover\:bg-slate-50\/60:hover,
+.dark .duenio-module main .hover\:bg-slate-50\/70:hover,
+.dark .duenio-module main .hover\:bg-slate-50\/80:hover,
 .dark .duenio-module main .hover\:bg-gray-50:hover,
 .dark .duenio-module main .hover\:bg-slate-100:hover,
 .dark .duenio-module main .hover\:bg-gray-100:hover {
   background-color: #1e293b;
+}
+
+.dark .duenio-module main .hover\:bg-slate-200:hover,
+.dark .duenio-module main .hover\:bg-slate-200\/60:hover,
+.dark .duenio-module main .hover\:bg-slate-300:hover {
+  background-color: #334155;
+}
+
+.dark .duenio-module main .hover\:bg-blue-50:hover,
+.dark .duenio-module main .hover\:bg-blue-100:hover,
+.dark .duenio-module main .hover\:bg-primary-100:hover {
+  background-color: rgba(37, 99, 235, 0.28);
+}
+
+.dark .duenio-module main .hover\:bg-emerald-50:hover,
+.dark .duenio-module main .hover\:bg-emerald-50\/70:hover,
+.dark .duenio-module main .hover\:bg-emerald-100:hover {
+  background-color: rgba(16, 185, 129, 0.26);
+}
+
+.dark .duenio-module main .hover\:bg-amber-50:hover,
+.dark .duenio-module main .hover\:bg-amber-100:hover,
+.dark .duenio-module main .hover\:bg-amber-200:hover {
+  background-color: rgba(245, 158, 11, 0.26);
+}
+
+.dark .duenio-module main .hover\:bg-red-50:hover,
+.dark .duenio-module main .hover\:bg-red-100:hover,
+.dark .duenio-module main .hover\:bg-rose-50:hover,
+.dark .duenio-module main .hover\:bg-rose-100:hover {
+  background-color: rgba(239, 68, 68, 0.26);
+}
+
+.dark .duenio-module main .hover\:bg-indigo-100:hover,
+.dark .duenio-module main .hover\:bg-purple-100:hover {
+  background-color: rgba(139, 92, 246, 0.28);
 }
 
 .dark .duenio-module main .text-slate-900,

@@ -1254,7 +1254,7 @@ export const clienteAuthService = {
     }
   },
 
-  registroExpress: async (data: { dni: string; nombre: string; apellido?: string; telefono: string; pin?: string }): Promise<ApiResponse<any>> => {
+  registroExpress: async (data: { dni: string; nombre: string; apellido?: string; telefono: string; pin?: string; direccion?: string }): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/auth/cliente/registro-express', data);
       return handleApiResponse<any>(response);

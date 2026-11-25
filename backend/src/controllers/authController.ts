@@ -1042,7 +1042,7 @@ export const verificarCodigoCliente = async (req: Request, res: Response) => {
  */
 export const registroExpressCliente = async (req: Request, res: Response) => {
   try {
-    const { dni, nombre, apellido, telefono, pin } = req.body;
+    const { dni, nombre, apellido, telefono, pin, direccion } = req.body;
     if (!dni || !nombre || !telefono) {
       return res.status(400).json({ success: false, error: 'DNI, Nombre y Teléfono son requeridos' });
     }
@@ -1051,6 +1051,7 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
     const cleanTel = String(telefono).replace(/\D/g, '').trim();
     let cleanNom = String(nombre).trim();
     let cleanApe = String(apellido || '').trim();
+    const cleanDir = direccion ? String(direccion).trim() : '';
 
     if (!/^\d{7,8}$/.test(cleanDni)) {
       return res.status(400).json({ success: false, error: 'El DNI debe contener únicamente números (7 u 8 dígitos)' });
@@ -1145,7 +1146,7 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
         dni: cleanDni,
         telefono: cleanTel,
         email: dummyEmail,
-        direccion: 'Bragado, Buenos Aires',
+        direccion: cleanDir || 'Chivilcoy, Buenos Aires',
         fechaNacimiento: new Date('1990-01-01'),
         userId: user.id,
         remiseriaId: remiseriaActiva?.id || null,
