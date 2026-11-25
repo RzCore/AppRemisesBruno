@@ -1616,7 +1616,15 @@ export const coordinadorDashboardService = {
     }
   },
 
-  crearLiquidacion: async (payload: { choferId: string; combustible: number; observaciones?: string }): Promise<ApiResponse<any>> => {
+  crearLiquidacion: async (payload: {
+    choferId: string;
+    combustible: number;
+    observaciones?: string;
+    metodoPagoChofer?: 'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS';
+    montoEfectivo?: number;
+    montoTransferencia?: number;
+    quienPagaSaldoAFavor?: 'COORDINADOR' | 'PENDIENTE_DUENIO';
+  }): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/coordinator-dashboard/liquidaciones/crear', payload);
       return handleApiResponse<any>(response);

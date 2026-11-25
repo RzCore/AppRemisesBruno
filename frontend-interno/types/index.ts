@@ -709,6 +709,15 @@ export interface Liquidacion {
   comisionChofer: number;
   comisionAgencia: number;
   gananciaPropietario: number;
+  totalEfectivoViajes?: number;
+  totalTransferenciaViajes?: number;
+  totalCuentaCorrienteViajes?: number;
+  saldoNeto?: number;
+  saldoAFavorChofer?: number;
+  quienPagaSaldoAFavor?: 'COORDINADOR' | 'PENDIENTE_DUENIO' | 'PAGADO_DUENIO' | null;
+  metodoPagoChofer?: 'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS' | null;
+  montoEfectivo?: number;
+  montoTransferencia?: number;
   observaciones?: string;
   createdAt: string;
 }
@@ -728,10 +737,18 @@ export interface LiquidacionPendienteResumen {
     totalRecaudado: number;
     totalEfectivo?: number;
     totalTransferencia?: number;
+    totalCuentaCorriente?: number;
+    totalCortaDistancia?: number;
+    totalLargaDistancia?: number;
+    cantidadCortaDistancia?: number;
+    cantidadLargaDistancia?: number;
     comisionChofer: number;
     comisionAgencia: number;
     combustible: number;
     gananciaPropietario: number;
+    saldoNeto?: number;
+    saldoAFavorChofer?: number;
+    montoARendirChofer?: number;
   };
 }
 

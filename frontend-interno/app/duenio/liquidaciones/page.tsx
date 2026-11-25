@@ -1,25 +1,21 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { coordinadorDashboardService, vehiculoService } from '@/lib/api';
 import {
-  DollarSign,
-  Calendar,
-  Fuel,
   FileText,
   User,
   Clock,
   Search,
-  Shield,
   RefreshCw,
   Car,
   Printer,
+  Download,
   CheckSquare,
   Square,
   CheckCircle,
-  TrendingUp,
   X,
   Banknote,
   CreditCard,
@@ -44,8 +40,9 @@ export default function HistorialLiquidacionesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<'all' | 'propietario' | 'comisionista'>('all');
   const [filterRecepcion, setFilterRecepcion] = useState<'all' | 'pendiente' | 'recibido'>('all');
+  const [generandoPdf, setGenerandoPdf] = useState(false);
 
-  // Modal de Confirmación de Recepción de Dinero
+  // Modal de Confirmación de Recepción de Dinero / Pago de Saldo a Favor
   const [recepcionModalLiq, setRecepcionModalLiq] = useState<any | null>(null);
   const [metodoEntrega, setMetodoEntrega] = useState<'COORDINADOR' | 'CHOFER_MANO' | 'TRANSFERENCIA'>('COORDINADOR');
   const [notasRecepcion, setNotasRecepcion] = useState('');
@@ -90,7 +87,7 @@ export default function HistorialLiquidacionesPage() {
     }
   };
 
-  // Propietarios únicos de vehículos cargados (excluyendo "Chofer" genérico si existiera)
+  // Propietarios únicos de vehículos cargados
   const listaPropietarios = useMemo(() => {
     const map = new Map<string, number>();
     vehiculos.forEach((v) => {
@@ -105,14 +102,12 @@ export default function HistorialLiquidacionesPage() {
     }));
   }, [vehiculos]);
 
-  // Al cambiar listaPropietarios o si no hay seleccionado, auto-seleccionar el primero
   useEffect(() => {
     if (listaPropietarios.length > 0 && !selectedPropietario) {
       setSelectedPropietario(listaPropietarios[0].nombre);
     }
   }, [listaPropietarios, selectedPropietario]);
 
-  // Vehículos del propietario seleccionado
   const vehiculosDelPropietario = useMemo(() => {
     if (!selectedPropietario) return [];
     return vehiculos.filter(
@@ -120,7 +115,6 @@ export default function HistorialLiquidacionesPage() {
     );
   }, [vehiculos, selectedPropietario]);
 
-  // Al cambiar de propietario, seleccionar todos sus vehículos por defecto
   useEffect(() => {
     if (vehiculosDelPropietario.length > 0) {
       setSelectedVehiculoIds(vehiculosDelPropietario.map((v) => v.id));
@@ -129,7 +123,6 @@ export default function HistorialLiquidacionesPage() {
     }
   }, [vehiculosDelPropietario]);
 
-  // Alternar selección de un vehículo
   const toggleVehiculoSelection = (id: string) => {
     setSelectedVehiculoIds((prev) =>
       prev.includes(id) ? prev.filter((vId) => vId !== id) : [...prev, id]
@@ -168,11 +161,17 @@ export default function HistorialLiquidacionesPage() {
     });
   }, [liquidaciones, searchTerm, filterTipo, filterRecepcion]);
 
-  // Totales Tab 1 (Choferes)
-  const totalRecaudadoChoferes = filteredLiquidaciones.reduce((sum, l) => sum + l.totalRecaudado, 0);
-  const totalAgenciaChoferes = filteredLiquidaciones.reduce((sum, l) => sum + l.comisionAgencia, 0);
-  const totalCombustibleChoferes = filteredLiquidaciones.reduce((sum, l) => sum + l.combustible, 0);
-  const totalGananciaPropietarioChoferes = filteredLiquidaciones.reduce((sum, l) => sum + l.gananciaPropietario, 0);
+  // Totales Tab 1 (Choferes) — sin combustible en pantalla del dueño
+  const totalRecaudadoChoferes = filteredLiquidaciones.reduce((sum, l) => sum + (l.totalRecaudado || 0), 0);
+  const totalAgenciaChoferes = filteredLiquidaciones.reduce((sum, l) => sum + (l.comisionAgencia || 0), 0);
+  const totalSaldoAFavorChoferes = filteredLiquidaciones.reduce((sum, l) => sum + (l.saldoAFavorChofer || 0), 0);
+  const totalSaldoAFavorPendienteDuenio = filteredLiquidaciones
+    .filter((l) => l.saldoAFavorChofer > 0 && l.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO')
+    .reduce((sum, l) => sum + (l.saldoAFavorChofer || 0), 0);
+  const totalGananciaPropietarioChoferes = filteredLiquidaciones.reduce(
+    (sum, l) => sum + (l.gananciaPropietario || 0),
+    0
+  );
 
   // Filtrado de liquidaciones para Tab 2 (Propietarios de Autos)
   const liquidacionesPropietario = useMemo(() => {
@@ -186,7 +185,6 @@ export default function HistorialLiquidacionesPage() {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     return liquidaciones.filter((liq) => {
-      // Verificar si la liquidación corresponde a uno de los vehículos seleccionados
       const liqVehiculoId = liq.chofer?.vehiculo?.id;
       const tieneViajeDeVehiculo = liq.viajes?.some((v: any) =>
         selectedVehiculoIds.includes(v.vehiculo?.id)
@@ -197,40 +195,192 @@ export default function HistorialLiquidacionesPage() {
 
       if (!perteneceAlAuto) return false;
 
-      // Filtro de período
       const fechaLiq = new Date(liq.fecha);
-      if (periodoPropietario === 'hoy') {
-        return fechaLiq >= startOfDay;
-      }
-      if (periodoPropietario === 'semana') {
-        return fechaLiq >= startOfWeek;
-      }
-      if (periodoPropietario === 'mes') {
-        return fechaLiq >= startOfMonth;
-      }
-      return true; // 'todos'
+      if (periodoPropietario === 'hoy') return fechaLiq >= startOfDay;
+      if (periodoPropietario === 'semana') return fechaLiq >= startOfWeek;
+      if (periodoPropietario === 'mes') return fechaLiq >= startOfMonth;
+      return true;
     });
   }, [liquidaciones, selectedVehiculoIds, periodoPropietario]);
 
-  // Cálculos financieros de la liquidación al Propietario (20% Agencia, 30% Chofer, 50% Dueño Auto)
+  // Cálculos financieros de la liquidación al Propietario usando los montos reales (15%/20% agencia, 30% chofer, 55%/50% propietario)
   const propFinanzas = useMemo(() => {
-    const totalBruto = liquidacionesPropietario.reduce((sum, l) => sum + l.totalRecaudado, 0);
-    const comisionAgencia = (totalBruto * 20) / 100;
-    const pagoChofer = (totalBruto * 30) / 100;
-    const combustible = liquidacionesPropietario.reduce((sum, l) => sum + (l.combustible || 0), 0);
-    const totalNetoPropietario = (totalBruto * 50) / 100 - combustible;
+    const totalBruto = liquidacionesPropietario.reduce((sum, l) => sum + (l.totalRecaudado || 0), 0);
+    const comisionAgencia = liquidacionesPropietario.reduce((sum, l) => sum + (l.comisionAgencia || 0), 0);
+    const pagoChofer = liquidacionesPropietario.reduce((sum, l) => sum + (l.comisionChofer || 0), 0);
+    const totalNetoPropietario = liquidacionesPropietario.reduce(
+      (sum, l) => sum + (l.gananciaPropietario || 0),
+      0
+    );
 
     return {
       totalBruto,
       comisionAgencia,
       pagoChofer,
-      combustible,
       totalNetoPropietario: Math.max(0, totalNetoPropietario)
     };
   }, [liquidacionesPropietario]);
 
   const handlePrint = () => {
     window.print();
+  };
+
+  // Generación de PDF directo con jsPDF + autoTable (respeta filtros aplicados)
+  const handleDescargarPdfCierres = async () => {
+    if (filteredLiquidaciones.length === 0) {
+      toast.error('No hay cierres para exportar con los filtros actuales.');
+      return;
+    }
+
+    try {
+      setGenerandoPdf(true);
+      const { jsPDF } = await import('jspdf');
+      const autoTableModule = await import('jspdf-autotable');
+      const autoTable = autoTableModule.default;
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const fechaHoy = new Date().toLocaleDateString('es-AR');
+
+      // Encabezado
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('REMISES BRUNO — REPORTE DE CIERRES DE CAJA', 14, 16);
+
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      const filtroTipoLabel =
+        filterTipo === 'all' ? 'Todos' : filterTipo === 'propietario' ? 'Auto Propio' : 'Auto Asignado';
+      const filtroRecLabel =
+        filterRecepcion === 'all' ? 'Todos' : filterRecepcion === 'recibido' ? 'Recibidos' : 'Pendientes';
+      doc.text(
+        `Fecha de emisión: ${fechaHoy}  |  Registros: ${filteredLiquidaciones.length}  |  Condición: ${filtroTipoLabel}  |  Estado: ${filtroRecLabel}${
+          searchTerm ? `  |  Búsqueda: "${searchTerm}"` : ''
+        }`,
+        14,
+        22
+      );
+
+      // Totales de viajes y rendiciones por medio de pago
+      const totViajesEfec = filteredLiquidaciones.reduce((s, l) => s + (l.totalEfectivoViajes || 0), 0);
+      const totViajesTransf = filteredLiquidaciones.reduce((s, l) => s + (l.totalTransferenciaViajes || 0), 0);
+      const totViajesCC = filteredLiquidaciones.reduce((s, l) => s + (l.totalCuentaCorrienteViajes || 0), 0);
+      const totCobradoEfec = filteredLiquidaciones
+        .filter((l) => (l.saldoNeto ?? 0) > 0)
+        .reduce((s, l) => s + (l.montoEfectivo || 0), 0);
+      const totCobradoTransf = filteredLiquidaciones
+        .filter((l) => (l.saldoNeto ?? 0) > 0)
+        .reduce((s, l) => s + (l.montoTransferencia || 0), 0);
+
+      const fmt = (n: number) => `$${(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+
+      // Resumen Ejecutivo
+      autoTable(doc, {
+        startY: 26,
+        head: [[
+          'Total Recaudado',
+          'Comisión Agencia',
+          'Viajes Efectivo',
+          'Viajes Transf.',
+          'Viajes Cta. Cte.',
+          'Cobrado Efec.',
+          'Cobrado Transf.',
+          'Saldos a Favor'
+        ]],
+        body: [[
+          fmt(totalRecaudadoChoferes),
+          fmt(totalAgenciaChoferes),
+          fmt(totViajesEfec),
+          fmt(totViajesTransf),
+          fmt(totViajesCC),
+          fmt(totCobradoEfec),
+          fmt(totCobradoTransf),
+          fmt(totalSaldoAFavorChoferes)
+        ]],
+        theme: 'grid',
+        headStyles: { fillColor: [15, 23, 42], fontSize: 8, halign: 'center' },
+        bodyStyles: { fontSize: 8, fontStyle: 'bold', halign: 'right' }
+      });
+
+      const formatPagoPdf = (liq: any) => {
+        if ((liq.saldoAFavorChofer || 0) > 0) {
+          const estado =
+            liq.quienPagaSaldoAFavor === 'COORDINADOR'
+              ? 'Pagó Coord.'
+              : liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO'
+              ? 'Pagó Dueño'
+              : 'Pend. Dueño';
+          return `A favor ${fmt(liq.saldoAFavorChofer)} (${estado})`;
+        }
+        if (liq.metodoPagoChofer === 'AMBOS') {
+          return `Ambos (Ef: ${fmt(liq.montoEfectivo)} / Tr: ${fmt(liq.montoTransferencia)})`;
+        }
+        if (liq.metodoPagoChofer === 'TRANSFERENCIA') {
+          return `Transf. ${fmt(liq.montoTransferencia || liq.saldoNeto || 0)}`;
+        }
+        if (liq.metodoPagoChofer === 'EFECTIVO') {
+          return `Efectivo ${fmt(liq.montoEfectivo || liq.saldoNeto || 0)}`;
+        }
+        return '—';
+      };
+
+      const rows = filteredLiquidaciones.map((liq) => {
+        const operador =
+          liq.coordinador?.coordinador?.nombre ||
+          liq.coordinador?.duenio?.nombre ||
+          liq.coordinador?.email ||
+          'N/A';
+        const fechaStr = `${new Date(liq.fecha).toLocaleDateString('es-AR')} ${new Date(liq.fecha).toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit'
+        })}`;
+        const viajesDesglose = `Ef: ${fmt(liq.totalEfectivoViajes || 0)} | Tr: ${fmt(
+          liq.totalTransferenciaViajes || 0
+        )} | CC: ${fmt(liq.totalCuentaCorrienteViajes || 0)}`;
+
+        return [
+          fechaStr,
+          `${liq.chofer?.nombre || ''} ${liq.chofer?.apellido || ''}`.trim(),
+          operador,
+          fmt(liq.totalRecaudado),
+          fmt(liq.comisionAgencia),
+          viajesDesglose,
+          formatPagoPdf(liq),
+          liq.dineroRecibido ? getMetodoEntregaLabel(liq.metodoEntregaDuenio) : 'Pendiente'
+        ];
+      });
+
+      const finalY = (doc as any).lastAutoTable?.finalY || 44;
+      autoTable(doc, {
+        startY: finalY + 5,
+        head: [[
+          'Fecha / Hora',
+          'Chofer',
+          'Operador',
+          'Recaudado',
+          'Agencia',
+          'Viajes (Ef / Tr / CC)',
+          'Rendición / Saldo a Favor',
+          'Control Dueño'
+        ]],
+        body: rows,
+        theme: 'striped',
+        headStyles: { fillColor: [30, 41, 59], fontSize: 7.5 },
+        bodyStyles: { fontSize: 7.5 },
+        columnStyles: {
+          3: { halign: 'right' },
+          4: { halign: 'right' }
+        }
+      });
+
+      const fileDate = new Date().toISOString().slice(0, 10);
+      doc.save(`cierre_cajas_${fileDate}.pdf`);
+      toast.success('PDF descargado correctamente');
+    } catch (error) {
+      console.error('Error generando PDF:', error);
+      toast.error('Error al generar el PDF');
+    } finally {
+      setGenerandoPdf(false);
+    }
   };
 
   const openRecepcionModal = (liq: any) => {
@@ -249,7 +399,7 @@ export default function HistorialLiquidacionesPage() {
         notasRecepcion: recibido ? notasRecepcion : undefined
       });
       if (res.success) {
-        toast.success(recibido ? 'Recepción de dinero confirmada' : 'Liquidación marcada como pendiente');
+        toast.success(recibido ? 'Operación confirmada' : 'Liquidación marcada como pendiente');
         setLiquidaciones((prev) =>
           prev.map((item) =>
             item.id === recepcionModalLiq.id
@@ -258,7 +408,11 @@ export default function HistorialLiquidacionesPage() {
                   dineroRecibido: recibido,
                   metodoEntregaDuenio: recibido ? metodoEntrega : null,
                   fechaRecepcionDuenio: recibido ? new Date().toISOString() : null,
-                  notasRecepcion: recibido ? (notasRecepcion.trim() || null) : null
+                  notasRecepcion: recibido ? notasRecepcion.trim() || null : null,
+                  quienPagaSaldoAFavor:
+                    res.data?.quienPagaSaldoAFavor !== undefined
+                      ? res.data.quienPagaSaldoAFavor
+                      : item.quienPagaSaldoAFavor
                 }
               : item
           )
@@ -285,6 +439,60 @@ export default function HistorialLiquidacionesPage() {
       default:
         return 'Recibido';
     }
+  };
+
+  const renderPagoBadge = (liq: any) => {
+    if ((liq.saldoAFavorChofer || 0) > 0) {
+      const estadoLabel =
+        liq.quienPagaSaldoAFavor === 'COORDINADOR'
+          ? 'Pagó Coordinador'
+          : liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO'
+          ? 'Pagado por Dueño'
+          : 'Pendiente Dueño';
+      const badgeColor =
+        liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
+          ? 'bg-amber-100 text-amber-800 border-amber-200'
+          : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className={`inline-flex w-fit px-2 py-0.5 rounded-md border text-[10px] font-bold ${badgeColor}`}>
+            A favor: ${liq.saldoAFavorChofer.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+          </span>
+          <span className="text-[10px] text-slate-500 font-medium">{estadoLabel}</span>
+        </div>
+      );
+    }
+
+    if (liq.metodoPagoChofer === 'AMBOS') {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="inline-flex w-fit px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+            Ambos
+          </span>
+          <span className="text-[10px] text-slate-500">
+            Ef: ${(liq.montoEfectivo || 0).toLocaleString('es-AR')} • Tr: ${(liq.montoTransferencia || 0).toLocaleString('es-AR')}
+          </span>
+        </div>
+      );
+    }
+
+    if (liq.metodoPagoChofer === 'TRANSFERENCIA') {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
+          Transferencia ${(liq.montoTransferencia || liq.saldoNeto || 0).toLocaleString('es-AR')}
+        </span>
+      );
+    }
+
+    if (liq.metodoPagoChofer === 'EFECTIVO') {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+          Efectivo ${(liq.montoEfectivo || liq.saldoNeto || 0).toLocaleString('es-AR')}
+        </span>
+      );
+    }
+
+    return <span className="text-slate-400 text-[11px]">—</span>;
   };
 
   if (!user) return null;
@@ -314,7 +522,7 @@ export default function HistorialLiquidacionesPage() {
         </button>
       </div>
 
-      {/* Selector de Pestañas (Segmented Switcher estilo Mobile App) */}
+      {/* Selector de Pestañas */}
       <div className="bg-slate-200/70 p-1.5 rounded-2xl flex max-w-xl mx-auto shadow-inner print:hidden">
         <button
           onClick={() => setActiveTab('choferes')}
@@ -345,7 +553,7 @@ export default function HistorialLiquidacionesPage() {
       {/* ========================================================= */}
       {activeTab === 'choferes' && (
         <div className="space-y-6 animate-in fade-in duration-200 print:hidden">
-          {/* Tarjetas Informativas Choferes */}
+          {/* Tarjetas Informativas Choferes (sin Combustible) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
@@ -359,22 +567,24 @@ export default function HistorialLiquidacionesPage() {
 
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
               <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
-                Comisión Agencia (20%)
+                Comisión Agencia (15%/20%)
               </span>
               <span className="text-xl sm:text-2xl font-black text-emerald-700 block mt-1">
                 ${totalAgenciaChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-emerald-600 mt-1 block">Ingreso neto base</span>
+              <span className="text-[10px] text-emerald-600 mt-1 block">20% local • 15% ≥20km</span>
             </div>
 
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
-              <span className="text-[11px] font-semibold text-orange-700 uppercase tracking-wider block">
-                Combustible
+              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block">
+                Saldos a Favor Choferes
               </span>
-              <span className="text-xl sm:text-2xl font-black text-orange-800 block mt-1">
-                ${totalCombustibleChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              <span className="text-xl sm:text-2xl font-black text-amber-800 block mt-1">
+                ${totalSaldoAFavorChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-orange-600 mt-1 block">Tickets deducidos</span>
+              <span className="text-[10px] text-amber-600 mt-1 block">
+                Pend. Dueño: ${totalSaldoAFavorPendienteDuenio.toLocaleString('es-AR')}
+              </span>
             </div>
 
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
@@ -388,9 +598,9 @@ export default function HistorialLiquidacionesPage() {
             </div>
           </div>
 
-          {/* Buscador y Filtros */}
+          {/* Buscador, Filtros y Botón PDF */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row gap-3">
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
               <div className="relative max-w-md flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
@@ -419,6 +629,15 @@ export default function HistorialLiquidacionesPage() {
                 <option value="pendiente">Pendiente de recibir</option>
                 <option value="recibido">Dinero recibido</option>
               </select>
+              <button
+                type="button"
+                onClick={handleDescargarPdfCierres}
+                disabled={generandoPdf || filteredLiquidaciones.length === 0}
+                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs shadow-xs active:scale-95 transition-all shrink-0"
+              >
+                <Download className="w-4 h-4" />
+                {generandoPdf ? 'Generando...' : 'Descargar PDF'}
+              </button>
             </div>
 
             {loading ? (
@@ -465,7 +684,7 @@ export default function HistorialLiquidacionesPage() {
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
                             }`}
                           >
-                            {liq.chofer?.esPropietario ? 'Auto Propio (80%)' : 'Auto Agencia (30%)'}
+                            {liq.chofer?.esPropietario ? 'Auto Propio' : 'Auto Agencia'}
                           </span>
                         </div>
 
@@ -477,16 +696,14 @@ export default function HistorialLiquidacionesPage() {
                             </span>
                           </div>
                           <div>
-                            <span className="text-[10px] text-emerald-600 font-medium block">Agencia (20%)</span>
+                            <span className="text-[10px] text-emerald-600 font-medium block">Agencia</span>
                             <span className="text-sm font-black text-emerald-700 block">
                               ${liq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
                           <div className="pt-1 border-t border-slate-200/50">
-                            <span className="text-[10px] text-slate-400 block">Combustible</span>
-                            <span className="font-semibold text-orange-700">
-                              ${liq.combustible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                            </span>
+                            <span className="text-[10px] text-slate-400 block">Rendición / Pago</span>
+                            <div className="mt-0.5">{renderPagoBadge(liq)}</div>
                           </div>
                           <div className="pt-1 border-t border-slate-200/50">
                             <span className="text-[10px] text-slate-400 block">Ganancia Auto</span>
@@ -498,26 +715,25 @@ export default function HistorialLiquidacionesPage() {
 
                         <div className="flex items-center justify-between text-[11px] text-slate-400">
                           <span>
-                            Cobró: <strong className="text-slate-600 font-medium">{creadorNombre}</strong>
+                            Operador: <strong className="text-slate-600 font-medium">{creadorNombre}</strong>
                           </span>
                           {liq.observaciones && (
-                            <span className="truncate max-w-[140px] italic">"{liq.observaciones}"</span>
+                            <span className="truncate max-w-[140px] italic">&quot;{liq.observaciones}&quot;</span>
                           )}
                         </div>
 
-                        {/* Estado de Recepción por el Dueño */}
                         <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                           {liq.dineroRecibido ? (
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                Recibido • {getMetodoEntregaLabel(liq.metodoEntregaDuenio)}
-                              </span>
-                            </div>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              {liq.saldoAFavorChofer > 0 ? 'Pagado' : 'Recibido'} • {getMetodoEntregaLabel(liq.metodoEntregaDuenio)}
+                            </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold">
                               <Clock className="w-3.5 h-3.5" />
-                              Pendiente de entrega
+                              {liq.saldoAFavorChofer > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
+                                ? 'Pendiente de pago'
+                                : 'Pendiente de entrega'}
                             </span>
                           )}
                           <button
@@ -529,7 +745,11 @@ export default function HistorialLiquidacionesPage() {
                                 : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
                             }`}
                           >
-                            {liq.dineroRecibido ? 'Editar' : 'Marcar Recibido'}
+                            {liq.dineroRecibido
+                              ? 'Editar'
+                              : liq.saldoAFavorChofer > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
+                              ? 'Marcar Pagado'
+                              : 'Marcar Recibido'}
                           </button>
                         </div>
                       </div>
@@ -537,37 +757,37 @@ export default function HistorialLiquidacionesPage() {
                   })}
                 </div>
 
-                {/* VISTA ESCRITORIO (TABLA) */}
+                {/* VISTA ESCRITORIO (TABLA — sin columna de Combustible) */}
                 <div className="hidden md:block overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-200 text-xs">
                     <thead className="bg-slate-50/80">
                       <tr>
-                        <th className="px-5 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="px-4 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
                           Fecha / Hora
                         </th>
-                        <th className="px-5 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="px-4 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
                           Chofer
                         </th>
-                        <th className="px-5 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="px-4 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
                           Operador
                         </th>
-                        <th className="px-5 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="px-4 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
                           Recaudado
                         </th>
-                        <th className="px-5 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
-                          Agencia (20%)
+                        <th className="px-4 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
+                          Agencia
                         </th>
-                        <th className="px-5 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
-                          Combustible
+                        <th className="px-4 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                          Rendición / Pago
                         </th>
-                        <th className="px-5 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="px-4 py-3.5 text-right font-semibold text-slate-500 uppercase tracking-wider">
                           Ganancia Auto
                         </th>
-                        <th className="px-5 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="px-4 py-3.5 text-left font-semibold text-slate-500 uppercase tracking-wider">
                           Notas
                         </th>
-                        <th className="px-5 py-3.5 text-center font-semibold text-slate-500 uppercase tracking-wider">
-                          Recepción Dueño
+                        <th className="px-4 py-3.5 text-center font-semibold text-slate-500 uppercase tracking-wider">
+                          Control Dueño
                         </th>
                       </tr>
                     </thead>
@@ -580,7 +800,7 @@ export default function HistorialLiquidacionesPage() {
                           'N/A';
                         return (
                           <tr key={liq.id} className="hover:bg-slate-50/50 transition-colors text-slate-700">
-                            <td className="px-5 py-3.5 whitespace-nowrap">
+                            <td className="px-4 py-3.5 whitespace-nowrap">
                               <span className="font-semibold text-slate-900 block">
                                 {new Date(liq.fecha).toLocaleDateString('es-AR')}
                               </span>
@@ -592,7 +812,7 @@ export default function HistorialLiquidacionesPage() {
                                 hs
                               </span>
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap">
+                            <td className="px-4 py-3.5 whitespace-nowrap">
                               <div className="font-bold text-slate-900">
                                 {liq.chofer?.nombre} {liq.chofer?.apellido}
                               </div>
@@ -603,29 +823,37 @@ export default function HistorialLiquidacionesPage() {
                                     : 'bg-blue-50 text-blue-700 border border-blue-200'
                                 }`}
                               >
-                                {liq.chofer?.esPropietario ? 'Auto Propio (80%)' : 'Auto Agencia (30%)'}
+                                {liq.chofer?.esPropietario ? 'Auto Propio' : 'Auto Agencia'}
                               </span>
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap">
+                            <td className="px-4 py-3.5 whitespace-nowrap">
                               <span className="font-medium text-slate-800 block">{creadorNombre}</span>
                               <span className="text-[10px] text-slate-400">{liq.coordinador?.email}</span>
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap text-right font-black text-slate-900">
-                              ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                              <span className="font-black text-slate-900 block">
+                                ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                              </span>
+                              {((liq.totalTransferenciaViajes || 0) > 0 || (liq.totalCuentaCorrienteViajes || 0) > 0) && (
+                                <span className="text-[10px] text-slate-400 block">
+                                  {(liq.totalTransferenciaViajes || 0) > 0 ? `Tr: $${liq.totalTransferenciaViajes.toLocaleString('es-AR')} ` : ''}
+                                  {(liq.totalCuentaCorrienteViajes || 0) > 0 ? `CC: $${liq.totalCuentaCorrienteViajes.toLocaleString('es-AR')}` : ''}
+                                </span>
+                              )}
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap text-right font-bold text-emerald-700 bg-emerald-50/20">
+                            <td className="px-4 py-3.5 whitespace-nowrap text-right font-bold text-emerald-700 bg-emerald-50/20">
                               ${liq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap text-right font-medium text-orange-700">
-                              ${liq.combustible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            <td className="px-4 py-3.5 whitespace-nowrap">
+                              {renderPagoBadge(liq)}
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap text-right font-bold text-purple-700">
+                            <td className="px-4 py-3.5 whitespace-nowrap text-right font-bold text-purple-700">
                               ${liq.gananciaPropietario.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                             </td>
-                            <td className="px-5 py-3.5 text-[11px] text-slate-500 max-w-[180px] truncate">
+                            <td className="px-4 py-3.5 text-[11px] text-slate-500 max-w-[160px] truncate">
                               {liq.observaciones || <span className="text-slate-300 italic">-</span>}
                             </td>
-                            <td className="px-5 py-3.5 whitespace-nowrap text-center">
+                            <td className="px-4 py-3.5 whitespace-nowrap text-center">
                               {liq.dineroRecibido ? (
                                 <div className="inline-flex items-center gap-1.5">
                                   <span
@@ -638,7 +866,7 @@ export default function HistorialLiquidacionesPage() {
                                   <button
                                     type="button"
                                     onClick={() => openRecepcionModal(liq)}
-                                    title="Editar recepción"
+                                    title="Editar"
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
                                   >
                                     <Edit2 className="w-3.5 h-3.5" />
@@ -651,7 +879,9 @@ export default function HistorialLiquidacionesPage() {
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-xs active:scale-95 transition-all"
                                 >
                                   <CheckCircle className="w-3.5 h-3.5" />
-                                  Marcar Recibido
+                                  {liq.saldoAFavorChofer > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
+                                    ? 'Marcar Pagado'
+                                    : 'Marcar Recibido'}
                                 </button>
                               )}
                             </td>
@@ -672,7 +902,6 @@ export default function HistorialLiquidacionesPage() {
       {/* ========================================================= */}
       {activeTab === 'propietarios' && (
         <div className="space-y-6 animate-in fade-in duration-200 print:hidden">
-          {/* Panel de Configuración de la Liquidación */}
           <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-100 shadow-sm space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
               <div>
@@ -681,11 +910,10 @@ export default function HistorialLiquidacionesPage() {
                   Liquidación por Propietario de Flota
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Seleccioná al titular y marcá los vehículos que querés incluir para liquidar el 50% de ganancia.
+                  Seleccioná al titular y marcá los vehículos que querés incluir para liquidar su ganancia (50% local / 55% larga distancia).
                 </p>
               </div>
 
-              {/* Botón Imprimir / PDF */}
               <button
                 onClick={() => setShowPdfModal(true)}
                 disabled={liquidacionesPropietario.length === 0}
@@ -762,7 +990,7 @@ export default function HistorialLiquidacionesPage() {
               </div>
             </div>
 
-            {/* Selector de Vehículos del Propietario con Checkboxes */}
+            {/* Selector de Vehículos del Propietario */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -835,8 +1063,8 @@ export default function HistorialLiquidacionesPage() {
             </div>
           </div>
 
-          {/* TARJETAS DE LIQUIDACIÓN FINANCIERA (Desglose 20 / 30 / 50) */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+          {/* TARJETAS DE LIQUIDACIÓN FINANCIERA (sin Combustible) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-xs">
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
                 Total Bruto (100%)
@@ -849,7 +1077,7 @@ export default function HistorialLiquidacionesPage() {
 
             <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-xs">
               <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
-                Remisería (20%)
+                Remisería (15%/20%)
               </span>
               <span className="text-xl font-black text-emerald-700 block mt-1">
                 ${propFinanzas.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -867,19 +1095,9 @@ export default function HistorialLiquidacionesPage() {
               <span className="text-[10px] text-blue-600 block mt-0.5">Recaudación diaria</span>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-xs">
-              <span className="text-[11px] font-semibold text-orange-700 uppercase tracking-wider block">
-                Combustible
-              </span>
-              <span className="text-xl font-black text-orange-800 block mt-1">
-                ${propFinanzas.combustible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-              </span>
-              <span className="text-[10px] text-orange-600 block mt-0.5">Deducciones</span>
-            </div>
-
-            <div className="col-span-2 lg:col-span-1 bg-gradient-to-br from-indigo-900 to-slate-900 text-white p-4 rounded-2xl shadow-md border border-indigo-800">
+            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white p-4 rounded-2xl shadow-md border border-indigo-800">
               <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider block">
-                Neto Dueño (50%)
+                Neto Dueño (50%/55%)
               </span>
               <span className="text-2xl font-black text-white block mt-1">
                 ${propFinanzas.totalNetoPropietario.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -888,7 +1106,7 @@ export default function HistorialLiquidacionesPage() {
             </div>
           </div>
 
-          {/* Listado de Liquidaciones / Viajes de los autos seleccionados */}
+          {/* Listado de Liquidaciones de los autos seleccionados (sin Combustible) */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
               <div>
@@ -917,20 +1135,18 @@ export default function HistorialLiquidacionesPage() {
                       <th className="px-5 py-3 text-left font-semibold text-slate-500 uppercase">Vehículo</th>
                       <th className="px-5 py-3 text-left font-semibold text-slate-500 uppercase">Chofer</th>
                       <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Bruto (100%)</th>
-                      <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Agencia (20%)</th>
+                      <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Agencia</th>
                       <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Chofer (30%)</th>
-                      <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Combustible</th>
-                      <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Neto Dueño (50%)</th>
+                      <th className="px-5 py-3 text-right font-semibold text-slate-500 uppercase">Neto Dueño</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-slate-100">
                     {liquidacionesPropietario.map((liq) => {
                       const veh = liq.chofer?.vehiculo || liq.viajes?.[0]?.vehiculo;
                       const bruto = liq.totalRecaudado || 0;
-                      const ag = (bruto * 20) / 100;
-                      const ch = (bruto * 30) / 100;
-                      const comb = liq.combustible || 0;
-                      const neto = (bruto * 50) / 100 - comb;
+                      const ag = liq.comisionAgencia || 0;
+                      const ch = liq.comisionChofer || 0;
+                      const neto = liq.gananciaPropietario || 0;
 
                       return (
                         <tr key={liq.id} className="hover:bg-slate-50/50 text-slate-700">
@@ -966,9 +1182,6 @@ export default function HistorialLiquidacionesPage() {
                           <td className="px-5 py-3 whitespace-nowrap text-right text-blue-700 font-semibold">
                             ${ch.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                           </td>
-                          <td className="px-5 py-3 whitespace-nowrap text-right text-orange-700 font-medium">
-                            ${comb.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </td>
                           <td className="px-5 py-3 whitespace-nowrap text-right font-black text-indigo-700 bg-indigo-50/30">
                             ${neto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                           </td>
@@ -984,12 +1197,11 @@ export default function HistorialLiquidacionesPage() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL / VISTA OFICIAL MEMBRETADA PARA PDF / IMPRESIÓN */}
+      {/* MODAL / VISTA OFICIAL MEMBRETADA PARA PROPIETARIOS */}
       {/* ========================================================= */}
       {showPdfModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 overflow-y-auto flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white print:static">
           <div className="relative bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden print:border-none print:shadow-none print:max-w-none">
-            {/* Barra de Controles superior del modal (Oculta al Imprimir) */}
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between print:hidden">
               <div className="flex items-center gap-2">
                 <Printer className="w-5 h-5 text-primary-400" />
@@ -1012,9 +1224,7 @@ export default function HistorialLiquidacionesPage() {
               </div>
             </div>
 
-            {/* CUERPO OFICIAL MEMBRETADO (Optimizadísimo para Hoja A4) */}
             <div className="p-8 sm:p-12 space-y-8 bg-white text-slate-900 print:p-8">
-              {/* Membrete Remises Bruno */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b-2 border-slate-900 gap-4">
                 <div>
                   <h1 className="text-2xl sm:text-3xl font-black text-slate-900 uppercase tracking-tight">
@@ -1049,7 +1259,6 @@ export default function HistorialLiquidacionesPage() {
                 </div>
               </div>
 
-              {/* Ficha del Propietario y Vehículos Liquidados */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                 <div>
                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
@@ -1081,12 +1290,11 @@ export default function HistorialLiquidacionesPage() {
                 </div>
               </div>
 
-              {/* CUADRO FINANCIERO RESUMEN (20% Remisería - 30% Chofer - 50% Propietario) */}
               <div>
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                   Esquema de Distribución y Liquidación
                 </h4>
-                <div className="grid grid-cols-4 gap-2 text-center p-3 rounded-xl border border-slate-200 bg-white">
+                <div className="grid grid-cols-3 gap-2 text-center p-3 rounded-xl border border-slate-200 bg-white">
                   <div className="p-2 border-r border-slate-100">
                     <span className="text-[10px] text-slate-400 block font-semibold">Bruto Total</span>
                     <span className="text-sm font-bold text-slate-900 block mt-0.5">
@@ -1099,29 +1307,21 @@ export default function HistorialLiquidacionesPage() {
                     <span className="text-sm font-bold text-emerald-700 block mt-0.5">
                       -${propFinanzas.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                     </span>
-                    <span className="text-[9px] text-emerald-600 font-medium">20% Remisería</span>
+                    <span className="text-[9px] text-emerald-600 font-medium">20% local / 15% ≥20km</span>
                   </div>
-                  <div className="p-2 border-r border-slate-100">
+                  <div className="p-2">
                     <span className="text-[10px] text-blue-700 block font-semibold">Paga Choferes</span>
                     <span className="text-sm font-bold text-blue-700 block mt-0.5">
                       -${propFinanzas.pagoChofer.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                     </span>
                     <span className="text-[9px] text-blue-600 font-medium">30% Honorarios</span>
                   </div>
-                  <div className="p-2">
-                    <span className="text-[10px] text-orange-700 block font-semibold">Combustible</span>
-                    <span className="text-sm font-bold text-orange-700 block mt-0.5">
-                      -${propFinanzas.combustible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                    </span>
-                    <span className="text-[9px] text-orange-600 font-medium">Deducciones</span>
-                  </div>
                 </div>
 
-                {/* BANNER TOTAL A COBRAR */}
                 <div className="mt-3 p-4 rounded-xl bg-slate-900 text-white flex items-center justify-between">
                   <div>
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                      Total Neto a Percibir por el Propietario (50%)
+                      Total Neto a Percibir por el Propietario (50% / 55%)
                     </span>
                     <span className="text-xs text-slate-300">
                       Correspondiente a los {selectedVehiculoIds.length} vehículos seleccionados
@@ -1133,7 +1333,6 @@ export default function HistorialLiquidacionesPage() {
                 </div>
               </div>
 
-              {/* Tabla Detallada para el Informe */}
               <div>
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                   Detalle de Jornadas y Cierres Computados
@@ -1144,19 +1343,19 @@ export default function HistorialLiquidacionesPage() {
                       <th className="p-2.5">Fecha</th>
                       <th className="p-2.5">Vehículo</th>
                       <th className="p-2.5">Chofer</th>
-                      <th className="p-2.5 text-right">Bruto (100%)</th>
-                      <th className="p-2.5 text-right">Agencia (20%)</th>
-                      <th className="p-2.5 text-right">Chofer (30%)</th>
-                      <th className="p-2.5 text-right">Neto Dueño (50%)</th>
+                      <th className="p-2.5 text-right">Bruto</th>
+                      <th className="p-2.5 text-right">Agencia</th>
+                      <th className="p-2.5 text-right">Chofer</th>
+                      <th className="p-2.5 text-right">Neto Dueño</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[11px]">
                     {liquidacionesPropietario.map((liq) => {
                       const veh = liq.chofer?.vehiculo || liq.viajes?.[0]?.vehiculo;
                       const bruto = liq.totalRecaudado || 0;
-                      const ag = (bruto * 20) / 100;
-                      const ch = (bruto * 30) / 100;
-                      const neto = (bruto * 50) / 100 - (liq.combustible || 0);
+                      const ag = liq.comisionAgencia || 0;
+                      const ch = liq.comisionChofer || 0;
+                      const neto = liq.gananciaPropietario || 0;
 
                       return (
                         <tr key={liq.id}>
@@ -1188,7 +1387,6 @@ export default function HistorialLiquidacionesPage() {
                 </table>
               </div>
 
-              {/* Sección de Firmas de Conformidad */}
               <div className="pt-12 grid grid-cols-2 gap-12 text-center text-xs text-slate-600">
                 <div className="border-t border-slate-400 pt-2">
                   <p className="font-bold text-slate-900">Firma del Propietario</p>
@@ -1204,7 +1402,7 @@ export default function HistorialLiquidacionesPage() {
         </div>
       )}
 
-      {/* MODAL PARA CONFIRMAR RECEPCIÓN DE DINERO POR EL DUEÑO */}
+      {/* MODAL PARA CONFIRMAR RECEPCIÓN DE DINERO / PAGO SALDO A FAVOR */}
       {recepcionModalLiq && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in print:hidden">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
@@ -1214,7 +1412,13 @@ export default function HistorialLiquidacionesPage() {
                   Control de Caja
                 </span>
                 <h3 className="text-lg font-bold text-slate-900 mt-1">
-                  {recepcionModalLiq.dineroRecibido ? 'Editar Recepción de Dinero' : 'Confirmar Dinero Recibido'}
+                  {recepcionModalLiq.saldoAFavorChofer > 0 && recepcionModalLiq.quienPagaSaldoAFavor !== 'COORDINADOR'
+                    ? recepcionModalLiq.dineroRecibido
+                      ? 'Editar Pago de Saldo a Favor'
+                      : 'Confirmar Pago al Chofer'
+                    : recepcionModalLiq.dineroRecibido
+                    ? 'Editar Recepción de Dinero'
+                    : 'Confirmar Dinero Recibido'}
                 </h3>
               </div>
               <button
@@ -1227,28 +1431,35 @@ export default function HistorialLiquidacionesPage() {
             </div>
 
             <div className="p-5 sm:p-6 space-y-4">
-              {/* Resumen de la liquidación */}
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between text-xs">
                 <div>
                   <p className="font-bold text-slate-900 text-sm">
                     {recepcionModalLiq.chofer?.nombre} {recepcionModalLiq.chofer?.apellido}
                   </p>
                   <p className="text-slate-500 mt-0.5">
-                    {new Date(recepcionModalLiq.fecha).toLocaleDateString('es-AR')} • Comisión Agencia: ${recepcionModalLiq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    {new Date(recepcionModalLiq.fecha).toLocaleDateString('es-AR')} • Comisión Agencia: $
+                    {recepcionModalLiq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Recaudado</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                    {recepcionModalLiq.saldoAFavorChofer > 0 ? 'Saldo a Favor' : 'Recaudado'}
+                  </span>
                   <span className="text-sm font-black text-slate-900">
-                    ${recepcionModalLiq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    $
+                    {(recepcionModalLiq.saldoAFavorChofer > 0
+                      ? recepcionModalLiq.saldoAFavorChofer
+                      : recepcionModalLiq.totalRecaudado
+                    ).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
               </div>
 
-              {/* Opciones de cómo recibió el dinero */}
               <div className="space-y-2.5">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  ¿Cómo recibiste el dinero?
+                  {recepcionModalLiq.saldoAFavorChofer > 0 && recepcionModalLiq.quienPagaSaldoAFavor !== 'COORDINADOR'
+                    ? '¿Cómo le pagaste al chofer?'
+                    : '¿Cómo recibiste el dinero?'}
                 </label>
 
                 <button
@@ -1260,15 +1471,19 @@ export default function HistorialLiquidacionesPage() {
                       : 'bg-white border-slate-200 hover:border-slate-300'
                   }`}
                 >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metodoEntrega === 'COORDINADOR' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                      metodoEntrega === 'COORDINADOR' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
                     <UserCheck className="w-5 h-5" />
                   </div>
                   <div className="flex-1">
                     <span className="text-xs sm:text-sm font-bold text-slate-900 block">
-                      Entregado por el Coordinador
+                      A través del Coordinador
                     </span>
                     <span className="text-[11px] text-slate-500 block">
-                      Le pagaron al coordinador y él te entregó el dinero.
+                      Gestionado por el coordinador de turno.
                     </span>
                   </div>
                 </button>
@@ -1282,15 +1497,19 @@ export default function HistorialLiquidacionesPage() {
                       : 'bg-white border-slate-200 hover:border-slate-300'
                   }`}
                 >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metodoEntrega === 'CHOFER_MANO' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                      metodoEntrega === 'CHOFER_MANO' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
                     <Banknote className="w-5 h-5" />
                   </div>
                   <div className="flex-1">
                     <span className="text-xs sm:text-sm font-bold text-slate-900 block">
-                      Chofer en mano (Efectivo)
+                      En mano (Efectivo)
                     </span>
                     <span className="text-[11px] text-slate-500 block">
-                      El chofer te entregó el dinero directamente en efectivo.
+                      Operación directa en efectivo con el chofer.
                     </span>
                   </div>
                 </button>
@@ -1304,7 +1523,11 @@ export default function HistorialLiquidacionesPage() {
                       : 'bg-white border-slate-200 hover:border-slate-300'
                   }`}
                 >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metodoEntrega === 'TRANSFERENCIA' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                      metodoEntrega === 'TRANSFERENCIA' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
                     <CreditCard className="w-5 h-5" />
                   </div>
                   <div className="flex-1">
@@ -1312,7 +1535,7 @@ export default function HistorialLiquidacionesPage() {
                       Transferencia
                     </span>
                     <span className="text-[11px] text-slate-500 block">
-                      El chofer o coordinador transfirió el dinero a tu cuenta.
+                      Transferencia bancaria o billetera virtual.
                     </span>
                   </div>
                 </button>
@@ -1358,7 +1581,7 @@ export default function HistorialLiquidacionesPage() {
                     className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all disabled:opacity-50"
                   >
                     <CheckCircle className="w-4 h-4" />
-                    {submittingRecepcion ? 'Guardando...' : 'Confirmar Recibido'}
+                    {submittingRecepcion ? 'Guardando...' : 'Confirmar'}
                   </button>
                 </div>
               </div>

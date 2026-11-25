@@ -639,12 +639,28 @@ model Liquidacion {
   chofer              Chofer    @relation(fields: [choferId], references: [id], onDelete: Cascade)
   coordinadorId       String
   coordinador         User      @relation(fields: [coordinadorId], references: [id], onDelete: Cascade)
-  totalRecaudado      Float
-  combustible         Float     @default(0.0)
-  comisionChofer      Float     @default(0.0)
-  comisionAgencia     Float     @default(0.0)
-  gananciaPropietario Float     @default(0.0)
-  observaciones       String?
+  totalRecaudado             Float
+  combustible                Float     @default(0.0)
+  comisionChofer             Float     @default(0.0)
+  comisionAgencia            Float     @default(0.0)
+  gananciaPropietario        Float     @default(0.0)
+
+  // Desglose de viajes por medio de pago
+  totalEfectivoViajes        Float     @default(0.0)
+  totalTransferenciaViajes   Float     @default(0.0)
+  totalCuentaCorrienteViajes Float     @default(0.0)
+
+  // Saldo neto de rendición y saldo a favor del chofer
+  saldoNeto                  Float     @default(0.0)
+  saldoAFavorChofer          Float     @default(0.0)
+  quienPagaSaldoAFavor       String?   // 'COORDINADOR' | 'PENDIENTE_DUENIO' | 'PAGADO_DUENIO'
+
+  // Medio de pago del chofer al cerrar caja (Efectivo / Transferencia / Ambos)
+  metodoPagoChofer           String?   // 'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS'
+  montoEfectivo              Float     @default(0.0)
+  montoTransferencia         Float     @default(0.0)
+
+  observaciones              String?
   dineroRecibido      Boolean   @default(false)
   metodoEntregaDuenio String?
   fechaRecepcionDuenio DateTime?

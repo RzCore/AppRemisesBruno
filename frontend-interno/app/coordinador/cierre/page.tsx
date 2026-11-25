@@ -6,7 +6,23 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import { choferService, coordinadorDashboardService } from '@/lib/api';
 import { Chofer, Viaje, LiquidacionPendienteResumen } from '@/types';
-import { ArrowLeft, DollarSign, Calendar, Fuel, FileText, User, Shield, CheckCircle2, AlertTriangle, Coins, RefreshCw, Clock } from 'lucide-react';
+import {
+  ArrowLeft,
+  DollarSign,
+  Calendar,
+  Fuel,
+  FileText,
+  User,
+  Shield,
+  CheckCircle2,
+  AlertTriangle,
+  Coins,
+  RefreshCw,
+  Clock,
+  Banknote,
+  CreditCard,
+  Wallet
+} from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 
@@ -18,7 +34,7 @@ export default function CierreCajaPage() {
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [selectedChoferId, setSelectedChoferId] = useState<string>('');
   const [loadingChoferes, setLoadingChoferes] = useState(true);
-  
+
   const [pendingData, setPendingData] = useState<LiquidacionPendienteResumen | null>(null);
   const [loadingPending, setLoadingPending] = useState(false);
 
@@ -29,6 +45,10 @@ export default function CierreCajaPage() {
   // Form Inputs
   const [combustible, setCombustible] = useState<string>('');
   const [observaciones, setObservaciones] = useState<string>('');
+  const [metodoPagoChofer, setMetodoPagoChofer] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS'>('EFECTIVO');
+  const [montoEfectivoInput, setMontoEfectivoInput] = useState<string>('');
+  const [montoTransferenciaInput, setMontoTransferenciaInput] = useState<string>('');
+  const [quienPagaSaldoAFavor, setQuienPagaSaldoAFavor] = useState<'COORDINADOR' | 'PENDIENTE_DUENIO'>('COORDINADOR');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -61,7 +81,6 @@ export default function CierreCajaPage() {
       setLoadingChoferes(true);
       const response = await choferService.getAll();
       if (response.success && response.data) {
-        // Filtrar choferes activos o suspendidos (para poder liquidar si es necesario)
         const activos = response.data.filter(c => c.estado !== 'DADO_DE_BAJA');
         setChoferes(activos);
       } else {
@@ -75,12 +94,20 @@ export default function CierreCajaPage() {
     }
   };
 
+  const resetFormInputs = () => {
+    setCombustible('');
+    setObservaciones('');
+    setMetodoPagoChofer('EFECTIVO');
+    setMontoEfectivoInput('');
+    setMontoTransferenciaInput('');
+    setQuienPagaSaldoAFavor('COORDINADOR');
+  };
+
   const handleChoferChange = async (choferId: string) => {
     setSelectedChoferId(choferId);
     setPendingData(null);
-    setCombustible('');
-    setObservaciones('');
-    
+    resetFormInputs();
+
     if (!choferId) return;
 
     try {
@@ -99,37 +126,87 @@ export default function CierreCajaPage() {
     }
   };
 
-  // Cálculos dinámicos en frontend basados en combustible ingresado
+  // Cálculos dinámicos en frontend basados en la comisión diferenciada por distancia del backend y combustible ingresado
   const getCalculos = () => {
-    if (!pendingData) return { totalRecaudado: 0, comisionChofer: 0, comisionAgencia: 0, gananciaPropietario: 0 };
-    
-    const { chofer, resumen } = pendingData;
-    const totalRecaudado = resumen.totalRecaudado;
-    const combustibleVal = parseFloat(combustible) || 0;
-
-    let comisionChofer = 0;
-    let comisionAgencia = 0;
-    let gananciaPropietario = 0;
-
-    if (chofer.esPropietario) {
-      comisionAgencia = (totalRecaudado * chofer.comisionDuenioAuto) / 100;
-      comisionChofer = totalRecaudado - comisionAgencia;
-      gananciaPropietario = 0;
-    } else {
-      comisionChofer = (totalRecaudado * chofer.comisionPorcentaje) / 100;
-      comisionAgencia = (totalRecaudado * chofer.comisionDuenioAuto) / 100;
-      gananciaPropietario = Math.max(0, totalRecaudado - comisionChofer - comisionAgencia - combustibleVal);
+    if (!pendingData) {
+      return {
+        totalRecaudado: 0,
+        totalEfectivo: 0,
+        totalTransferencia: 0,
+        totalCuentaCorriente: 0,
+        totalCortaDistancia: 0,
+        totalLargaDistancia: 0,
+        cantidadCortaDistancia: 0,
+        cantidadLargaDistancia: 0,
+        comisionChofer: 0,
+        comisionAgencia: 0,
+        gananciaPropietario: 0,
+        saldoNeto: 0,
+        montoARendirChofer: 0,
+        saldoAFavorChofer: 0
+      };
     }
+
+    const { chofer, resumen } = pendingData;
+    const totalRecaudado = resumen.totalRecaudado || 0;
+    const totalEfectivo = resumen.totalEfectivo ?? 0;
+    const totalTransferencia = resumen.totalTransferencia ?? 0;
+    const totalCuentaCorriente = resumen.totalCuentaCorriente ?? 0;
+    const comisionChofer = resumen.comisionChofer || 0;
+    const comisionAgencia = resumen.comisionAgencia || 0;
+    const combustibleVal = chofer.esPropietario ? 0 : Math.max(0, parseFloat(combustible) || 0);
+
+    const gananciaPropietario = chofer.esPropietario
+      ? 0
+      : Math.max(0, (resumen.gananciaPropietario || 0) - combustibleVal);
+
+    const saldoNeto = Math.round((totalEfectivo - comisionChofer - combustibleVal) * 100) / 100;
+    const montoARendirChofer = saldoNeto > 0 ? saldoNeto : 0;
+    const saldoAFavorChofer = saldoNeto < 0 ? Math.round(Math.abs(saldoNeto) * 100) / 100 : 0;
 
     return {
       totalRecaudado,
+      totalEfectivo,
+      totalTransferencia,
+      totalCuentaCorriente,
+      totalCortaDistancia: resumen.totalCortaDistancia ?? 0,
+      totalLargaDistancia: resumen.totalLargaDistancia ?? 0,
+      cantidadCortaDistancia: resumen.cantidadCortaDistancia ?? 0,
+      cantidadLargaDistancia: resumen.cantidadLargaDistancia ?? 0,
       comisionChofer,
       comisionAgencia,
-      gananciaPropietario
+      gananciaPropietario,
+      saldoNeto,
+      montoARendirChofer,
+      saldoAFavorChofer
     };
   };
 
   const calculos = getCalculos();
+  const montoOperacionActual =
+    calculos.montoARendirChofer > 0
+      ? calculos.montoARendirChofer
+      : calculos.saldoAFavorChofer > 0 && quienPagaSaldoAFavor === 'COORDINADOR'
+      ? calculos.saldoAFavorChofer
+      : 0;
+
+  const handleMontoEfectivoChange = (val: string) => {
+    setMontoEfectivoInput(val);
+    const efec = parseFloat(val);
+    if (!isNaN(efec) && montoOperacionActual > 0) {
+      const restante = Math.max(0, Math.round((montoOperacionActual - efec) * 100) / 100);
+      setMontoTransferenciaInput(restante.toString());
+    }
+  };
+
+  const handleMontoTransferenciaChange = (val: string) => {
+    setMontoTransferenciaInput(val);
+    const transf = parseFloat(val);
+    if (!isNaN(transf) && montoOperacionActual > 0) {
+      const restante = Math.max(0, Math.round((montoOperacionActual - transf) * 100) / 100);
+      setMontoEfectivoInput(restante.toString());
+    }
+  };
 
   const handleSubmitCierre = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,29 +217,81 @@ export default function CierreCajaPage() {
       return;
     }
 
-    const confirmMessage = pendingData.chofer.esPropietario
-      ? `¿Confirmas el cierre de caja de ${pendingData.chofer.nombre} ${pendingData.chofer.apellido}? \nComisión Agencia a cobrar: $${calculos.comisionAgencia.toLocaleString('es-AR')}`
-      : `¿Confirmas el cierre de caja de ${pendingData.chofer.nombre} ${pendingData.chofer.apellido}? \nCombustible: $${(parseFloat(combustible) || 0).toLocaleString('es-AR')} \nComisión Agencia: $${calculos.comisionAgencia.toLocaleString('es-AR')}`;
+    const necesitaMedioPago =
+      calculos.montoARendirChofer > 0 ||
+      (calculos.saldoAFavorChofer > 0 && quienPagaSaldoAFavor === 'COORDINADOR');
+
+    let montoEfectivoVal = 0;
+    let montoTransferenciaVal = 0;
+
+    if (necesitaMedioPago) {
+      if (metodoPagoChofer === 'EFECTIVO') {
+        montoEfectivoVal = montoOperacionActual;
+      } else if (metodoPagoChofer === 'TRANSFERENCIA') {
+        montoTransferenciaVal = montoOperacionActual;
+      } else {
+        montoEfectivoVal = parseFloat(montoEfectivoInput) || 0;
+        montoTransferenciaVal = parseFloat(montoTransferenciaInput) || 0;
+        if (montoEfectivoVal < 0 || montoTransferenciaVal < 0) {
+          toast.error('Los montos no pueden ser negativos.');
+          return;
+        }
+        if (Math.abs((montoEfectivoVal + montoTransferenciaVal) - montoOperacionActual) > 1) {
+          toast.error(
+            `Efectivo ($${montoEfectivoVal.toLocaleString('es-AR')}) + Transferencia ($${montoTransferenciaVal.toLocaleString('es-AR')}) debe sumar $${montoOperacionActual.toLocaleString('es-AR')}.`
+          );
+          return;
+        }
+      }
+    }
+
+    let confirmDetalle = '';
+    if (calculos.montoARendirChofer > 0) {
+      const medioTxt =
+        metodoPagoChofer === 'AMBOS'
+          ? `Efectivo $${montoEfectivoVal.toLocaleString('es-AR')} + Transf. $${montoTransferenciaVal.toLocaleString('es-AR')}`
+          : metodoPagoChofer;
+      confirmDetalle = `Chofer entrega: $${calculos.montoARendirChofer.toLocaleString('es-AR')} (${medioTxt})`;
+    } else if (calculos.saldoAFavorChofer > 0) {
+      confirmDetalle =
+        quienPagaSaldoAFavor === 'COORDINADOR'
+          ? `SALDO A FAVOR del chofer: $${calculos.saldoAFavorChofer.toLocaleString('es-AR')} (Paga Coordinador - ${metodoPagoChofer})`
+          : `SALDO A FAVOR del chofer: $${calculos.saldoAFavorChofer.toLocaleString('es-AR')} (Queda pendiente para el Dueño)`;
+    } else {
+      confirmDetalle = 'Saldo en $0 (sin movimiento de efectivo)';
+    }
+
+    const confirmMessage = `¿Confirmas el cierre de caja de ${pendingData.chofer.nombre} ${pendingData.chofer.apellido}?\nComisión Agencia: $${calculos.comisionAgencia.toLocaleString('es-AR')}\n${confirmDetalle}`;
 
     if (!confirm(confirmMessage)) return;
 
     try {
       setIsSubmitting(true);
-      const payload = {
+      const payload: any = {
         choferId: selectedChoferId,
-        combustible: parseFloat(combustible) || 0,
+        combustible: pendingData.chofer.esPropietario ? 0 : parseFloat(combustible) || 0,
         observaciones: observaciones.trim()
       };
+
+      if (calculos.montoARendirChofer > 0) {
+        payload.metodoPagoChofer = metodoPagoChofer;
+        payload.montoEfectivo = montoEfectivoVal;
+        payload.montoTransferencia = montoTransferenciaVal;
+      } else if (calculos.saldoAFavorChofer > 0) {
+        payload.quienPagaSaldoAFavor = quienPagaSaldoAFavor;
+        if (quienPagaSaldoAFavor === 'COORDINADOR') {
+          payload.metodoPagoChofer = metodoPagoChofer;
+          payload.montoEfectivo = montoEfectivoVal;
+          payload.montoTransferencia = montoTransferenciaVal;
+        }
+      }
 
       const response = await coordinadorDashboardService.crearLiquidacion(payload);
       if (response.success) {
         toast.success('Cierre de caja y liquidación registrados exitosamente');
-        // Limpiar estados
         setPendingData(null);
         setSelectedChoferId('');
-        setCombustible('');
-        setObservaciones('');
-        // Recargar choferes y resumen del turno
+        resetFormInputs();
         loadChoferes();
         loadResumenTurno();
       } else {
@@ -199,13 +328,16 @@ export default function CierreCajaPage() {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              <button 
-                onClick={() => { loadChoferes(); loadResumenTurno(); }}
+              <button
+                onClick={() => {
+                  loadChoferes();
+                  loadResumenTurno();
+                }}
                 disabled={loadingChoferes || loadingResumen}
                 className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
                 title="Recargar datos"
               >
-                <RefreshCw className={`w-4 h-4 ${(loadingChoferes || loadingResumen) ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${loadingChoferes || loadingResumen ? 'animate-spin' : ''}`} />
               </button>
             </div>
           </div>
@@ -221,7 +353,7 @@ export default function CierreCajaPage() {
                 <User className="w-5 h-5 text-blue-500" />
                 Seleccionar Chofer
               </h2>
-              
+
               <div className="space-y-4">
                 <div>
                   <label htmlFor="choferSelect" className="block text-sm font-medium text-slate-700 mb-2">
@@ -253,17 +385,19 @@ export default function CierreCajaPage() {
                       <div className="space-y-1.5 text-xs text-blue-900">
                         <p className="flex justify-between">
                           <span>Condición:</span>
-                          <span className="font-semibold">{pendingData.chofer.esPropietario ? 'Propietario de auto' : 'Chofer comisionista'}</span>
+                          <span className="font-semibold">
+                            {pendingData.chofer.esPropietario ? 'Propietario de auto' : 'Chofer comisionista'}
+                          </span>
                         </p>
                         {!pendingData.chofer.esPropietario && (
                           <p className="flex justify-between">
                             <span>Comisión Chofer:</span>
-                            <span className="font-semibold">{pendingData.chofer.comisionPorcentaje}% de recaudación</span>
+                            <span className="font-semibold">30% de recaudación</span>
                           </p>
                         )}
                         <p className="flex justify-between">
                           <span>Comisión Agencia:</span>
-                          <span className="font-semibold">{pendingData.chofer.comisionDuenioAuto}% de recaudación</span>
+                          <span className="font-semibold">20% (&lt;20km) / 15% (≥20km)</span>
                         </p>
                       </div>
                     </div>
@@ -273,44 +407,156 @@ export default function CierreCajaPage() {
             </div>
 
             {pendingData && (
-              <form onSubmit={handleSubmitCierre} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                <h2 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+              <form onSubmit={handleSubmitCierre} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                   <Coins className="w-5 h-5 text-emerald-500" />
                   Parámetros de Liquidación
                 </h2>
 
                 {!pendingData.chofer.esPropietario ? (
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor="combustibleInput" className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
-                        <Fuel className="w-4 h-4 text-orange-500" />
-                        Gasto en Combustible (Nafta/GNC)
-                      </label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-medium">$</span>
-                        <input
-                          type="number"
-                          id="combustibleInput"
-                          min="0"
-                          step="0.01"
-                          value={combustible}
-                          onChange={(e) => setCombustible(e.target.value)}
-                          className="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-800 font-bold text-lg"
-                          placeholder="0.00"
-                        />
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">Este importe se descontará del saldo del dueño del vehículo.</p>
+                  <div>
+                    <label htmlFor="combustibleInput" className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
+                      <Fuel className="w-4 h-4 text-orange-500" />
+                      Gasto en Combustible (Nafta/GNC)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-medium">$</span>
+                      <input
+                        type="number"
+                        id="combustibleInput"
+                        min="0"
+                        step="0.01"
+                        value={combustible}
+                        onChange={(e) => setCombustible(e.target.value)}
+                        className="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-800 font-bold text-lg"
+                        placeholder="0.00"
+                      />
                     </div>
+                    <p className="text-xs text-slate-500 mt-1">Se descuenta del saldo del dueño del vehículo y del efectivo a rendir.</p>
                   </div>
                 ) : (
-                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 flex items-start gap-2.5">
+                  <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 flex items-start gap-2.5">
                     <Shield className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
                     <div>
                       <p className="text-xs font-semibold text-slate-800">Chofer Propietario</p>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        Al ser dueño del vehículo, la agencia solo le retiene su comisión (20% o el configurado). El combustible no se deduce en caja.
+                        La agencia retiene 20% en viajes locales (&lt;20 km) y 15% en larga distancia (≥20 km). El combustible no se deduce en caja.
                       </p>
                     </div>
+                  </div>
+                )}
+
+                {/* Si el chofer tiene SALDO A FAVOR */}
+                {pendingData.viajes.length > 0 && calculos.saldoAFavorChofer > 0 && (
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-800 uppercase">Saldo a Favor del Chofer</span>
+                      <span className="text-lg font-black text-amber-900">
+                        ${calculos.saldoAFavorChofer.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-800">
+                      Los viajes en Cuenta Corriente / Transferencia superan el efectivo cobrado por el chofer. Indicá quién le abona este saldo:
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setQuienPagaSaldoAFavor('COORDINADOR')}
+                        className={`p-2.5 rounded-xl border-2 text-left text-xs font-bold transition-all ${
+                          quienPagaSaldoAFavor === 'COORDINADOR'
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white text-slate-700 border-amber-200 hover:border-amber-400'
+                        }`}
+                      >
+                        Paga Coordinador desde caja ahora
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuienPagaSaldoAFavor('PENDIENTE_DUENIO')}
+                        className={`p-2.5 rounded-xl border-2 text-left text-xs font-bold transition-all ${
+                          quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white text-slate-700 border-amber-200 hover:border-amber-400'
+                        }`}
+                      >
+                        Queda pendiente para que pague el Dueño
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Selector de Medio de Pago (Efectivo / Transferencia / Ambos) */}
+                {pendingData.viajes.length > 0 && montoOperacionActual > 0 && (
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <label className="block text-sm font-bold text-slate-700">
+                      {calculos.montoARendirChofer > 0
+                        ? 'Medio de pago del chofer'
+                        : 'Medio de pago al chofer (desde caja)'}
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        { id: 'EFECTIVO', label: 'Efectivo', icon: Banknote },
+                        { id: 'TRANSFERENCIA', label: 'Transf.', icon: CreditCard },
+                        { id: 'AMBOS', label: 'Ambos', icon: Wallet }
+                      ] as const).map(({ id, label, icon: Icon }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => {
+                            setMetodoPagoChofer(id);
+                            if (id === 'AMBOS') {
+                              const mitad = Math.round((montoOperacionActual / 2) * 100) / 100;
+                              const resto = Math.round((montoOperacionActual - mitad) * 100) / 100;
+                              setMontoEfectivoInput(mitad.toString());
+                              setMontoTransferenciaInput(resto.toString());
+                            }
+                          }}
+                          className={`py-2.5 px-2 rounded-xl border-2 text-xs font-bold flex flex-col items-center gap-1 transition-all ${
+                            metodoPagoChofer === id
+                              ? 'bg-emerald-50 border-emerald-600 text-emerald-800'
+                              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {metodoPagoChofer === 'AMBOS' && (
+                      <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">Efectivo ($)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={montoEfectivoInput}
+                            onChange={(e) => handleMontoEfectivoChange(e.target.value)}
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 bg-white"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">Transferencia ($)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={montoTransferenciaInput}
+                            onChange={(e) => handleMontoTransferenciaChange(e.target.value)}
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 bg-white"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div className="col-span-2 flex justify-between text-[11px] font-semibold text-slate-600 pt-1 border-t border-slate-200">
+                          <span>Total a cubrir:</span>
+                          <span className="text-slate-900 font-bold">
+                            ${montoOperacionActual.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -325,7 +571,7 @@ export default function CierreCajaPage() {
                     onChange={(e) => setObservaciones(e.target.value)}
                     rows={3}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-800 text-sm"
-                    placeholder="Detalles sobre el combustible, estado del auto, etc."
+                    placeholder="Detalles sobre el cierre, transferencia, combustible, etc."
                   />
                 </div>
 
@@ -335,7 +581,7 @@ export default function CierreCajaPage() {
                   className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none"
                 >
                   <CheckCircle2 className="w-5 h-5" />
-                  Realizar Cierre de Caja
+                  {isSubmitting ? 'Registrando...' : 'Realizar Cierre de Caja'}
                 </button>
               </form>
             )}
@@ -361,9 +607,9 @@ export default function CierreCajaPage() {
                       <p className="text-slate-400 text-sm">Cargando resumen de caja...</p>
                     </div>
                   ) : resumenTurno ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 shadow-sm">
-                        <span className="text-xs text-slate-500 font-bold block uppercase tracking-wider text-[10px]">Total Recaudado</span>
+                        <span className="text-slate-500 font-bold block uppercase tracking-wider text-[10px]">Total Recaudado</span>
                         <span className="text-2xl font-black text-slate-800 block mt-1">
                           ${(resumenTurno.resumen?.totalRecaudado || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                         </span>
@@ -371,27 +617,31 @@ export default function CierreCajaPage() {
                       </div>
 
                       <div className="bg-emerald-50/50 rounded-xl p-4 border border-emerald-100 shadow-sm">
-                        <span className="text-xs text-emerald-700 font-bold block uppercase tracking-wider text-[10px]">Agencia (Retenido)</span>
+                        <span className="text-emerald-700 font-bold block uppercase tracking-wider text-[10px]">Efectivo en Caja (Neto)</span>
                         <span className="text-2xl font-black text-emerald-800 block mt-1">
-                          ${(resumenTurno.resumen?.totalComisionAgencia || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          ${(resumenTurno.resumen?.netoEfectivoEnCaja ?? resumenTurno.resumen?.totalEfectivoCobrado ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                         </span>
-                        <span className="text-[10px] text-emerald-600 mt-1 block">Rendir al propietario</span>
+                        <span className="text-[10px] text-emerald-600 mt-1 block">
+                          Cobrado: ${(resumenTurno.resumen?.totalEfectivoCobrado || 0).toLocaleString('es-AR')}
+                        </span>
                       </div>
 
-                      <div className="bg-orange-50/50 rounded-xl p-4 border border-orange-100 shadow-sm">
-                        <span className="text-xs text-orange-700 font-bold block uppercase tracking-wider text-[10px]">Combustible</span>
-                        <span className="text-2xl font-black text-orange-800 block mt-1">
-                          ${(resumenTurno.resumen?.totalCombustible || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100 shadow-sm">
+                        <span className="text-blue-700 font-bold block uppercase tracking-wider text-[10px]">Transferencias</span>
+                        <span className="text-2xl font-black text-blue-800 block mt-1">
+                          ${(resumenTurno.resumen?.totalTransferenciaCobrada || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                         </span>
-                        <span className="text-[10px] text-orange-600 mt-1 block">Tickets descontados</span>
+                        <span className="text-[10px] text-blue-600 mt-1 block">Rendidas por choferes</span>
                       </div>
 
-                      <div className="bg-purple-50/50 rounded-xl p-4 border border-purple-100 shadow-sm">
-                        <span className="text-xs text-purple-700 font-bold block uppercase tracking-wider text-[10px]">Ganancia Propietarios</span>
-                        <span className="text-2xl font-black text-purple-800 block mt-1">
-                          ${(resumenTurno.resumen?.totalGananciaPropietario || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      <div className="bg-amber-50/50 rounded-xl p-4 border border-amber-100 shadow-sm">
+                        <span className="text-amber-700 font-bold block uppercase tracking-wider text-[10px]">Saldos a Favor</span>
+                        <span className="text-2xl font-black text-amber-800 block mt-1">
+                          ${((resumenTurno.resumen?.totalPagadoSaldoAFavorCaja || 0) + (resumenTurno.resumen?.totalSaldoAFavorPendienteDuenio || 0)).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                         </span>
-                        <span className="text-[10px] text-purple-600 mt-1 block">Neto vehículos alquilados</span>
+                        <span className="text-[10px] text-amber-700 mt-1 block">
+                          Caja: ${(resumenTurno.resumen?.totalPagadoSaldoAFavorCaja || 0).toLocaleString('es-AR')} | Dueño: ${(resumenTurno.resumen?.totalSaldoAFavorPendienteDuenio || 0).toLocaleString('es-AR')}
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -427,11 +677,9 @@ export default function CierreCajaPage() {
                           <tr>
                             <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Hora</th>
                             <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Chofer</th>
-                            <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Tipo</th>
                             <th className="px-3 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Recaudado</th>
                             <th className="px-3 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Agencia</th>
-                            <th className="px-3 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Combustible</th>
-                            <th className="px-3 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Neto Prop.</th>
+                            <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Rendición / Pago</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-100">
@@ -442,16 +690,9 @@ export default function CierreCajaPage() {
                               </td>
                               <td className="px-3 py-2.5 whitespace-nowrap font-bold text-slate-800">
                                 {liq.chofer?.nombre} {liq.chofer?.apellido}
-                                <div className="text-[10px] text-slate-400 font-normal">#{liq.chofer?.numeroChofer}</div>
-                              </td>
-                              <td className="px-3 py-2.5 whitespace-nowrap">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                  liq.chofer?.esPropietario 
-                                    ? 'bg-green-100 text-green-800' 
-                                    : 'bg-blue-100 text-blue-800'
-                                }`}>
-                                  {liq.chofer?.esPropietario ? 'Dueño Auto' : 'Comisionista'}
-                                </span>
+                                <div className="text-[10px] text-slate-400 font-normal">
+                                  #{liq.chofer?.numeroChofer} • {liq.chofer?.esPropietario ? 'Dueño Auto' : 'Comisionista'}
+                                </div>
                               </td>
                               <td className="px-3 py-2.5 whitespace-nowrap text-right font-bold text-slate-800">
                                 ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -459,11 +700,34 @@ export default function CierreCajaPage() {
                               <td className="px-3 py-2.5 whitespace-nowrap text-right text-emerald-700 font-bold bg-emerald-50/20">
                                 ${liq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                               </td>
-                              <td className="px-3 py-2.5 whitespace-nowrap text-right text-orange-700 font-medium">
-                                ${liq.combustible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-3 py-2.5 whitespace-nowrap text-right text-purple-700 font-bold">
-                                ${liq.gananciaPropietario.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                {liq.saldoAFavorChofer > 0 ? (
+                                  <div className="flex flex-col">
+                                    <span className="inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                      Saldo a favor: ${liq.saldoAFavorChofer.toLocaleString('es-AR')}
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 mt-0.5">
+                                      {liq.quienPagaSaldoAFavor === 'COORDINADOR'
+                                        ? `Pagado caja (${liq.metodoPagoChofer || 'EFECTIVO'})`
+                                        : 'Pendiente Dueño'}
+                                    </span>
+                                  </div>
+                                ) : liq.metodoPagoChofer === 'AMBOS' ? (
+                                  <div className="text-[11px]">
+                                    <span className="font-bold text-indigo-700">Ambos</span>
+                                    <div className="text-[10px] text-slate-500">
+                                      Efec: ${(liq.montoEfectivo || 0).toLocaleString('es-AR')} | Transf: ${(liq.montoTransferencia || 0).toLocaleString('es-AR')}
+                                    </div>
+                                  </div>
+                                ) : liq.metodoPagoChofer === 'TRANSFERENCIA' ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                                    Transferencia ${(liq.montoTransferencia || liq.saldoNeto || 0).toLocaleString('es-AR')}
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                    Efectivo ${(liq.montoEfectivo || liq.saldoNeto || liq.comisionAgencia || 0).toLocaleString('es-AR')}
+                                  </span>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -483,19 +747,54 @@ export default function CierreCajaPage() {
                 {/* Cuadro Resumen Financiero */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <h3 className="text-lg font-bold text-slate-800 mb-4">Cálculo de Liquidación</h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+
+                  {/* Banner de Balance Real del Cierre */}
+                  {pendingData.viajes.length > 0 && (
+                    <div
+                      className={`mb-5 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                        calculos.saldoAFavorChofer > 0
+                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                          : calculos.montoARendirChofer > 0
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : 'bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-wider block opacity-80">
+                          {calculos.saldoAFavorChofer > 0
+                            ? 'Saldo a Favor del Chofer (a pagar por agencia)'
+                            : calculos.montoARendirChofer > 0
+                            ? 'Monto Neto a Entregar por el Chofer'
+                            : 'Balance en Cero'}
+                        </span>
+                        <p className="text-xs opacity-75 mt-0.5">
+                          Efectivo cobrado (${calculos.totalEfectivo.toLocaleString('es-AR')}) − Parte chofer ($
+                          {calculos.comisionChofer.toLocaleString('es-AR')})
+                          {!pendingData.chofer.esPropietario && (parseFloat(combustible) || 0) > 0
+                            ? ` − Combustible ($${(parseFloat(combustible) || 0).toLocaleString('es-AR')})`
+                            : ''}
+                        </p>
+                      </div>
+                      <span className="text-2xl sm:text-3xl font-black">
+                        $
+                        {(calculos.saldoAFavorChofer > 0
+                          ? calculos.saldoAFavorChofer
+                          : calculos.montoARendirChofer
+                        ).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                     <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
                       <span className="text-xs text-slate-500 font-semibold block uppercase">Total Recaudado</span>
                       <span className="text-2xl font-black text-slate-800 block mt-1">
                         ${calculos.totalRecaudado.toLocaleString('es-AR')}
                       </span>
-                      <div className="text-[11px] text-slate-500 mt-1 flex flex-col gap-0.5">
-                        <span>{pendingData.viajes.length} viaje{pendingData.viajes.length > 1 ? 's' : ''}</span>
-                        <div className="flex gap-2 text-[10px] font-semibold pt-0.5">
-                          <span className="text-emerald-700">💵 Efec: ${(pendingData.resumen.totalEfectivo ?? 0).toLocaleString('es-AR')}</span>
-                          <span className="text-blue-700">💳 Transf: ${(pendingData.resumen.totalTransferencia ?? 0).toLocaleString('es-AR')}</span>
-                        </div>
+                      <div className="text-[10px] text-slate-500 mt-1.5 space-y-0.5 font-semibold">
+                        <div className="text-emerald-700">Efec: ${calculos.totalEfectivo.toLocaleString('es-AR')}</div>
+                        <div className="text-blue-700">Transf: ${calculos.totalTransferencia.toLocaleString('es-AR')}</div>
+                        <div className="text-purple-700">Cta Cte: ${calculos.totalCuentaCorriente.toLocaleString('es-AR')}</div>
                       </div>
                     </div>
 
@@ -504,9 +803,10 @@ export default function CierreCajaPage() {
                       <span className="text-2xl font-black text-emerald-800 block mt-1">
                         ${calculos.comisionAgencia.toLocaleString('es-AR')}
                       </span>
-                      <span className="text-[10px] text-emerald-600 mt-1 block font-medium">
-                        Retención ({pendingData.chofer.comisionDuenioAuto}%)
-                      </span>
+                      <div className="text-[10px] text-emerald-700 mt-1.5 space-y-0.5 font-medium">
+                        <div>&lt;20km (20%): {calculos.cantidadCortaDistancia} viaje{calculos.cantidadCortaDistancia !== 1 ? 's' : ''}</div>
+                        <div>≥20km (15%): {calculos.cantidadLargaDistancia} viaje{calculos.cantidadLargaDistancia !== 1 ? 's' : ''}</div>
+                      </div>
                     </div>
 
                     <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100">
@@ -515,9 +815,9 @@ export default function CierreCajaPage() {
                         ${calculos.comisionChofer.toLocaleString('es-AR')}
                       </span>
                       <span className="text-[10px] text-blue-600 mt-1 block font-medium">
-                        {pendingData.chofer.esPropietario 
-                          ? `Sobrante dueño (${100 - pendingData.chofer.comisionDuenioAuto}%)`
-                          : `Salario chofer (${pendingData.chofer.comisionPorcentaje}%)`}
+                        {pendingData.chofer.esPropietario
+                          ? '80% corta / 85% larga'
+                          : 'Salario chofer (30%)'}
                       </span>
                     </div>
 
@@ -528,7 +828,7 @@ export default function CierreCajaPage() {
                           ${calculos.gananciaPropietario.toLocaleString('es-AR')}
                         </span>
                         <span className="text-[10px] text-purple-600 mt-1 block font-medium">
-                          Remanente del vehículo
+                          50% corta / 55% larga (− comb.)
                         </span>
                       </div>
                     )}
@@ -564,55 +864,76 @@ export default function CierreCajaPage() {
                             <th className="px-3 sm:px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Fecha/Hora</th>
                             <th className="px-3 sm:px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Cliente</th>
                             <th className="px-3 sm:px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Origen / Destino</th>
+                            <th className="px-3 sm:px-4 py-2.5 text-center text-xs font-semibold text-slate-500 uppercase">Dist. / Com.</th>
                             <th className="px-3 sm:px-4 py-2.5 text-center text-xs font-semibold text-slate-500 uppercase">Pago</th>
                             <th className="px-3 sm:px-4 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase">Importe</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-100">
-                          {pendingData.viajes.map((viaje: Viaje) => (
-                            <tr key={viaje.id} className="hover:bg-slate-50/30 transition-colors">
-                              <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-sm text-slate-600">
-                                <div className="flex items-center gap-1.5">
-                                  <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                  <div>
-                                    <div className="font-semibold text-slate-800 text-xs sm:text-sm">
-                                      {new Date(viaje.fecha).toLocaleDateString('es-AR')}
-                                    </div>
-                                    <div className="text-[11px] text-slate-400">
-                                      {new Date(viaje.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                          {pendingData.viajes.map((viaje: Viaje) => {
+                            const km = Number((viaje as any).distanciaKmConPasajero) || 0;
+                            const esLarga = km >= 20;
+                            return (
+                              <tr key={viaje.id} className="hover:bg-slate-50/30 transition-colors">
+                                <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-sm text-slate-600">
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                    <div>
+                                      <div className="font-semibold text-slate-800 text-xs sm:text-sm">
+                                        {new Date(viaje.fecha).toLocaleDateString('es-AR')}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400">
+                                        {new Date(viaje.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              </td>
-                              <td className="px-3 sm:px-4 py-3 text-sm text-slate-800 font-medium">
-                                <div className="truncate max-w-[130px] sm:max-w-none" title={viaje.clienteNombre || 'S/N'}>
-                                  {viaje.clienteNombre || 'S/N'}
-                                </div>
-                              </td>
-                              <td className="px-3 sm:px-4 py-3 text-xs sm:text-sm text-slate-600">
-                                <div className="line-clamp-1" title={viaje.origen}>
-                                  <span className="font-semibold text-slate-700">Orig:</span> {viaje.origen}
-                                </div>
-                                <div className="mt-0.5 line-clamp-1" title={viaje.destino}>
-                                  <span className="font-semibold text-slate-700">Dest:</span> {viaje.destino}
-                                </div>
-                              </td>
-                              <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-center">
-                                {viaje.metodoPago === 'TRANSFERENCIA' ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                                    Transferencia
+                                </td>
+                                <td className="px-3 sm:px-4 py-3 text-sm text-slate-800 font-medium">
+                                  <div className="truncate max-w-[130px] sm:max-w-none" title={viaje.clienteNombre || 'S/N'}>
+                                    {viaje.clienteNombre || 'S/N'}
+                                  </div>
+                                </td>
+                                <td className="px-3 sm:px-4 py-3 text-xs sm:text-sm text-slate-600">
+                                  <div className="line-clamp-1" title={viaje.origen}>
+                                    <span className="font-semibold text-slate-700">Orig:</span> {viaje.origen}
+                                  </div>
+                                  <div className="mt-0.5 line-clamp-1" title={viaje.destino}>
+                                    <span className="font-semibold text-slate-700">Dest:</span> {viaje.destino}
+                                  </div>
+                                </td>
+                                <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-center">
+                                  <div className="text-[11px] font-semibold text-slate-700">{km.toFixed(1)} km</div>
+                                  <span
+                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      esLarga
+                                        ? 'bg-indigo-100 text-indigo-800'
+                                        : 'bg-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    {esLarga ? '15% Larga' : '20% Local'}
                                   </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                    Efectivo
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-xs sm:text-sm text-right font-bold text-slate-900">
-                                ${Number(viaje.precio).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                          ))}
+                                </td>
+                                <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-center">
+                                  {viaje.metodoPago === 'TRANSFERENCIA' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                                      Transferencia
+                                    </span>
+                                  ) : viaje.metodoPago === 'CUENTA_CORRIENTE' ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                                      Cta. Cte.
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                      Efectivo
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-xs sm:text-sm text-right font-bold text-slate-900">
+                                  ${Number(viaje.precio).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

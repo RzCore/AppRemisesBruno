@@ -454,7 +454,8 @@ export const reportesController = {
               estado: 'COMPLETADO'
             },
             select: {
-              precio: true
+              precio: true,
+              distanciaKmConPasajero: true
             }
           }
         }
@@ -463,14 +464,27 @@ export const reportesController = {
       const liquidaciones = choferes.map(chofer => {
         const viajesCompletados = chofer.viajes.length;
         const facturacionBruta = chofer.viajes.reduce((sum, v) => sum + Number(v.precio), 0);
-        
-        // Obtener el porcentaje de comisión de la remisería del chofer
-        const comisionAgenciaPct = chofer.remiseria?.comisionPorcentaje || 30.0;
-        const comisionChoferPct = 100.0 - comisionAgenciaPct;
 
-        // Calcular desgloses
-        const comisionChofer = (facturacionBruta * comisionChoferPct) / 100;
-        const saldoAgencia = (facturacionBruta * comisionAgenciaPct) / 100;
+        // Regla diferenciada por distancia: >= 20 km -> 15% agencia | < 20 km -> 20% agencia
+        let saldoAgencia = 0;
+        let comisionChofer = 0;
+
+        for (const v of chofer.viajes) {
+          const precio = Number(v.precio) || 0;
+          const km = Number(v.distanciaKmConPasajero) || 0;
+          const agenciaPct = km >= 20 ? 15 : 20;
+          const ag = (precio * agenciaPct) / 100;
+          saldoAgencia += ag;
+          if (chofer.esPropietario) {
+            comisionChofer += precio - ag;
+          } else {
+            comisionChofer += (precio * 30) / 100;
+          }
+        }
+
+        const comisionAgenciaPct = facturacionBruta > 0
+          ? Math.round((saldoAgencia / facturacionBruta) * 1000) / 10
+          : 20.0;
 
         return {
           choferId: chofer.id,
@@ -482,8 +496,8 @@ export const reportesController = {
           comisionAgenciaPct,
           viajesCompletados,
           facturacionBruta,
-          comisionChofer,
-          saldoAgencia
+          comisionChofer: Math.round(comisionChofer * 100) / 100,
+          saldoAgencia: Math.round(saldoAgencia * 100) / 100
         };
       });
 

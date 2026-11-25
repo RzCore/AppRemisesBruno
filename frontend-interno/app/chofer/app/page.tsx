@@ -135,10 +135,6 @@ export default function ChoferApp() {
   const [isPausaModalOpen, setIsPausaModalOpen] = useState(false);
   const [pausandoTurno, setPausandoTurno] = useState(false);
 
-  // Modal para iniciar/finalizar turno con odómetro de tablero opcional
-  const [modalConexion, setModalConexion] = useState<'INICIAR' | 'FINALIZAR' | null>(null);
-  const [odometroInput, setOdometroInput] = useState('');
-
   // Modal y selección de método de pago al finalizar viaje
   const [modalFinalizarViaje, setModalFinalizarViaje] = useState(false);
   const [metodoPagoSeleccionado, setMetodoPagoSeleccionado] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE'>('EFECTIVO');
@@ -1368,8 +1364,6 @@ export default function ChoferApp() {
 
       setIsActive(newState);
       localStorage.setItem('chofer_isActive', JSON.stringify(newState));
-      setModalConexion(null);
-      setOdometroInput('');
 
       if (newState) {
         toast.success('Ahora estás Activo. Esperando viajes...');
@@ -1450,13 +1444,12 @@ export default function ChoferApp() {
           })
           .catch(() => {});
       }
-      setModalConexion('INICIAR');
+      await confirmarToggleStatus(undefined);
     } else {
       if (viajeActual) {
         toast.error('No puedes desconectarte mientras tienes un viaje en curso.');
         return;
       }
-      setOdometroInput('');
       setModalArqueoCierreOpen(true);
       setCargandoArqueo(true);
       try {
@@ -3039,69 +3032,6 @@ export default function ChoferApp() {
         </div>
       )}
 
-      {/* Modal para ingresar Odómetro de Tablero opcional al Conectarse o Desconectarse */}
-      {modalConexion && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl p-5 shadow-2xl border border-transparent dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <Gauge className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-                <h3 className="font-bold text-gray-900 dark:text-white text-sm">
-                  {modalConexion === 'INICIAR' ? 'Iniciar Turno' : 'Finalizar Turno'}
-                </h3>
-              </div>
-              <button
-                onClick={() => setModalConexion(null)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-500 dark:text-slate-400">
-              {modalConexion === 'INICIAR'
-                ? '¿Deseas registrar el odómetro del tablero del auto para control exacto? (Opcional)'
-                : '¿Deseas anotar el odómetro final del tablero antes de desconectarte? (Opcional)'}
-            </p>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                Kilometraje de tablero (km)
-              </label>
-              <input
-                type="number"
-                placeholder="Ej: 145200"
-                value={odometroInput}
-                onChange={(e) => setOdometroInput(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-primary-500 text-sm"
-              />
-            </div>
-
-            <div className="flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => confirmarToggleStatus(undefined)}
-                disabled={actionLoading}
-                className="flex-1 py-2.5 border border-gray-300 dark:border-slate-700 text-gray-600 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
-              >
-                Omitir Odómetro
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  confirmarToggleStatus(
-                    odometroInput ? parseFloat(odometroInput) : undefined
-                  )
-                }
-                disabled={actionLoading}
-                className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors"
-              >
-                {modalConexion === 'INICIAR' ? 'Conectarse' : 'Desconectarse'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {/* Modal para Pausar Turno (Almuerzo / Baño / Combustible) */}
       {isPausaModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
@@ -3857,20 +3787,6 @@ export default function ChoferApp() {
                     </p>
                   </div>
                 </div>
-
-                {/* Odómetro final opcional */}
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 block">
-                    Odómetro de Tablero Final (opcional):
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="Ej: 145890"
-                    value={odometroInput}
-                    onChange={(e) => setOdometroInput(e.target.value)}
-                    className="w-full p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-xs text-gray-900 dark:text-white"
-                  />
-                </div>
               </div>
             ) : null}
 
@@ -3886,8 +3802,7 @@ export default function ChoferApp() {
                 type="button"
                 onClick={async () => {
                   setModalArqueoCierreOpen(false);
-                  const odo = odometroInput ? parseFloat(odometroInput) : undefined;
-                  await confirmarToggleStatus(odo);
+                  await confirmarToggleStatus(undefined);
                 }}
                 disabled={actionLoading}
                 className="flex-2 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md shadow-rose-600/30 cursor-pointer"

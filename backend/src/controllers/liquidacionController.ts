@@ -2,6 +2,120 @@ import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
 
+const UMBRAL_LARGA_DISTANCIA_KM = 20;
+const COMISION_AGENCIA_CORTA_PCT = 20;
+const COMISION_AGENCIA_LARGA_PCT = 15;
+const COMISION_CHOFER_NO_PROP_PCT = 30;
+
+interface CalculoLiquidacionResult {
+  totalRecaudado: number;
+  totalEfectivoViajes: number;
+  totalTransferenciaViajes: number;
+  totalCuentaCorrienteViajes: number;
+  totalCortaDistancia: number;
+  totalLargaDistancia: number;
+  cantidadCortaDistancia: number;
+  cantidadLargaDistancia: number;
+  comisionChofer: number;
+  comisionAgencia: number;
+  gananciaPropietario: number;
+  saldoNeto: number;
+  saldoAFavorChofer: number;
+  montoARendirChofer: number;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function calcularLiquidacionViajes(
+  viajes: Array<{ precio: any; metodoPago?: string | null; distanciaKmConPasajero?: number | null }>,
+  esPropietario: boolean,
+  combustible = 0
+): CalculoLiquidacionResult {
+  let totalRecaudado = 0;
+  let totalEfectivoViajes = 0;
+  let totalTransferenciaViajes = 0;
+  let totalCuentaCorrienteViajes = 0;
+  let totalCortaDistancia = 0;
+  let totalLargaDistancia = 0;
+  let cantidadCortaDistancia = 0;
+  let cantidadLargaDistancia = 0;
+
+  let comisionChofer = 0;
+  let comisionAgencia = 0;
+  let gananciaPropietarioBruta = 0;
+
+  for (const v of viajes) {
+    const precio = Number(v.precio) || 0;
+    const km = Number(v.distanciaKmConPasajero) || 0;
+    const esLargaDistancia = km >= UMBRAL_LARGA_DISTANCIA_KM;
+    const agenciaPct = esLargaDistancia ? COMISION_AGENCIA_LARGA_PCT : COMISION_AGENCIA_CORTA_PCT;
+
+    totalRecaudado += precio;
+
+    if (esLargaDistancia) {
+      totalLargaDistancia += precio;
+      cantidadLargaDistancia += 1;
+    } else {
+      totalCortaDistancia += precio;
+      cantidadCortaDistancia += 1;
+    }
+
+    if (v.metodoPago === 'TRANSFERENCIA') {
+      totalTransferenciaViajes += precio;
+    } else if (v.metodoPago === 'CUENTA_CORRIENTE') {
+      totalCuentaCorrienteViajes += precio;
+    } else {
+      totalEfectivoViajes += precio;
+    }
+
+    const comAgenciaViaje = (precio * agenciaPct) / 100;
+    comisionAgencia += comAgenciaViaje;
+
+    if (esPropietario) {
+      // Propietario: 80% (< 20 km) | 85% (>= 20 km)
+      comisionChofer += precio - comAgenciaViaje;
+    } else {
+      // Comisionista: 30% chofer siempre; 20% agencia / 50% dueño (< 20 km) | 15% agencia / 55% dueño (>= 20 km)
+      const comChoferViaje = (precio * COMISION_CHOFER_NO_PROP_PCT) / 100;
+      comisionChofer += comChoferViaje;
+      gananciaPropietarioBruta += precio - comChoferViaje - comAgenciaViaje;
+    }
+  }
+
+  const combustibleVal = esPropietario ? 0 : Math.max(0, Number(combustible) || 0);
+  const gananciaPropietario = esPropietario
+    ? 0
+    : Math.max(0, gananciaPropietarioBruta - combustibleVal);
+
+  // El chofer solo cobró en mano los viajes en EFECTIVO.
+  // Los viajes en TRANSFERENCIA y CUENTA_CORRIENTE van a la cuenta de la agencia.
+  // saldoNeto = totalEfectivoViajes - comisionChofer - combustibleVal
+  // > 0 => el chofer entrega dinero a la caja
+  // < 0 => saldo a favor del chofer (la agencia le debe pagar)
+  const saldoNeto = round2(totalEfectivoViajes - comisionChofer - combustibleVal);
+  const saldoAFavorChofer = saldoNeto < 0 ? round2(Math.abs(saldoNeto)) : 0;
+  const montoARendirChofer = saldoNeto > 0 ? round2(saldoNeto) : 0;
+
+  return {
+    totalRecaudado: round2(totalRecaudado),
+    totalEfectivoViajes: round2(totalEfectivoViajes),
+    totalTransferenciaViajes: round2(totalTransferenciaViajes),
+    totalCuentaCorrienteViajes: round2(totalCuentaCorrienteViajes),
+    totalCortaDistancia: round2(totalCortaDistancia),
+    totalLargaDistancia: round2(totalLargaDistancia),
+    cantidadCortaDistancia,
+    cantidadLargaDistancia,
+    comisionChofer: round2(comisionChofer),
+    comisionAgencia: round2(comisionAgencia),
+    gananciaPropietario: round2(gananciaPropietario),
+    saldoNeto,
+    saldoAFavorChofer,
+    montoARendirChofer
+  };
+}
+
 export const liquidacionController = {
   // Obtener viajes pendientes de liquidar para un chofer
   async getPendientes(req: AuthenticatedRequest, res: Response) {
@@ -64,29 +178,8 @@ export const liquidacionController = {
         }
       });
 
-      // Calcular totales
-      const totalRecaudado = viajes.reduce((sum, v) => sum + Number(v.precio), 0);
-      const totalEfectivo = viajes.filter(v => v.metodoPago !== 'TRANSFERENCIA').reduce((sum, v) => sum + Number(v.precio), 0);
-      const totalTransferencia = viajes.filter(v => v.metodoPago === 'TRANSFERENCIA').reduce((sum, v) => sum + Number(v.precio), 0);
-
-      // Comisiones calculadas por defecto (sin combustible)
-      let comisionChofer = 0;
-      let comisionAgencia = 0;
-      let gananciaPropietario = 0;
-
-      // Reglas de Comisiones:
-      // 1. Todos pagan 20% de comisión a la remisería.
-      // 2. Choferes con vehículo asignado se llevan el 30% de la recaudación diaria.
-      // 3. Dueño del vehículo se lleva el 50% restante (menos combustible).
-      if (chofer.esPropietario) {
-        comisionAgencia = (totalRecaudado * 20) / 100; // 20% para la agencia
-        comisionChofer = totalRecaudado - comisionAgencia; // 80% para el chofer dueño
-        gananciaPropietario = 0; // El dueño del auto es el chofer mismo
-      } else {
-        comisionChofer = (totalRecaudado * 30) / 100; // 30% recaudación diaria
-        comisionAgencia = (totalRecaudado * 20) / 100; // 20% comisión remisería
-        gananciaPropietario = totalRecaudado - comisionChofer - comisionAgencia; // 50% para el dueño del auto
-      }
+      // Calcular totales y comisiones viaje por viaje (< 20 km: 20% agencia | >= 20 km: 15% agencia)
+      const calc = calcularLiquidacionViajes(viajes, chofer.esPropietario, 0);
 
       res.json({
         success: true,
@@ -102,13 +195,21 @@ export const liquidacionController = {
           },
           viajes,
           resumen: {
-            totalRecaudado,
-            totalEfectivo,
-            totalTransferencia,
-            comisionChofer,
-            comisionAgencia,
+            totalRecaudado: calc.totalRecaudado,
+            totalEfectivo: calc.totalEfectivoViajes,
+            totalTransferencia: calc.totalTransferenciaViajes,
+            totalCuentaCorriente: calc.totalCuentaCorrienteViajes,
+            totalCortaDistancia: calc.totalCortaDistancia,
+            totalLargaDistancia: calc.totalLargaDistancia,
+            cantidadCortaDistancia: calc.cantidadCortaDistancia,
+            cantidadLargaDistancia: calc.cantidadLargaDistancia,
+            comisionChofer: calc.comisionChofer,
+            comisionAgencia: calc.comisionAgencia,
             combustible: 0,
-            gananciaPropietario
+            gananciaPropietario: calc.gananciaPropietario,
+            saldoNeto: calc.saldoNeto,
+            saldoAFavorChofer: calc.saldoAFavorChofer,
+            montoARendirChofer: calc.montoARendirChofer
           }
         }
       });
@@ -124,7 +225,15 @@ export const liquidacionController = {
   // Crear la liquidación (cierre de caja)
   async crear(req: AuthenticatedRequest, res: Response) {
     try {
-      const { choferId, combustible, observaciones } = req.body;
+      const {
+        choferId,
+        combustible,
+        observaciones,
+        metodoPagoChofer,
+        montoEfectivo,
+        montoTransferencia,
+        quienPagaSaldoAFavor
+      } = req.body;
       const { rol, id: userId } = req.user!;
 
       if (!choferId) {
@@ -195,26 +304,87 @@ export const liquidacionController = {
         });
       }
 
-      const totalRecaudado = viajes.reduce((sum, v) => sum + Number(v.precio), 0);
+      const calc = calcularLiquidacionViajes(viajes, chofer.esPropietario, combustibleVal);
 
-      // Calcular comisiones y ganancias definitivas
-      let comisionChofer = 0;
-      let comisionAgencia = 0;
-      let gananciaPropietario = 0;
+      // Validar medio de pago del chofer y/o saldo a favor
+      const metodosPagoValidos = ['EFECTIVO', 'TRANSFERENCIA', 'AMBOS'];
+      let metodoPagoFinal: string | null = null;
+      let montoEfectivoFinal = 0;
+      let montoTransferenciaFinal = 0;
+      let quienPagaFinal: string | null = null;
 
-      if (chofer.esPropietario) {
-        // Chofer dueño del vehículo: Paga 20% de comisión a la remisería, retiene el 80%
-        comisionAgencia = (totalRecaudado * 20) / 100;
-        comisionChofer = totalRecaudado - comisionAgencia;
-        gananciaPropietario = 0;
-      } else {
-        // Chofer que maneja un vehículo asignado (por la remisería o un tercero):
-        // El chofer se lleva el 30% de su recaudación diaria
-        // La remisería cobra el 20% de comisión
-        // El dueño del auto (o la remisería si es propietaria) recibe el 50% restante
-        comisionChofer = (totalRecaudado * 30) / 100;
-        comisionAgencia = (totalRecaudado * 20) / 100;
-        gananciaPropietario = totalRecaudado - comisionChofer - comisionAgencia - combustibleVal;
+      if (calc.montoARendirChofer > 0) {
+        const metodo = metodoPagoChofer || 'EFECTIVO';
+        if (!metodosPagoValidos.includes(metodo)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Medio de pago inválido. Debe ser EFECTIVO, TRANSFERENCIA o AMBOS.'
+          });
+        }
+        metodoPagoFinal = metodo;
+
+        if (metodo === 'EFECTIVO') {
+          montoEfectivoFinal = calc.montoARendirChofer;
+          montoTransferenciaFinal = 0;
+        } else if (metodo === 'TRANSFERENCIA') {
+          montoEfectivoFinal = 0;
+          montoTransferenciaFinal = calc.montoARendirChofer;
+        } else {
+          const efec = Number(montoEfectivo) || 0;
+          const transf = Number(montoTransferencia) || 0;
+          if (efec < 0 || transf < 0) {
+            return res.status(400).json({
+              success: false,
+              message: 'Los montos de efectivo y transferencia no pueden ser negativos.'
+            });
+          }
+          if (Math.abs((efec + transf) - calc.montoARendirChofer) > 1) {
+            return res.status(400).json({
+              success: false,
+              message: `La suma de Efectivo ($${efec}) + Transferencia ($${transf}) debe coincidir con el monto a rendir ($${calc.montoARendirChofer}).`
+            });
+          }
+          montoEfectivoFinal = round2(efec);
+          montoTransferenciaFinal = round2(transf);
+        }
+      } else if (calc.saldoAFavorChofer > 0) {
+        const quien = quienPagaSaldoAFavor || 'PENDIENTE_DUENIO';
+        if (!['COORDINADOR', 'PENDIENTE_DUENIO'].includes(quien)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Debe indicar si el saldo a favor lo paga el COORDINADOR o queda PENDIENTE_DUENIO.'
+          });
+        }
+        quienPagaFinal = quien;
+
+        if (quien === 'COORDINADOR') {
+          const metodo = metodoPagoChofer || 'EFECTIVO';
+          if (!metodosPagoValidos.includes(metodo)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Medio de pago inválido.'
+            });
+          }
+          metodoPagoFinal = metodo;
+          if (metodo === 'EFECTIVO') {
+            montoEfectivoFinal = calc.saldoAFavorChofer;
+            montoTransferenciaFinal = 0;
+          } else if (metodo === 'TRANSFERENCIA') {
+            montoEfectivoFinal = 0;
+            montoTransferenciaFinal = calc.saldoAFavorChofer;
+          } else {
+            const efec = Number(montoEfectivo) || 0;
+            const transf = Number(montoTransferencia) || 0;
+            if (Math.abs((efec + transf) - calc.saldoAFavorChofer) > 1) {
+              return res.status(400).json({
+                success: false,
+                message: `La suma de Efectivo + Transferencia debe coincidir con el saldo a favor ($${calc.saldoAFavorChofer}).`
+              });
+            }
+            montoEfectivoFinal = round2(efec);
+            montoTransferenciaFinal = round2(transf);
+          }
+        }
       }
 
       // Registrar la liquidación y relacionar los viajes en una transacción
@@ -223,11 +393,20 @@ export const liquidacionController = {
           data: {
             choferId: chofer.id,
             coordinadorId: userId, // ID del usuario autenticado (dueño o coordinador) en la tabla 'User'
-            totalRecaudado,
-            combustible: combustibleVal,
-            comisionChofer,
-            comisionAgencia,
-            gananciaPropietario,
+            totalRecaudado: calc.totalRecaudado,
+            combustible: chofer.esPropietario ? 0 : combustibleVal,
+            comisionChofer: calc.comisionChofer,
+            comisionAgencia: calc.comisionAgencia,
+            gananciaPropietario: calc.gananciaPropietario,
+            totalEfectivoViajes: calc.totalEfectivoViajes,
+            totalTransferenciaViajes: calc.totalTransferenciaViajes,
+            totalCuentaCorrienteViajes: calc.totalCuentaCorrienteViajes,
+            saldoNeto: calc.saldoNeto,
+            saldoAFavorChofer: calc.saldoAFavorChofer,
+            quienPagaSaldoAFavor: quienPagaFinal,
+            metodoPagoChofer: metodoPagoFinal,
+            montoEfectivo: montoEfectivoFinal,
+            montoTransferencia: montoTransferenciaFinal,
             observaciones: observaciones || null
           }
         });
@@ -254,11 +433,17 @@ export const liquidacionController = {
           details: JSON.stringify({
             liquidacionId: liquidacion.id,
             choferId: chofer.id,
-            totalRecaudado,
-            comisionChofer,
-            comisionAgencia,
+            totalRecaudado: calc.totalRecaudado,
+            comisionChofer: calc.comisionChofer,
+            comisionAgencia: calc.comisionAgencia,
             combustibleVal,
-            gananciaPropietario
+            gananciaPropietario: calc.gananciaPropietario,
+            saldoNeto: calc.saldoNeto,
+            saldoAFavorChofer: calc.saldoAFavorChofer,
+            quienPagaSaldoAFavor: quienPagaFinal,
+            metodoPagoChofer: metodoPagoFinal,
+            montoEfectivo: montoEfectivoFinal,
+            montoTransferencia: montoTransferenciaFinal
           }),
           ipAddress: req.ip,
           userAgent: req.get('User-Agent') || null
@@ -314,15 +499,37 @@ export const liquidacionController = {
       const totalGananciaPropietario = liquidaciones.reduce((sum, l) => sum + l.gananciaPropietario, 0);
       const totalCombustible = liquidaciones.reduce((sum, l) => sum + l.combustible, 0);
 
+      const totalEfectivoCobrado = liquidaciones
+        .filter(l => l.saldoNeto > 0)
+        .reduce((sum, l) => sum + (l.montoEfectivo || 0), 0);
+      const totalTransferenciaCobrada = liquidaciones
+        .filter(l => l.saldoNeto > 0)
+        .reduce((sum, l) => sum + (l.montoTransferencia || 0), 0);
+      const totalPagadoSaldoAFavorCaja = liquidaciones
+        .filter(l => l.saldoAFavorChofer > 0 && l.quienPagaSaldoAFavor === 'COORDINADOR')
+        .reduce((sum, l) => sum + l.saldoAFavorChofer, 0);
+      const totalEfectivoPagadoCaja = liquidaciones
+        .filter(l => l.saldoAFavorChofer > 0 && l.quienPagaSaldoAFavor === 'COORDINADOR')
+        .reduce((sum, l) => sum + (l.montoEfectivo || 0), 0);
+      const totalSaldoAFavorPendienteDuenio = liquidaciones
+        .filter(l => l.saldoAFavorChofer > 0 && l.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO')
+        .reduce((sum, l) => sum + l.saldoAFavorChofer, 0);
+      const netoEfectivoEnCaja = round2(totalEfectivoCobrado - totalEfectivoPagadoCaja);
+
       res.json({
         success: true,
         data: {
           liquidaciones,
           resumen: {
-            totalRecaudado,
-            totalComisionAgencia,
-            totalGananciaPropietario,
-            totalCombustible
+            totalRecaudado: round2(totalRecaudado),
+            totalComisionAgencia: round2(totalComisionAgencia),
+            totalGananciaPropietario: round2(totalGananciaPropietario),
+            totalCombustible: round2(totalCombustible),
+            totalEfectivoCobrado: round2(totalEfectivoCobrado),
+            totalTransferenciaCobrada: round2(totalTransferenciaCobrada),
+            totalPagadoSaldoAFavorCaja: round2(totalPagadoSaldoAFavorCaja),
+            totalSaldoAFavorPendienteDuenio: round2(totalSaldoAFavorPendienteDuenio),
+            netoEfectivoEnCaja
           }
         }
       });
@@ -386,6 +593,8 @@ export const liquidacionController = {
               fecha: true,
               origen: true,
               destino: true,
+              metodoPago: true,
+              distanciaKmConPasajero: true,
               vehiculo: {
                 select: {
                   id: true,
@@ -563,13 +772,24 @@ export const liquidacionController = {
         });
       }
 
+      // Si es una liquidación con saldo a favor del chofer pendiente del dueño, también actualizar su estado de pago
+      let quienPagaSaldoAFavorUpdate: string | undefined;
+      if (liquidacion.saldoAFavorChofer > 0) {
+        if (recibido && liquidacion.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO') {
+          quienPagaSaldoAFavorUpdate = 'PAGADO_DUENIO';
+        } else if (!recibido && liquidacion.quienPagaSaldoAFavor === 'PAGADO_DUENIO') {
+          quienPagaSaldoAFavorUpdate = 'PENDIENTE_DUENIO';
+        }
+      }
+
       const updated = await prisma.liquidacion.update({
         where: { id },
         data: {
           dineroRecibido: recibido,
           metodoEntregaDuenio: recibido ? metodoEntregaDuenio : null,
           fechaRecepcionDuenio: recibido ? new Date() : null,
-          notasRecepcion: recibido ? (notasRecepcion?.trim() || null) : null
+          notasRecepcion: recibido ? (notasRecepcion?.trim() || null) : null,
+          ...(quienPagaSaldoAFavorUpdate ? { quienPagaSaldoAFavor: quienPagaSaldoAFavorUpdate } : {})
         }
       });
 
