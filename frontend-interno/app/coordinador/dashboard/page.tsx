@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { coordinadorDashboardService, clienteAuthService, choferService, vehiculoService, artEmpresaService, getSocketUrl } from '@/lib/api';
+import { getArtColorClasses } from '@/lib/artColorUtils';
 import { ArtEmpresa } from '@/types';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import LogoBruno from '@/components/LogoBruno';
@@ -2919,16 +2920,24 @@ export default function CoordinadorDashboard() {
                                   {viaje.cliente}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                                  {viaje.artEmpresa && (
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                                      ART - {viaje.artEmpresa.nombre}
-                                    </span>
-                                  )}
-                                  {viaje.numeroSiniestro && (
-                                    <span className="text-[10px] font-mono text-gray-600">
-                                      Sin: {viaje.numeroSiniestro}
-                                    </span>
-                                  )}
+                                  {(() => {
+                                    const artColors = getArtColorClasses(viaje.artEmpresa?.nombre, viaje.artEmpresa?.id);
+                                    return (
+                                      <>
+                                        {viaje.artEmpresa && (
+                                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border ${artColors.badge}`}>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
+                                            ART - {viaje.artEmpresa.nombre}
+                                          </span>
+                                        )}
+                                        {viaje.numeroSiniestro && (
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${artColors.siniestro}`}>
+                                            Sin: {viaje.numeroSiniestro}
+                                          </span>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                                 <div className="text-xs text-gray-500 truncate mt-0.5">{viaje.telefono}</div>
                               </td>
@@ -3015,11 +3024,22 @@ export default function CoordinadorDashboard() {
                               <td className="px-3 sm:px-4 py-3 font-medium text-gray-900 text-xs sm:text-sm">
                                 <div>{reserva.cliente}</div>
                                 {reserva.telefono && <div className="text-xs text-gray-500">{reserva.telefono}</div>}
-                                {reserva.isViajeArt && (
-                                  <div className="text-[11px] font-bold text-blue-700 mt-0.5">
-                                    🏢 {reserva.artNombre || 'ART'} {reserva.numeroSiniestro ? `(Sin: ${reserva.numeroSiniestro})` : ''}
-                                  </div>
-                                )}
+                                {reserva.isViajeArt && (() => {
+                                  const artColors = getArtColorClasses(reserva.artNombre);
+                                  return (
+                                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border ${artColors.badge}`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
+                                        {reserva.artNombre || 'ART'}
+                                      </span>
+                                      {reserva.numeroSiniestro && (
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${artColors.siniestro}`}>
+                                          Sin: {reserva.numeroSiniestro}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900">{reserva.origen}</td>
                               <td className="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900">{reserva.destino}</td>

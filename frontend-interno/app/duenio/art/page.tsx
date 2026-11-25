@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { artEmpresaService, remiseriaService, choferService, coordinadorDashboardService } from '@/lib/api';
+import { getArtColorClasses } from '@/lib/artColorUtils';
 import { ArtEmpresa, CreateArtEmpresaData, UpdateArtEmpresaData, FacturacionArtResponse, CierreFacturacionArt } from '@/types';
 import {
   Briefcase,
@@ -84,9 +85,10 @@ export default function ArtPage() {
     activo: true,
   });
 
-  // Modal Configurar y Sincronizar Portal Externo (Feleval)
+  // Modal Configurar y Sincronizar Portal Externo (Feleval / SIMAR2)
   const [portalModalArt, setPortalModalArt] = useState<any | null>(null);
   const [portalConfigForm, setPortalConfigForm] = useState({
+    portalExternoTipo: 'FELEVAL' as 'FELEVAL' | 'SIMAR2',
     portalExternoActivo: false,
     portalExternoEmail: '',
     portalExternoPassword: '',
@@ -98,12 +100,25 @@ export default function ArtPage() {
 
   const abrirModalPortal = (art: any) => {
     setPortalModalArt(art);
+    const tipoDetectado: 'FELEVAL' | 'SIMAR2' =
+      art.portalExternoTipo === 'SIMAR2' ||
+      String(art.portalExternoUrl || '').toLowerCase().includes('simar2') ||
+      String(art.nombre || '').toLowerCase().includes('central') ||
+      String(art.nombre || '').toLowerCase().includes('nacion') ||
+      String(art.nombre || '').toLowerCase().includes('nación')
+        ? 'SIMAR2'
+        : 'FELEVAL';
     setPortalConfigForm({
+      portalExternoTipo: tipoDetectado,
       portalExternoActivo: Boolean(art.portalExternoActivo),
       portalExternoEmail: art.portalExternoEmail || '',
       portalExternoPassword: '',
       portalExternoEmailAlerta: art.portalExternoEmailAlerta || 'rizzofs@gmail.com',
-      portalExternoUrl: art.portalExternoUrl || 'https://app.feleval.com.ar'
+      portalExternoUrl:
+        art.portalExternoUrl ||
+        (tipoDetectado === 'SIMAR2'
+          ? 'https://simar2.com.ar/nacion/prestadores'
+          : 'https://app.feleval.com.ar')
     });
   };
 
@@ -112,14 +127,19 @@ export default function ArtPage() {
     if (!portalModalArt) return;
     try {
       setSavingPortalConfig(true);
+      const defaultUrl =
+        portalConfigForm.portalExternoTipo === 'SIMAR2'
+          ? 'https://simar2.com.ar/nacion/prestadores'
+          : 'https://app.feleval.com.ar';
       const res = await artEmpresaService.configurarPortalExterno(portalModalArt.id, {
+        portalExternoTipo: portalConfigForm.portalExternoTipo,
         portalExternoActivo: portalConfigForm.portalExternoActivo,
         portalExternoEmail: portalConfigForm.portalExternoEmail.trim(),
         ...(portalConfigForm.portalExternoPassword.trim()
           ? { portalExternoPassword: portalConfigForm.portalExternoPassword.trim() }
           : {}),
         portalExternoEmailAlerta: portalConfigForm.portalExternoEmailAlerta.trim() || 'rizzofs@gmail.com',
-        portalExternoUrl: portalConfigForm.portalExternoUrl.trim() || 'https://app.feleval.com.ar'
+        portalExternoUrl: portalConfigForm.portalExternoUrl.trim() || defaultUrl
       });
       if (res.success) {
         toast.success('Configuración de sincronización guardada');
@@ -1516,11 +1536,13 @@ export default function ArtPage() {
                 <div className="block md:hidden divide-y divide-slate-100">
                   {listaFiltrada.map((v) => {
                     const selectedCh = choferSeleccionadoPorViaje[v.id] ?? v.choferId ?? '';
+                    const artColors = getArtColorClasses(v.artEmpresa?.nombre, v.artEmpresaId);
                     return (
                       <div key={v.id} className="p-4 space-y-3 bg-white">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <span className="inline-flex px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px]">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border font-bold text-[10px] ${artColors.badge}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
                               ART - {v.artEmpresa?.nombre || 'Empresa'}
                             </span>
                             <h4 className="font-bold text-slate-900 text-sm mt-1 break-words">
@@ -1530,9 +1552,9 @@ export default function ArtPage() {
                               <p className="text-xs text-slate-500">{v.clienteTelefono}</p>
                             )}
                             {v.numeroSiniestro && (
-                              <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                              <span className={`inline-flex mt-1 px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold ${artColors.siniestro}`}>
                                 Sin: {v.numeroSiniestro}
-                              </p>
+                              </span>
                             )}
                           </div>
                           <div className="text-right shrink-0">
@@ -1645,14 +1667,22 @@ export default function ArtPage() {
                               </div>
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <span className="inline-flex px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px]">
-                                ART - {v.artEmpresa?.nombre || 'Empresa'}
-                              </span>
-                              {v.numeroSiniestro && (
-                                <div className="text-[11px] text-slate-600 font-mono mt-0.5">
-                                  Sin: {v.numeroSiniestro}
-                                </div>
-                              )}
+                              {(() => {
+                                const artColors = getArtColorClasses(v.artEmpresa?.nombre, v.artEmpresaId);
+                                return (
+                                  <div className="flex flex-col items-start gap-1">
+                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border font-bold text-[10px] ${artColors.badge}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
+                                      ART - {v.artEmpresa?.nombre || 'Empresa'}
+                                    </span>
+                                    {v.numeroSiniestro && (
+                                      <span className={`inline-flex px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold ${artColors.siniestro}`}>
+                                        Sin: {v.numeroSiniestro}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-3">
                               <div className="font-bold text-slate-900">{v.clienteNombre || 'Sin nombre'}</div>
@@ -2439,28 +2469,39 @@ export default function ArtPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="font-bold text-slate-900 text-sm">{viaje.artEmpresa?.nombre || 'Sin ART'}</span>
-                              {viaje.numeroSiniestro ? (
-                                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200">
-                                  <span>#{viaje.numeroSiniestro}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAbrirSiniestro(viaje, 'MODIFICAR')}
-                                    className="hover:text-blue-900"
-                                    title="Modificar número de siniestro"
-                                  >
-                                    <Edit className="w-2.5 h-2.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAbrirSiniestro(viaje, 'ANULAR')}
-                                    className="text-rose-500 hover:text-rose-700 font-bold"
-                                    title="Anular viaje de siniestro"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
+                              {(() => {
+                                const artColors = getArtColorClasses(viaje.artEmpresa?.nombre, viaje.artEmpresaId);
+                                return (
+                                  <>
+                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border font-bold text-[11px] ${artColors.badge}`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
+                                      {viaje.artEmpresa?.nombre || 'Sin ART'}
+                                    </span>
+                                    {viaje.numeroSiniestro ? (
+                                      <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border ${artColors.siniestro}`}>
+                                        <span>#{viaje.numeroSiniestro}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAbrirSiniestro(viaje, 'MODIFICAR')}
+                                          className="hover:opacity-75"
+                                          title="Modificar número de siniestro"
+                                        >
+                                          <Edit className="w-2.5 h-2.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAbrirSiniestro(viaje, 'ANULAR')}
+                                          className="text-rose-500 hover:text-rose-700 font-bold"
+                                          title="Anular viaje de siniestro"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </>
+                                );
+                              })()}
+                              {!viaje.numeroSiniestro && (
                                 <button
                                   type="button"
                                   onClick={() => handleAbrirSiniestro(viaje, 'MODIFICAR')}
@@ -2638,32 +2679,41 @@ export default function ArtPage() {
 
                           {/* ART / Siniestro */}
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <span className="font-bold text-slate-900 block">
-                              {viaje.artEmpresa?.nombre || 'Sin ART'}
-                            </span>
-                            {viaje.numeroSiniestro ? (
-                              <div className="flex items-center gap-1 mt-0.5">
-                                <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200">
-                                  #{viaje.numeroSiniestro}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleAbrirSiniestro(viaje, 'MODIFICAR')}
-                                  className="text-slate-400 hover:text-blue-600 p-0.5"
-                                  title="Corregir N° de Siniestro"
-                                >
-                                  <Edit className="w-3 h-3" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleAbrirSiniestro(viaje, 'ANULAR')}
-                                  className="text-rose-400 hover:text-rose-600 font-bold p-0.5"
-                                  title="Anular Siniestro / Caído"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ) : (
+                            {(() => {
+                              const artColors = getArtColorClasses(viaje.artEmpresa?.nombre, viaje.artEmpresaId);
+                              return (
+                                <>
+                                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border font-bold text-[11px] ${artColors.badge}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
+                                    {viaje.artEmpresa?.nombre || 'Sin ART'}
+                                  </span>
+                                  {viaje.numeroSiniestro ? (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono border ${artColors.siniestro}`}>
+                                        #{viaje.numeroSiniestro}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAbrirSiniestro(viaje, 'MODIFICAR')}
+                                        className="text-slate-400 hover:text-blue-600 p-0.5"
+                                        title="Corregir N° de Siniestro"
+                                      >
+                                        <Edit className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAbrirSiniestro(viaje, 'ANULAR')}
+                                        className="text-rose-400 hover:text-rose-600 font-bold p-0.5"
+                                        title="Anular Siniestro / Caído"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                            {!viaje.numeroSiniestro && (
                               <button
                                 type="button"
                                 onClick={() => handleAbrirSiniestro(viaje, 'MODIFICAR')}
@@ -5183,7 +5233,9 @@ export default function ArtPage() {
                   <RefreshCw className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Sincronización Portal Feleval</h3>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Sincronización Portal {portalConfigForm.portalExternoTipo === 'SIMAR2' ? 'SIMAR2' : 'Feleval'}
+                  </h3>
                   <p className="text-xs text-slate-500">{portalModalArt.nombre} • Automática diaria a las 23:59 hs</p>
                 </div>
               </div>
@@ -5239,11 +5291,59 @@ export default function ArtPage() {
               </label>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Email de acceso a Feleval</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Sistema / Portal externo</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPortalConfigForm((prev) => ({
+                        ...prev,
+                        portalExternoTipo: 'FELEVAL',
+                        portalExternoUrl: 'https://app.feleval.com.ar'
+                      }))
+                    }
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
+                      portalConfigForm.portalExternoTipo === 'FELEVAL'
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Feleval
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPortalConfigForm((prev) => ({
+                        ...prev,
+                        portalExternoTipo: 'SIMAR2',
+                        portalExternoUrl: 'https://simar2.com.ar/nacion/prestadores'
+                      }))
+                    }
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
+                      portalConfigForm.portalExternoTipo === 'SIMAR2'
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    SIMAR2 (Central Nación)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {portalConfigForm.portalExternoTipo === 'SIMAR2'
+                    ? 'Usuario / CUIT de acceso a SIMAR2'
+                    : 'Email de acceso a Feleval'}
+                </label>
                 <input
-                  type="email"
+                  type={portalConfigForm.portalExternoTipo === 'SIMAR2' ? 'text' : 'email'}
                   required
-                  placeholder="usuario@ejemplo.com"
+                  placeholder={
+                    portalConfigForm.portalExternoTipo === 'SIMAR2'
+                      ? '20369969464'
+                      : 'usuario@ejemplo.com'
+                  }
                   value={portalConfigForm.portalExternoEmail}
                   onChange={(e) =>
                     setPortalConfigForm((prev) => ({ ...prev, portalExternoEmail: e.target.value }))
@@ -5254,7 +5354,7 @@ export default function ArtPage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Contraseña de Feleval
+                  Contraseña del portal
                 </label>
                 <input
                   type="password"
@@ -5266,7 +5366,7 @@ export default function ArtPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Se guarda cifrada en el servidor. Cuando Feleval pida cambiar la clave, actualizala acá.
+                  Se guarda cifrada en el servidor. Si cambia la clave del portal, actualizala acá.
                 </p>
               </div>
 

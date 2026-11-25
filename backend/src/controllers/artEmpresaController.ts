@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
-import { encryptPortalPassword, sincronizarArtFeleval } from '../services/felevalSyncService';
+import { encryptPortalPassword, sincronizarPortalArt } from '../services/felevalSyncService';
 
 async function resolveRemiseriaId(req: AuthenticatedRequest): Promise<string | null> {
   const userId = req.user?.id;
@@ -1764,12 +1764,24 @@ export const artEmpresaController = {
         portalExternoEmail,
         portalExternoPassword,
         portalExternoEmailAlerta,
-        portalExternoUrl
+        portalExternoUrl,
+        portalExternoTipo
       } = req.body;
 
+      const urlTrim = portalExternoUrl?.trim() || '';
+      const tipoResuelto =
+        String(portalExternoTipo || '').toUpperCase() === 'SIMAR2' || urlTrim.toLowerCase().includes('simar2')
+          ? 'SIMAR2'
+          : 'FELEVAL';
+
+      const defaultUrl =
+        tipoResuelto === 'SIMAR2'
+          ? 'https://simar2.com.ar/nacion/prestadores'
+          : 'https://app.feleval.com.ar';
+
       const dataUpdate: any = {
-        portalExternoTipo: 'FELEVAL',
-        portalExternoUrl: portalExternoUrl?.trim() || 'https://app.feleval.com.ar',
+        portalExternoTipo: tipoResuelto,
+        portalExternoUrl: urlTrim || defaultUrl,
         portalExternoActivo: Boolean(portalExternoActivo),
         portalExternoEmail: portalExternoEmail !== undefined ? portalExternoEmail.trim() : art.portalExternoEmail,
         portalExternoEmailAlerta: portalExternoEmailAlerta?.trim() || 'rizzofs@gmail.com'
@@ -1812,7 +1824,7 @@ export const artEmpresaController = {
         return res.status(404).json({ success: false, message: 'ART / Empresa no encontrada' });
       }
 
-      const result = await sincronizarArtFeleval(id, { enviarAlertaSiempre: true });
+      const result = await sincronizarPortalArt(id, { enviarAlertaSiempre: true });
       return res.status(result.success ? 200 : 400).json({
         success: result.success,
         data: result,

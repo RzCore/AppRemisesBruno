@@ -10,7 +10,50 @@ import {
 } from '../lib/pricingUtils';
 
 const FELEVAL_BASE_URL = 'https://app.feleval.com.ar';
+const SIMAR2_DEFAULT_URL = 'https://simar2.com.ar/nacion/prestadores';
 const ALGO = 'aes-256-gcm';
+
+function getTodayArgYYYYMMDD(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function parseFechaHoraSimar2(fechaStr: string, horaStr: string): { fecha: Date; horaTurno: string } {
+  const fMatch = String(fechaStr || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  const hMatch = String(horaStr || '').match(/(\d{1,2}):(\d{2})/);
+  if (!fMatch) {
+    return { fecha: new Date(), horaTurno: '08:00' };
+  }
+  const year = parseInt(fMatch[1], 10);
+  const month = parseInt(fMatch[2], 10) - 1;
+  const day = parseInt(fMatch[3], 10);
+  const hour = hMatch ? parseInt(hMatch[1], 10) : 8;
+  const minute = hMatch ? parseInt(hMatch[2], 10) : 0;
+
+  // Guardamos fecha en horario local de Argentina (UTC-3)
+  const fecha = new Date(Date.UTC(year, month, day, hour + 3, minute, 0));
+  const horaTurno = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return { fecha, horaTurno };
+}
+
+function formatDireccionSimar2(calle?: string, localidad?: string): string {
+  const c = String(calle || '').replace(/\s+/g, ' ').trim();
+  const l = String(localidad || '').replace(/\s+/g, ' ').trim();
+  if (!c && !l) return 'A confirmar';
+  if (!l) return c;
+  if (!c) return `${l}, Buenos Aires`;
+  if (c.toLowerCase().includes(l.toLowerCase())) {
+    return /buenos aires|caba|capital federal/i.test(c) ? c : `${c}, Buenos Aires`;
+  }
+  const sufijoProv = /capital federal|caba/i.test(l) ? '' : ', Buenos Aires';
+  return `${c}, ${l}${sufijoProv}`;
+}
 
 function getEncryptionKey(): Buffer {
   const secret =
@@ -740,14 +783,408 @@ export async function sincronizarArtFeleval(
   }
 }
 
+export async function sincronizarArtSimar2(
+  artEmpresaId: string,
+  options?: { enviarAlertaSiempre?: boolean }
+): Promise<FelevalSyncResult> {
+  const art = await prisma.artEmpresa.findUnique({
+    where: { id: artEmpresaId },
+    include: { remiseria: { select: { latitud: true, longitud: true } } }
+  });
+
+  if (!art) {
+    return {
+      success: false,
+      estado: 'ERROR_CONEXION',
+      mensaje: 'ART / Empresa no encontrada',
+      totalEnPortal: 0,
+      importados: 0,
+      yaExistentes: 0,
+      erroresDetalle: 0
+    };
+  }
+
+  if (!art.portalExternoEmail || !art.portalExternoPasswordEnc) {
+    return {
+      success: false,
+      estado: 'ERROR_CLAVE',
+      mensaje: 'Faltan configurar el usuario o contraseña del portal SIMAR2',
+      totalEnPortal: 0,
+      importados: 0,
+      yaExistentes: 0,
+      erroresDetalle: 0
+    };
+  }
+
+  // Normalizar URL base (si pegaron .../index.php, quitar index.php)
+  const rawUrl = (art.portalExternoUrl || SIMAR2_DEFAULT_URL).trim();
+  const baseUrl = rawUrl.replace(/\/index\.php$/i, '').replace(/\/+$/, '');
+  const emailAlerta = art.portalExternoEmailAlerta || 'rizzofs@gmail.com';
+  let passwordPlain = '';
+
+  try {
+    passwordPlain = decryptPortalPassword(art.portalExternoPasswordEnc);
+  } catch {
+    return {
+      success: false,
+      estado: 'ERROR_CLAVE',
+      mensaje: 'No se pudo descifrar la contraseña guardada. Volvé a ingresarla.',
+      totalEnPortal: 0,
+      importados: 0,
+      yaExistentes: 0,
+      erroresDetalle: 0
+    };
+  }
+
+  const cookieMap = new Map<string, string>();
+
+  const registrarErrorClave = async (motivo: string): Promise<FelevalSyncResult> => {
+    const yaAlertoHoy =
+      art.portalExternoUltimoEstado === 'ERROR_CLAVE' &&
+      art.portalExternoUltimaSync &&
+      new Date(art.portalExternoUltimaSync).toDateString() === new Date().toDateString();
+
+    let alertaEmailEnviada = false;
+    if (options?.enviarAlertaSiempre || !yaAlertoHoy) {
+      await sendFelevalPasswordAlertEmail(
+        emailAlerta,
+        art.nombre,
+        art.portalExternoEmail || '',
+        motivo
+      );
+      alertaEmailEnviada = true;
+    }
+
+    await prisma.artEmpresa.update({
+      where: { id: art.id },
+      data: {
+        portalExternoUltimaSync: new Date(),
+        portalExternoUltimoEstado: 'ERROR_CLAVE',
+        portalExternoUltimoMensaje: motivo
+      }
+    });
+
+    return {
+      success: false,
+      estado: 'ERROR_CLAVE',
+      mensaje: motivo,
+      totalEnPortal: 0,
+      importados: 0,
+      yaExistentes: 0,
+      erroresDetalle: 0,
+      alertaEmailEnviada
+    };
+  };
+
+  try {
+    // 1. Obtener PHPSESSID inicial
+    const resGet = await fetch(`${baseUrl}/index.php`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RemisesBrunoSync/1.0)' },
+      signal: AbortSignal.timeout(15000)
+    });
+    const cookiesGet = resGet.headers.getSetCookie ? resGet.headers.getSetCookie() : [];
+    mergeCookies(cookieMap, cookiesGet);
+    await resGet.text();
+
+    // 2. Enviar credenciales (usu / con / recordar)
+    const formBody = new URLSearchParams();
+    formBody.set('usu', art.portalExternoEmail.trim());
+    formBody.set('con', passwordPlain);
+    formBody.set('recordar', 'on');
+
+    const resPost = await fetch(`${baseUrl}/index.php`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': cookiesToHeader(cookieMap),
+        'User-Agent': 'Mozilla/5.0 (compatible; RemisesBrunoSync/1.0)',
+        'Referer': `${baseUrl}/index.php`
+      },
+      body: formBody.toString(),
+      signal: AbortSignal.timeout(15000)
+    });
+    const cookiesPost = resPost.headers.getSetCookie ? resPost.headers.getSetCookie() : [];
+    mergeCookies(cookieMap, cookiesPost);
+    const htmlPost = await resPost.text();
+
+    const loginOk =
+      /modulos\/dia\/index\.php/i.test(htmlPost) ||
+      /Bienvenido\/a/i.test(htmlPost);
+
+    if (!loginOk) {
+      return await registrarErrorClave(
+        'Credenciales rechazadas por el portal SIMAR2 (usuario o contraseña incorrectos).'
+      );
+    }
+
+    // 3. Traer todos los viajes del prestador desde DataTables JSON
+    const viajesUrl = `${baseUrl}/modulos/viajes/server-response-choferes.php?draw=1&start=0&length=500`;
+    const resViajes = await fetch(viajesUrl, {
+      headers: {
+        'Cookie': cookiesToHeader(cookieMap),
+        'User-Agent': 'Mozilla/5.0 (compatible; RemisesBrunoSync/1.0)',
+        'Accept': 'application/json'
+      },
+      signal: AbortSignal.timeout(25000)
+    });
+
+    if (resViajes.status === 401 || resViajes.status === 403) {
+      return await registrarErrorClave('Sesión no autorizada al consultar viajes en SIMAR2.');
+    }
+
+    const rawText = await resViajes.text();
+    let json: { data?: any[] } = {};
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      throw new Error(`Respuesta no JSON de SIMAR2 (${resViajes.status})`);
+    }
+
+    const allRows = Array.isArray(json.data) ? json.data : [];
+    const hoyArg = getTodayArgYYYYMMDD();
+
+    // Filtrar viajes a partir de hoy (excluyendo viajes viejos y viajes anulados 'an')
+    const vigentes = allRows.filter((row) => {
+      const f = String(row?.fecha || '').trim();
+      const est = String(row?.estado_chofer || '').trim().toLowerCase();
+      return f >= hoyArg && est !== 'an';
+    });
+
+    const candidatos = vigentes
+      .filter((row) => row?.id)
+      .map((row) => ({
+        simarId: String(row.id).trim(),
+        externoId: `SIMAR2:${String(row.id).trim()}`,
+        row
+      }));
+
+    let importados = 0;
+    let yaExistentes = 0;
+    let erroresDetalle = 0;
+
+    const existentesDb =
+      candidatos.length > 0
+        ? await prisma.viaje.findMany({
+            where: { externoId: { in: candidatos.map((c) => c.externoId) } },
+            select: { externoId: true }
+          })
+        : [];
+    const existentesSet = new Set(existentesDb.map((e) => e.externoId));
+
+    const soloNuevos = candidatos.filter((c) => {
+      if (existentesSet.has(c.externoId)) {
+        yaExistentes++;
+        return false;
+      }
+      return true;
+    });
+
+    const baseLat = typeof art.remiseria?.latitud === 'number' ? art.remiseria.latitud : DEFAULT_BASE_LAT;
+    const baseLon = typeof art.remiseria?.longitud === 'number' ? art.remiseria.longitud : DEFAULT_BASE_LON;
+
+    for (const { simarId, externoId, row } of soloNuevos) {
+      try {
+        const clienteNombre = String(row.naccidentado || 'Pasajero ART').replace(/\s+/g, ' ').trim();
+        const telefono = String(row.tel_accidentado || '').trim();
+        const dniRaw = String(row.cuil_dni || '').replace(/\D/g, '');
+        const siniestro = String(row.siniestro || row.ntraslado || '').trim() || null;
+        const subArt = String(row.nombre || '').trim();
+        const origen = formatDireccionSimar2(row.origen, row.origen_desc);
+        const destino = formatDireccionSimar2(row.destino, row.destino_desc);
+        const sentidoRaw = String(row.sentido || '').trim().toLowerCase();
+        const sentidoLabel =
+          sentidoRaw === 'iv' ? 'Ida y Vuelta' : sentidoRaw === 'id' || sentidoRaw === 'i' ? 'Ida' : sentidoRaw === 'v' ? 'Vuelta' : '';
+        const choferPortal = String(row.chofer_nombre || '').trim();
+        const obsPortal = [row.observaciones, row.obs_viaje, row.entrecalles ? `Entrecalles: ${row.entrecalles}` : '']
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+          .join(' • ');
+
+        const { fecha, horaTurno } = parseFechaHoraSimar2(row.fecha, row.horasalida);
+
+        const logistica = await calcularLogisticaFeleval({
+          origen,
+          destino,
+          horaTurno,
+          modalidad: String(row.modalidad || ''),
+          modoTabla: '',
+          baseLat,
+          baseLon
+        });
+
+        let clienteId: string | null = null;
+        const cleanTel = telefono.replace(/\D/g, '');
+        if (cleanTel || dniRaw) {
+          const cli = await prisma.cliente.findFirst({
+            where: {
+              remiseriaId: art.remiseriaId,
+              OR: [
+                ...(cleanTel ? [{ telefono: cleanTel }, { telefono }] : []),
+                ...(dniRaw ? [{ dni: dniRaw }] : [])
+              ]
+            },
+            select: { id: true }
+          });
+          if (cli) clienteId = cli.id;
+        }
+
+        if (!clienteId && clienteNombre) {
+          try {
+            const partes = clienteNombre.split(/\s+/);
+            const nombreCli = partes[0] || 'Pasajero';
+            const apellidoCli = partes.length > 1 ? partes.slice(1).join(' ') : 'ART';
+            const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+            const dniFinal = dniRaw || `ART${suffix.slice(-8)}`;
+            const telFinal = cleanTel || telefono || `S/T-${suffix.slice(-6)}`;
+            const dummyEmail = `art_${suffix}@cliente.brunoremises.local`;
+            const passwordHash = await bcrypt.hash(dniFinal, 10);
+
+            const nuevoUser = await prisma.user.create({
+              data: { email: dummyEmail, passwordHash, rol: 'CLIENTE' }
+            });
+            const nuevoCli = await prisma.cliente.create({
+              data: {
+                userId: nuevoUser.id,
+                remiseriaId: art.remiseriaId,
+                nombre: nombreCli,
+                apellido: apellidoCli,
+                dni: dniFinal,
+                telefono: telFinal,
+                email: dummyEmail,
+                direccion: origen,
+                fechaNacimiento: new Date('1990-01-01'),
+                observaciones: `Pasajero SIMAR2${subArt ? ` (${subArt})` : ''}`
+              }
+            });
+            clienteId = nuevoCli.id;
+          } catch {
+            // Ignorar conflicto de unicidad eventual
+          }
+        }
+
+        const esLocal = logistica.esLocal;
+        const precioArt = esLocal
+          ? Number(art.precioTramo || 0)
+          : logistica.distanciaKm > 0
+          ? Math.round(logistica.distanciaKm * Number(art.valorKm || 0))
+          : 0;
+        const precioChofer =
+          art.pagaChoferTipo === 'PERSONALIZADO'
+            ? esLocal
+              ? Number(art.choferPrecioTramo || precioArt)
+              : logistica.distanciaKm > 0
+              ? Math.round(logistica.distanciaKm * Number(art.choferValorKm || 0))
+              : 0
+            : precioArt;
+
+        const metaObs = [
+          `[SIMAR2 #${simarId}]`,
+          esLocal ? '[LOCAL]' : logistica.cobrarDesdeBase ? '[POR KM - DESDE BASE]' : '[POR KM]',
+          subArt ? `ART: ${subArt}` : '',
+          sentidoLabel ? `Sentido: ${sentidoLabel}` : '',
+          choferPortal ? `Ref. portal: ${choferPortal}` : '',
+          obsPortal
+        ]
+          .filter(Boolean)
+          .join(' | ');
+
+        await prisma.viaje.create({
+          data: {
+            remiseriaId: art.remiseriaId,
+            artEmpresaId: art.id,
+            externoId,
+            clienteId,
+            clienteNombre,
+            clienteTelefono: telefono || null,
+            origen,
+            destino,
+            fecha,
+            horaSalidaChofer: logistica.horaSalida,
+            horaTurno,
+            distanciaKmConPasajero: logistica.distanciaKm,
+            precio: precioChofer,
+            precioArt: precioArt > 0 ? precioArt : null,
+            numeroSiniestro: siniestro,
+            observaciones: metaObs,
+            prioridad: 'ALTA',
+            estado: 'PENDIENTE',
+            estadoCoordinacion: 'PENDIENTE_CONTACTO'
+          }
+        });
+
+        importados++;
+      } catch (rowErr) {
+        console.error('Error importando fila de SIMAR2:', rowErr);
+        erroresDetalle++;
+      }
+    }
+
+    const mensaje = `Sincronización OK: ${importados} viaje${importados !== 1 ? 's' : ''} nuevo${importados !== 1 ? 's' : ''} importado${importados !== 1 ? 's' : ''}, ${yaExistentes} ya existente${yaExistentes !== 1 ? 's' : ''} (desde ${hoyArg}).`;
+
+    await prisma.artEmpresa.update({
+      where: { id: art.id },
+      data: {
+        portalExternoUltimaSync: new Date(),
+        portalExternoUltimoEstado: 'OK',
+        portalExternoUltimoMensaje: mensaje
+      }
+    });
+
+    return {
+      success: true,
+      estado: 'OK',
+      mensaje,
+      totalEnPortal: vigentes.length,
+      importados,
+      yaExistentes,
+      erroresDetalle
+    };
+  } catch (err: any) {
+    const mensaje = `Error de conexión con SIMAR2: ${err?.message || 'desconocido'}`;
+    await prisma.artEmpresa.update({
+      where: { id: art.id },
+      data: {
+        portalExternoUltimaSync: new Date(),
+        portalExternoUltimoEstado: 'ERROR_CONEXION',
+        portalExternoUltimoMensaje: mensaje
+      }
+    });
+    return {
+      success: false,
+      estado: 'ERROR_CONEXION',
+      mensaje,
+      totalEnPortal: 0,
+      importados: 0,
+      yaExistentes: 0,
+      erroresDetalle: 0
+    };
+  }
+}
+
+export async function sincronizarPortalArt(
+  artEmpresaId: string,
+  options?: { enviarAlertaSiempre?: boolean }
+): Promise<FelevalSyncResult> {
+  const art = await prisma.artEmpresa.findUnique({
+    where: { id: artEmpresaId },
+    select: { portalExternoTipo: true, portalExternoUrl: true }
+  });
+  const tipo = String(art?.portalExternoTipo || '').toUpperCase();
+  const url = String(art?.portalExternoUrl || '').toLowerCase();
+  if (tipo === 'SIMAR2' || url.includes('simar2')) {
+    return sincronizarArtSimar2(artEmpresaId, options);
+  }
+  return sincronizarArtFeleval(artEmpresaId, options);
+}
+
 let lastCronDateArg = '';
 
 /**
  * Scheduler diario que corre todos los días a las 23:59 (hora Argentina)
- * para sincronizar todas las ARTs con integración Feleval activa.
+ * para sincronizar todas las ARTs con integración de portal externo activa (Feleval / SIMAR2).
  */
 export function iniciarServicioSyncFeleval() {
-  console.log('🔄 Servicio de sincronización diaria Feleval iniciado (programado 23:59 hs AR).');
+  console.log('🔄 Servicio de sincronización diaria ART (Feleval / SIMAR2) iniciado (programado 23:59 hs AR).');
 
   const tick = async () => {
     try {
@@ -768,24 +1205,24 @@ export function iniciarServicioSyncFeleval() {
 
       if (horaMin === '23:59' && lastCronDateArg !== fechaArg) {
         lastCronDateArg = fechaArg;
-        console.log(`⏰ [Feleval Sync 23:59] Ejecutando sincronización diaria (${fechaArg})...`);
+        console.log(`⏰ [Portal ART Sync 23:59] Ejecutando sincronización diaria (${fechaArg})...`);
 
         const artsActivas = await prisma.artEmpresa.findMany({
           where: {
             activo: true,
             portalExternoActivo: true,
-            portalExternoTipo: 'FELEVAL'
+            portalExternoTipo: { in: ['FELEVAL', 'SIMAR2'] }
           },
-          select: { id: true, nombre: true }
+          select: { id: true, nombre: true, portalExternoTipo: true }
         });
 
         for (const art of artsActivas) {
-          const res = await sincronizarArtFeleval(art.id);
-          console.log(`[Feleval Sync] ${art.nombre}: ${res.estado} — ${res.mensaje}`);
+          const res = await sincronizarPortalArt(art.id);
+          console.log(`[Portal ART Sync - ${art.portalExternoTipo}] ${art.nombre}: ${res.estado} — ${res.mensaje}`);
         }
       }
     } catch (err) {
-      console.error('Error en cron diario de Feleval:', err);
+      console.error('Error en cron diario de portales ART:', err);
     }
   };
 

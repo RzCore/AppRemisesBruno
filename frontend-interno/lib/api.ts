@@ -2304,6 +2304,7 @@ export const artEmpresaService = {
       portalExternoPassword?: string;
       portalExternoEmailAlerta?: string;
       portalExternoUrl?: string;
+      portalExternoTipo?: 'FELEVAL' | 'SIMAR2';
     }
   ): Promise<ApiResponse<any>> => {
     try {
