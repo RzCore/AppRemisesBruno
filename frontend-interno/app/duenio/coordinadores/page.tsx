@@ -59,7 +59,11 @@ export default function CoordinadoresPage() {
     try {
       const response = await remiseriaService.getAll();
       if (response.success) {
-        setRemiserias(response.data || []);
+        const list = response.data || [];
+        setRemiserias(list);
+        if (list[0]?.id) {
+          setFormData((prev) => (prev.remiseriaId ? prev : { ...prev, remiseriaId: list[0].id }));
+        }
       } else {
         toast.error('Error al cargar remiserías');
       }
@@ -72,11 +76,17 @@ export default function CoordinadoresPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await coordinadorService.create(formData);
+      const payload = {
+        ...formData,
+        nombre: formData.nombre.trim(),
+        email: formData.email.trim().toLowerCase(),
+        remiseriaId: formData.remiseriaId || remiserias[0]?.id || ''
+      };
+      const response = await coordinadorService.create(payload);
       if (response.success) {
         toast.success('Coordinador creado exitosamente');
         setShowCreateModal(false);
-        setFormData({ nombre: '', email: '', password: '', remiseriaId: '' });
+        setFormData({ nombre: '', email: '', password: '', remiseriaId: remiserias[0]?.id || '' });
         loadCoordinadores();
       } else {
         toast.error(response.message || 'Error al crear coordinador');

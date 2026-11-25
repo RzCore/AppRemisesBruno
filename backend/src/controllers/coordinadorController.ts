@@ -184,24 +184,31 @@ export const coordinadorController = {
   // Crear coordinador
   async create(req: AuthenticatedRequest, res: Response) {
     try {
-      const { nombre, email, password, remiseriaId } = req.body;
+      let { nombre, email, password, remiseriaId } = req.body;
       const { rol, id: userId } = req.user!;
 
-      // Validar campos requeridos
-      if (!nombre || !email || !password || !remiseriaId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Todos los campos son requeridos',
-        });
-      }
+      nombre = typeof nombre === 'string' ? nombre.trim() : '';
+      email = typeof email === 'string' ? email.trim().toLowerCase() : '';
+      password = typeof password === 'string' ? password : '';
 
-      // Validar acceso a la remisería
+      // Si es DUENIO y no llegó remiseriaId, inferir automáticamente de sus remiserías asociadas
       if (rol === 'DUENIO') {
         const duenio = await prisma.duenio.findUnique({
           where: { userId },
           include: { remiserias: { select: { remiseriaId: true } } }
         });
         const remiseriaIds = duenio?.remiserias.map(r => r.remiseriaId) || [];
+        if (!remiseriaId && remiseriaIds.length > 0) {
+          remiseriaId = remiseriaIds[0];
+        }
+        if (!nombre || !email || !password || !remiseriaId) {
+          return res.status(400).json({
+            success: false,
+            message: !remiseriaId
+              ? 'No tienes ninguna remisería asociada para crear coordinadores'
+              : 'Todos los campos son requeridos',
+          });
+        }
         if (!remiseriaIds.includes(remiseriaId)) {
           return res.status(403).json({
             success: false,
@@ -213,6 +220,18 @@ export const coordinadorController = {
           success: false,
           message: 'No tienes permisos para crear coordinadores',
         });
+      } else {
+        // ADMIN: si no llega remiseriaId, tomar la primera remisería activa si existe
+        if (!remiseriaId) {
+          const firstRem = await prisma.remiseria.findFirst({ select: { id: true } });
+          if (firstRem) remiseriaId = firstRem.id;
+        }
+        if (!nombre || !email || !password || !remiseriaId) {
+          return res.status(400).json({
+            success: false,
+            message: 'Todos los campos son requeridos',
+          });
+        }
       }
 
       // Verificar si el email ya existe
