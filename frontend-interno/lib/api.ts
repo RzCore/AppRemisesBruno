@@ -1472,7 +1472,19 @@ export const coordinadorDashboardService = {
     }
   },
 
-  calcularPrecio: async (origen: string, destino: string, coords?: { latOrigen?: number; lonOrigen?: number; latDestino?: number; lonDestino?: number; artEmpresaId?: string }): Promise<ApiResponse<any>> => {
+  calcularPrecio: async (
+    origen: string,
+    destino: string,
+    coords?: {
+      latOrigen?: number;
+      lonOrigen?: number;
+      latDestino?: number;
+      lonDestino?: number;
+      artEmpresaId?: string;
+      esViajeLocal?: boolean;
+      cobrarDesdeBase?: boolean;
+    }
+  ): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/coordinator-dashboard/viajes/calcular-precio', { 
         origen, 
@@ -1481,7 +1493,9 @@ export const coordinadorDashboardService = {
         lonOrigen: coords?.lonOrigen,
         latDestino: coords?.latDestino,
         lonDestino: coords?.lonDestino,
-        artEmpresaId: coords?.artEmpresaId
+        artEmpresaId: coords?.artEmpresaId,
+        esViajeLocal: coords?.esViajeLocal,
+        cobrarDesdeBase: coords?.cobrarDesdeBase
       });
       return handleApiResponse<any>(response);
     } catch (error: any) {

@@ -31,7 +31,7 @@ export function calcularDistanciaHaversineKm(
   return R * c;
 }
 
-async function calcularDistanciaRutaKm(
+export async function calcularDistanciaRutaKm(
   lat1: number,
   lon1: number,
   lat2: number,

@@ -1153,7 +1153,7 @@ export default function ArtPage() {
                         <span className="text-base font-bold text-slate-900 mt-1 block">
                           ${art.precioTramo?.toLocaleString('es-AR') || '0'}
                         </span>
-                        <span className="text-[10px] text-slate-400">0 a 1 Km</span>
+                        <span className="text-[10px] text-slate-400">Tarifa fija local</span>
                       </div>
 
                       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
@@ -1161,7 +1161,7 @@ export default function ArtPage() {
                         <span className="text-base font-bold text-primary-600 mt-1 block">
                           ${art.valorKm?.toLocaleString('es-AR') || '0'}
                         </span>
-                        <span className="text-[10px] text-slate-400">km adicional</span>
+                        <span className="text-[10px] text-slate-400">por km (no local)</span>
                       </div>
 
                       <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
@@ -2586,7 +2586,7 @@ export default function ArtPage() {
                         className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
-                    <span className="text-[10px] text-slate-400 block mt-1">Viajes urbanos (0 a 1 Km)</span>
+                    <span className="text-[10px] text-slate-400 block mt-1">Tarifa fija para viajes locales (sin importar distancia)</span>
                   </div>
 
                   {/* Precio por Kilómetro */}

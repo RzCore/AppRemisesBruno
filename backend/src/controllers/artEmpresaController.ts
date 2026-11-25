@@ -90,10 +90,9 @@ export const artEmpresaController = {
         // El precio facturado a la ART es el precioArt o calculado con la tarifa ART
         const totalFacturado = art.viajes.reduce((sum, v) => {
           if (v.precioArt && Number(v.precioArt) > 0) return sum + Number(v.precioArt);
-          // Si no tiene precioArt explícito, calculamos según la tarifa de la ART
-          const km = v.distanciaKmConPasajero || 1;
-          let p = art.precioTramo || 0;
-          if (km > 1 && art.valorKm > 0) p += (km - 1) * art.valorKm;
+          // Fallback si no tiene precioArt explícito
+          const km = v.distanciaKmConPasajero || 0;
+          const p = km > 0 && art.valorKm > 0 ? Math.round(km * art.valorKm) : (art.precioTramo || 0);
           return sum + p;
         }, 0);
 
@@ -1533,11 +1532,10 @@ export const artEmpresaController = {
 
         let pArt = v.precioArt ? Number(v.precioArt) : 0;
         if (!pArt && v.artEmpresa) {
-          const km = v.distanciaKmConPasajero || 1;
-          let p = v.artEmpresa.precioTramo || 0;
-          if (km > 1 && v.artEmpresa.valorKm > 0) p += (km - 1) * v.artEmpresa.valorKm;
+          const km = v.distanciaKmConPasajero || 0;
+          let p = km > 0 && v.artEmpresa.valorKm > 0 ? Math.round(km * v.artEmpresa.valorKm) : (v.artEmpresa.precioTramo || 0);
           if (v.costoEspera) p += v.costoEspera;
-          pArt = Math.round(p / 50) * 50;
+          pArt = Math.round(p);
         }
 
         totalFacturadoArt += pArt + peaje;

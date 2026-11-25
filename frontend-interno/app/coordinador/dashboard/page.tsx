@@ -172,7 +172,9 @@ export default function CoordinadorDashboard() {
     observaciones: '',
     prioridad: 'NORMAL' as 'BAJA' | 'NORMAL' | 'ALTA' | 'URGENTE',
     artEmpresaId: '',
-    numeroSiniestro: ''
+    numeroSiniestro: '',
+    esViajeLocal: true,
+    cobrarDesdeBase: false
   });
   const [artList, setArtList] = useState<ArtEmpresa[]>([]);
   const [predictiveSuggestions, setPredictiveSuggestions] = useState<any[]>([]);
@@ -1535,7 +1537,9 @@ export default function CoordinadorDashboard() {
       observaciones: '',
       prioridad: 'NORMAL',
       artEmpresaId: '',
-      numeroSiniestro: ''
+      numeroSiniestro: '',
+      esViajeLocal: true,
+      cobrarDesdeBase: false
     });
     setPredictiveSuggestions([]);
     setSelectedPredictiveClient(null);
@@ -1662,7 +1666,9 @@ export default function CoordinadorDashboard() {
           lonOrigen: expressOrigenCoords?.lon,
           latDestino: expressDestinoCoords?.lat,
           lonDestino: expressDestinoCoords?.lon,
-          artEmpresaId: expressData.artEmpresaId || undefined
+          artEmpresaId: expressData.artEmpresaId || undefined,
+          esViajeLocal: expressData.artEmpresaId ? expressData.esViajeLocal : undefined,
+          cobrarDesdeBase: expressData.artEmpresaId && !expressData.esViajeLocal ? expressData.cobrarDesdeBase : undefined
         }
       );
 
@@ -1707,7 +1713,7 @@ export default function CoordinadorDashboard() {
     }, 450);
 
     return () => clearTimeout(timer);
-  }, [expressData.origen, expressData.destino, expressOrigenCoords, expressDestinoCoords, isExpressModalOpen]);
+  }, [expressData.origen, expressData.destino, expressData.artEmpresaId, expressData.esViajeLocal, expressData.cobrarDesdeBase, expressOrigenCoords, expressDestinoCoords, isExpressModalOpen]);
 
   const seleccionarClientePredictivo = (c: any) => {
     setSelectedPredictiveClient(c);
@@ -1746,7 +1752,10 @@ export default function CoordinadorDashboard() {
         observaciones: expressData.observaciones,
         prioridad: expressData.prioridad,
         artEmpresaId: expressData.artEmpresaId || undefined,
-        numeroSiniestro: expressData.numeroSiniestro || undefined
+        numeroSiniestro: expressData.numeroSiniestro || undefined,
+        esViajeLocal: expressData.artEmpresaId ? expressData.esViajeLocal : undefined,
+        cobrarDesdeBase: expressData.artEmpresaId && !expressData.esViajeLocal ? expressData.cobrarDesdeBase : undefined,
+        distanciaKm: distanciaExpressEstimada ?? undefined
       });
 
       if (res && res.success) {
@@ -4420,6 +4429,52 @@ export default function CoordinadorDashboard() {
                     className="w-full px-3 py-2 border border-amber-300 rounded-xl text-xs bg-white text-gray-800 placeholder-gray-400 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
                 </div>
+
+                {expressData.artEmpresaId && (
+                  <div className="mt-2.5 pt-2.5 border-t border-amber-200/80 space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setExpressData((prev) => ({ ...prev, esViajeLocal: true, cobrarDesdeBase: false }))}
+                        className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all ${
+                          expressData.esViajeLocal
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-amber-200 hover:border-amber-400'
+                        }`}
+                      >
+                        Viaje Local (Tarifa fija)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExpressData((prev) => ({ ...prev, esViajeLocal: false }))}
+                        className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all ${
+                          !expressData.esViajeLocal
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-amber-200 hover:border-amber-400'
+                        }`}
+                      >
+                        Por Km (No local)
+                      </button>
+                    </div>
+
+                    {!expressData.esViajeLocal && (
+                      <label className="flex items-start gap-2 p-2 rounded-xl bg-white border border-amber-200 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={expressData.cobrarDesdeBase}
+                          onChange={(e) => setExpressData((prev) => ({ ...prev, cobrarDesdeBase: e.target.checked }))}
+                          className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-[11px] text-slate-700 leading-tight">
+                          <strong className="text-slate-900">Cobrar desde la base hasta el destino</strong>
+                          <span className="block text-[10px] text-slate-500">
+                            Marcar cuando el móvil debe salir a buscar al pasajero a otra localidad.
+                          </span>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Asignar Móvil Inmediato */}

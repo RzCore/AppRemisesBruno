@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
-import { calcularAjusteOrigenRemoto } from '../lib/pricingUtils';
+import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, DEFAULT_BASE_LAT, DEFAULT_BASE_LON } from '../lib/pricingUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -1146,7 +1146,7 @@ export const coordinatorDashboardController = {
   async calcularPrecio(req: AuthenticatedRequest, res: Response) {
     try {
       const coordinadorId = req.user?.id;
-      const { origen, destino, latOrigen, lonOrigen, latDestino, lonDestino, artEmpresaId, clienteId } = req.body;
+      const { origen, destino, latOrigen, lonOrigen, latDestino, lonDestino, artEmpresaId, clienteId, esViajeLocal, cobrarDesdeBase } = req.body;
 
       if (!coordinadorId) {
         return res.status(401).json({
@@ -1184,11 +1184,13 @@ export const coordinatorDashboardController = {
       // CONFIDENCIALIDAD TOTAL: Al chofer y coordinador solo se les liquida:
       // O la tarifa especial acordada con el chofer, o la lista normal de precios.
       // El precio acordado entre el dueño y la ART nunca se divulga.
+      let artObj: any = null;
       if (artEmpresaId) {
         const art = await prisma.artEmpresa.findUnique({
           where: { id: artEmpresaId }
         });
         if (art && art.activo) {
+          artObj = art;
           artEmpresaAplicada = {
             id: art.id,
             nombre: art.nombre
@@ -1297,28 +1299,62 @@ export const coordinatorDashboardController = {
         }
       }
 
-      // Ajuste por origen fuera del radio urbano de la base (ej. pasajero en Alberti pidiendo móvil desde Chivilcoy)
-      const ajusteRemoto = await calcularAjusteOrigenRemoto({
-        distanciaViajeKm: distanciaKm,
-        latOrigen: finalLatOrigen,
-        lonOrigen: finalLonOrigen,
-        latDestino: finalLatDestino,
-        lonDestino: finalLonDestino,
-        baseLat: coordinador.remiseria?.latitud,
-        baseLon: coordinador.remiseria?.longitud,
-      });
+      const esLocalArt = Boolean(artObj && esViajeLocal === true);
+      const usarDesdeBase = Boolean(cobrarDesdeBase === true);
 
-      const distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
+      let distanciaFacturable = distanciaKm;
+      let distBaseAOrigenKm = 0;
+      let ajusteRemoto: any = { esOrigenRemoto: false, kmAproximacion: 0, distanciaFacturableKm: distanciaKm };
 
-      // Fórmula solicitada por el usuario:
-      // Bajada de bandera incluye de 0 a 1 KM. 
-      // Por cada KM restante se le suma valorKm.
-      let precioEstimado = bajadaBandera;
-      if (distanciaFacturable > 1) {
-        precioEstimado += (distanciaFacturable - 1) * valorKm;
+      if (!esLocalArt && usarDesdeBase && finalLatOrigen && finalLonOrigen) {
+        // Cobrar desde la base hasta el destino (Base -> Origen + Origen -> Destino)
+        const baseLat = typeof coordinador.remiseria?.latitud === 'number' ? coordinador.remiseria.latitud : DEFAULT_BASE_LAT;
+        const baseLon = typeof coordinador.remiseria?.longitud === 'number' ? coordinador.remiseria.longitud : DEFAULT_BASE_LON;
+        distBaseAOrigenKm = await calcularDistanciaRutaKm(baseLat, baseLon, finalLatOrigen, finalLonOrigen);
+        distanciaFacturable = Math.round((distBaseAOrigenKm + distanciaKm) * 10) / 10;
+        ajusteRemoto = {
+          esOrigenRemoto: true,
+          kmAproximacion: distBaseAOrigenKm,
+          distanciaFacturableKm: distanciaFacturable
+        };
+      } else if (!esLocalArt) {
+        // Ajuste automático por origen fuera del radio urbano de la base (ej. pasajero en Alberti pidiendo móvil desde Chivilcoy)
+        ajusteRemoto = await calcularAjusteOrigenRemoto({
+          distanciaViajeKm: distanciaKm,
+          latOrigen: finalLatOrigen,
+          lonOrigen: finalLonOrigen,
+          latDestino: finalLatDestino,
+          lonDestino: finalLonDestino,
+          baseLat: coordinador.remiseria?.latitud,
+          baseLon: coordinador.remiseria?.longitud,
+        });
+        distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
       }
-      // Redondear a múltiplos de 50 para cobro exacto y ágil
-      precioEstimado = Math.round(precioEstimado / 50) * 50;
+
+      let precioEstimado = bajadaBandera;
+      if (artObj && esViajeLocal !== undefined) {
+        if (esLocalArt) {
+          // Viaje Local ART: tarifa fija independientemente de la distancia
+          if (artObj.pagaChoferTipo === 'PERSONALIZADO' && artObj.choferPrecioTramo && artObj.choferPrecioTramo > 0) {
+            precioEstimado = artObj.choferPrecioTramo;
+          } else {
+            precioEstimado = bajadaBandera;
+          }
+        } else {
+          // Viaje NO Local ART: se cobra por km recorrido (sin sumar tramo local)
+          if (artObj.pagaChoferTipo === 'PERSONALIZADO' && artObj.choferValorKm && artObj.choferValorKm > 0) {
+            precioEstimado = Math.round(distanciaFacturable * artObj.choferValorKm);
+          } else {
+            precioEstimado = Math.round(distanciaFacturable * valorKm);
+          }
+        }
+      } else {
+        // Fórmula estándar de remisería: bajada de bandera (0-1 km) + km adicionales
+        if (distanciaFacturable > 1) {
+          precioEstimado += (distanciaFacturable - 1) * valorKm;
+        }
+        precioEstimado = Math.round(precioEstimado / 50) * 50;
+      }
 
       res.json({
         success: true,
@@ -1327,6 +1363,9 @@ export const coordinatorDashboardController = {
           destino,
           distanciaKm: distanciaFacturable,
           distanciaViajeKm: distanciaKm,
+          distBaseAOrigenKm,
+          esViajeLocal: esLocalArt,
+          cobrarDesdeBase: usarDesdeBase,
           esOrigenRemoto: ajusteRemoto.esOrigenRemoto,
           kmAproximacion: ajusteRemoto.kmAproximacion,
           precio: precioEstimado,
@@ -2253,16 +2292,21 @@ export const coordinatorDashboardController = {
       }
 
       // Cálculo del precio confidencial facturado a la ART
+      // Regla ART:
+      // - Si es viaje local (esViajeLocal === true): tarifa fija precioTramo (indistinta la distancia)
+      // - Si NO es local (esViajeLocal === false): distanciaFacturable * valorKm (sin sumar tramo local)
+      const esViajeLocalArt = req.body.esViajeLocal === true;
+      const kmFacturableExpress = parseFloat(req.body.distanciaKm) || 0;
       let precioArtCalculado: number | null = null;
       if (artEmpresaId) {
         const art = await prisma.artEmpresa.findUnique({ where: { id: artEmpresaId } });
         if (art) {
-          let pArt = art.precioTramo || 0;
-          const kmEst = parseFloat(req.body.distanciaKm) || 1.0;
-          if (kmEst > 1 && art.valorKm > 0) {
-            pArt += (kmEst - 1) * art.valorKm;
+          if (esViajeLocalArt) {
+            precioArtCalculado = art.precioTramo || 0;
+          } else {
+            const kmEst = kmFacturableExpress > 0 ? kmFacturableExpress : 1.0;
+            precioArtCalculado = Math.round(kmEst * (art.valorKm || 0));
           }
-          precioArtCalculado = Math.round(pArt / 50) * 50;
         }
       }
 
@@ -2274,6 +2318,7 @@ export const coordinatorDashboardController = {
           clienteTelefono: cleanPhone,
           origen: origen.trim(),
           destino: (destino || 'A convenir').trim(),
+          distanciaKmConPasajero: kmFacturableExpress,
           precio: precioFinal,
           precioArt: precioArtCalculado,
           fecha: new Date(),
