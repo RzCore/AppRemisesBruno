@@ -9,6 +9,7 @@ import { useAppTracking } from '@/hooks/useAppTracking';
 import LogoBruno from '@/components/LogoBruno';
 import { 
   Car, 
+  Shield,
   Clock, 
   Calendar, 
   MapPin, 
@@ -1966,8 +1967,14 @@ export default function CoordinadorDashboard() {
     return filtered;
   };
 
+  const viajesSinAsignarNormales = viajesSinAsignar.filter((v) => !v.artEmpresaId && !v.artEmpresa);
+  const viajesSinAsignarArt = [...viajesSinAsignar.filter((v) => Boolean(v.artEmpresaId || v.artEmpresa))].sort(
+    (a, b) => new Date(a.rawFecha || 0).getTime() - new Date(b.rawFecha || 0).getTime()
+  );
+
   const filteredEnCurso = filterList(viajesEnCurso, { applyDate: true, applyMovil: true });
-  const filteredSinAsignar = filterList(viajesSinAsignar, { applyDate: true, applyMovil: false });
+  const filteredSinAsignar = filterList(viajesSinAsignarNormales, { applyDate: true, applyMovil: false });
+  const filteredSinAsignarArt = filterList(viajesSinAsignarArt, { applyDate: true, applyMovil: false });
   const filteredReservas = filterList(reservas, { applyDate: true, applyMovil: true });
   const filteredChoferes = filterList(choferesConectados, { applyDate: false, applyMovil: true });
   const filteredHistorial = filterHistorial(viajesHistorial);
@@ -1986,6 +1993,7 @@ export default function CoordinadorDashboard() {
 
   const paginatedEnCurso = paginateItems(filteredEnCurso);
   const paginatedSinAsignar = paginateItems(filteredSinAsignar);
+  const paginatedSinAsignarArt = paginateItems(filteredSinAsignarArt);
   const paginatedReservas = paginateItems(filteredReservas);
   const paginatedHistorial = paginateItems(filteredHistorial);
   const paginatedAuditoriaViajes = paginateItems(filteredAuditoriaViajes);
@@ -2105,13 +2113,14 @@ export default function CoordinadorDashboard() {
 
   const tabs = [
     { id: 'en-curso', label: 'Viajes en Curso', icon: Car, count: stats.viajesEnCurso },
-    { id: 'sin-asignar', label: 'Sin Asignar', icon: Clock, count: stats.viajesSinAsignar, alert: stats.viajesSinAsignar > 0 },
+    { id: 'sin-asignar', label: 'Sin Asignar', icon: Clock, count: viajesSinAsignarNormales.length, alert: viajesSinAsignarNormales.length > 0 },
+    { id: 'sin-asignar-art', label: 'ART Sin Asignar', icon: Shield, count: viajesSinAsignarArt.length, isArt: true },
     { id: 'reservados', label: 'Reservados', icon: Calendar, count: stats.viajesReservados },
     { id: 'conectados', label: 'Conectados', icon: Users, count: choferesConectados.length },
     { id: 'historial', label: 'Finalizados / Anulados', icon: CheckCircle2, count: viajesHistorial.length }
   ];
 
-  const hasAlerts = stats.viajesSinAsignar > 0;
+  const hasAlerts = viajesSinAsignarNormales.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col overflow-x-hidden w-full">
@@ -2544,6 +2553,8 @@ export default function CoordinadorDashboard() {
                   <span className={`py-0.5 px-2 rounded-full text-xs font-semibold ${
                     tab.alert 
                       ? 'bg-red-100 text-red-900 animate-pulse' 
+                      : (tab as any).isArt && tab.count > 0
+                      ? 'bg-amber-100 text-amber-900'
                       : 'bg-gray-100 text-gray-800'
                   }`}>
                     {tab.count}
@@ -2850,6 +2861,122 @@ export default function CoordinadorDashboard() {
                     </table>
                   </div>
                   {renderPagination(filteredSinAsignar.length)}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'sin-asignar-art' && (
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                  <div className="flex items-center space-x-3">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Viajes ART Sin Asignar ({filteredSinAsignarArt.length})
+                    </h3>
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                      Ordenados por fecha de turno
+                    </span>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border-2 border-amber-200 overflow-hidden">
+                  <div className="overflow-auto max-h-[68vh]">
+                    <table className="w-full text-left text-sm divide-y divide-gray-200 table-auto lg:table-fixed">
+                      <thead className="bg-amber-50 text-xs font-semibold text-amber-900 uppercase tracking-wider sticky top-0 z-10 shadow-[inset_0_-1px_0_0_rgba(253,230,138,1)]">
+                        <tr>
+                          <th className="px-3 sm:px-4 py-3 w-36 lg:w-[16%]">Fecha / Turno</th>
+                          <th className="px-3 sm:px-4 py-3 w-44 lg:w-[20%]">Pasajero / ART</th>
+                          <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[24%]">Origen</th>
+                          <th className="px-3 sm:px-4 py-3 min-w-[140px] lg:w-[24%]">Destino</th>
+                          <th className="px-3 sm:px-4 py-3 w-32 lg:w-[16%] text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredSinAsignarArt.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-12 text-center text-gray-500">
+                              <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500" />
+                              <p className="font-semibold text-gray-700">No hay viajes ART sin asignar</p>
+                              <p className="text-xs text-gray-400 mt-1">Todos los traslados ART tienen móvil asignado.</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          paginatedSinAsignarArt.map((viaje) => (
+                            <tr key={viaje.id} className="hover:bg-amber-50/40 transition-colors">
+                              <td className="px-3 sm:px-4 py-3 whitespace-nowrap">
+                                <div className="font-bold text-gray-900 text-xs sm:text-sm">
+                                  {viaje.rawFecha ? new Date(viaje.rawFecha).toLocaleDateString('es-AR') : '-'}
+                                </div>
+                                <div className="text-[11px] font-bold text-indigo-700">
+                                  Turno: {viaje.rawViaje?.horaTurno || (viaje.rawFecha ? new Date(viaje.rawFecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '-')} hs
+                                </div>
+                                {viaje.rawViaje?.horaSalidaChofer && (
+                                  <div className="text-[10px] font-semibold text-amber-800">
+                                    Salida: {viaje.rawViaje.horaSalidaChofer} hs
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-3 sm:px-4 py-3">
+                                <div className="font-semibold text-gray-900 text-xs sm:text-sm truncate" title={viaje.cliente}>
+                                  {viaje.cliente}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                                  {viaje.artEmpresa && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                      ART - {viaje.artEmpresa.nombre}
+                                    </span>
+                                  )}
+                                  {viaje.numeroSiniestro && (
+                                    <span className="text-[10px] font-mono text-gray-600">
+                                      Sin: {viaje.numeroSiniestro}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 truncate mt-0.5">{viaje.telefono}</div>
+                              </td>
+                              <td className="px-3 sm:px-4 py-3">
+                                <div className="text-xs sm:text-sm text-gray-900 line-clamp-2 leading-snug" title={viaje.origen}>
+                                  <LocationIcon className="h-3.5 w-3.5 mr-1 inline text-blue-500 shrink-0" />
+                                  <span>{viaje.origen}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 sm:px-4 py-3">
+                                <div className="text-xs sm:text-sm text-gray-900 line-clamp-2 leading-snug" title={viaje.destino}>
+                                  <LocationIcon className="h-3.5 w-3.5 mr-1 inline text-emerald-500 shrink-0" />
+                                  <span>{viaje.destino}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 sm:px-4 py-3 text-right">
+                                {viaje.choferId ? (
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 animate-pulse">
+                                      <Clock className="w-3 h-3 mr-1" />
+                                      {viaje.chofer} (Esperando)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openAssignModalForViaje(viaje)}
+                                      className="text-[11px] text-gray-500 hover:text-gray-800 underline cursor-pointer"
+                                    >
+                                      Reasignar otro móvil
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => openAssignModalForViaje(viaje)}
+                                    className="bg-amber-600 hover:bg-amber-700 text-white px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold text-xs shadow-sm transition-colors inline-flex items-center space-x-1"
+                                  >
+                                    <Car className="h-3.5 w-3.5" />
+                                    <span>Asignar Auto</span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {renderPagination(filteredSinAsignarArt.length)}
                 </div>
               </div>
             )}
