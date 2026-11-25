@@ -668,8 +668,8 @@ export default function ClienteApp() {
     totalVehiculosActivos: number;
     viajesPendientes: number;
     todosOcupados: boolean;
-    demoraMin: number;
-    demoraMax: number;
+    demoraMin: number | null;
+    demoraMax: number | null;
   } | null>(null);
 
   const cargarDisponibilidad = async () => {
@@ -1121,6 +1121,21 @@ export default function ClienteApp() {
       setIsCalculando(false);
     }
   };
+
+  // Cotización automática ni bien el cliente tiene origen y destino completos
+  useEffect(() => {
+    if (estadoViaje !== 'IDLE' || !estadoAgencia.abierta) return;
+    const o = origen.trim();
+    const d = destino.trim();
+    if (o.length < 4 || d.length < 4) return;
+
+    const timer = setTimeout(() => {
+      calcularPrecio();
+    }, origenCoords && destinoCoords ? 250 : 750);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origen, destino, origenCoords, destinoCoords, paradas, estadoViaje, estadoAgencia.abierta]);
 
   const pedirAuto = async () => {
     if (!origen || !destino || !presupuesto) return;
@@ -1656,15 +1671,17 @@ export default function ClienteApp() {
                       </div>
                     </div>
 
-                    <div className="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/60 rounded-xl px-3 py-1.5 text-right shrink-0 shadow-xs">
-                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                        Demora aprox.
-                      </span>
-                      <span className="text-xs font-extrabold text-amber-950 dark:text-amber-200 flex items-center justify-end gap-1">
-                        <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                        {disponibilidad.demoraMin} - {disponibilidad.demoraMax} min
-                      </span>
-                    </div>
+                    {disponibilidad.todosOcupados && disponibilidad.demoraMin && disponibilidad.demoraMax && (
+                      <div className="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/60 rounded-xl px-3 py-1.5 text-right shrink-0 shadow-xs">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                          Demora aprox.
+                        </span>
+                        <span className="text-xs font-extrabold text-amber-950 dark:text-amber-200 flex items-center justify-end gap-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                          {disponibilidad.demoraMin} - {disponibilidad.demoraMax} min
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1678,17 +1695,6 @@ export default function ClienteApp() {
       {/* ÁREA INFERIOR (Presupuesto o Estado del Viaje) */}
       <div className="mt-auto z-10 w-full max-w-lg mx-auto p-4 animate-slide-up">
         
-        {/* Caso 1: Origen y Destino ingresados pero no cotizados */}
-        {estadoViaje === 'IDLE' && estadoAgencia.abierta && origen && destino && !presupuesto && !isCalculando && (
-          <button 
-            onClick={() => calcularPrecio()}
-            className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl py-4 shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm"
-          >
-            <span>Confirmar Itinerario y Ver Precio</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        )}
-
         {/* Caso 2: Calculando */}
         {isCalculando && estadoAgencia.abierta && (
           <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl text-center space-y-3">
@@ -1937,7 +1943,9 @@ export default function ClienteApp() {
                 </div>
                 <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-snug">
                   {disponibilidad?.todosOcupados
-                    ? `Todos los móviles están en viaje. Demora estimada: ${disponibilidad.demoraMin}-${disponibilidad.demoraMax} min. Te asignaremos el primer auto que se libere.`
+                    ? disponibilidad.demoraMin && disponibilidad.demoraMax
+                      ? `Todos los móviles están en viaje. Demora estimada: ${disponibilidad.demoraMin}-${disponibilidad.demoraMax} min. Te asignaremos el primer auto que se libere.`
+                      : 'Todos los móviles están en viaje. Te asignaremos el primer auto que se libere.'
                     : `Tu pedido está en el puesto #${activeViaje?.posicionEnCola} de prioridad y se está ofreciendo automáticamente a la flota disponible.`}
                 </p>
               </div>

@@ -2249,7 +2249,8 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
       }),
       prisma.viaje.count({
         where: {
-          estado: 'PENDIENTE'
+          estado: 'PENDIENTE',
+          artEmpresaId: null
         }
       }),
       prisma.vehiculo.count({
@@ -2271,9 +2272,9 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
     const hayAutosDisponibles = autosLibresOnline > 0;
     const todosOcupados = !hayAutosDisponibles && (autosEnViaje > 0 || choferesOnline.length > 0);
 
-    // Calcular demora aproximada en minutos
-    let demoraMin = 3;
-    let demoraMax = 6;
+    // Calcular demora aproximada en minutos (solo cuando hay flota conectada/activa)
+    let demoraMin: number | null = 3;
+    let demoraMax: number | null = 6;
 
     if (!hayAutosDisponibles) {
       if (viajesActivos.length > 0) {
@@ -2284,12 +2285,12 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
           return 15; // ACEPTADO
         });
         const proximoEnLiberarse = Math.min(...tiemposRestantes);
-        demoraMin = proximoEnLiberarse + viajesPendientes * 8;
+        demoraMin = Math.min(45, proximoEnLiberarse + viajesPendientes * 8);
         demoraMax = demoraMin + 5;
       } else {
-        // Sin choferes online en la app, asignación por base/coordinador
-        demoraMin = 10 + viajesPendientes * 8;
-        demoraMax = demoraMin + 5;
+        // Sin choferes online en la app: no mostrar demora artificial
+        demoraMin = null;
+        demoraMax = null;
       }
     }
 
