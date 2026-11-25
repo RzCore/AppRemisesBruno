@@ -23,6 +23,9 @@ export default function InternoHomePage() {
         } else if (user.rol === 'COORDINADOR') {
           window.location.href = 'https://coordinacion.brunoremises.com.ar/';
           return;
+        } else if (user.rol === 'ADMIN') {
+          window.location.href = 'https://admin.brunoremises.com.ar/admin/dashboard';
+          return;
         } else {
           window.location.href = 'https://admin.brunoremises.com.ar/';
           return;

@@ -115,7 +115,15 @@ export default function DuenioDashboard() {
     if (typeof window !== 'undefined') {
       window.scrollTo(0, 0);
     }
-    if (!user || user.rol !== 'DUENIO') {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    if (user.rol === 'ADMIN') {
+      router.push('/admin/dashboard');
+      return;
+    }
+    if (user.rol !== 'DUENIO') {
       router.push('/login');
       return;
     }
