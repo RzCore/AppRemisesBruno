@@ -414,7 +414,7 @@ export default function VehiculosPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="input max-w-[200px] bg-white cursor-pointer"
+            className="input w-full sm:max-w-[200px] bg-white cursor-pointer"
           >
             <option value="all">Todos los estados</option>
             <option value="ACTIVO">Activos</option>
@@ -670,8 +670,8 @@ export default function VehiculosPage() {
               </div>
 
               {/* Stepper visual interactivo */}
-              <div className="px-5 sm:px-6 pt-3 pb-2 bg-slate-50/70 border-b border-slate-100">
-                <div className="grid grid-cols-4 gap-2">
+              <div className="px-4 sm:px-6 pt-3 pb-2 bg-slate-50/70 border-b border-slate-100">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
                   {[
                     { step: 1, label: 'Rodado', icon: Car },
                     { step: 2, label: 'Titular', icon: User },
@@ -786,7 +786,7 @@ export default function VehiculosPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">
                           Año *

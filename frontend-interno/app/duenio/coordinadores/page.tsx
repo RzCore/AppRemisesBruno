@@ -217,7 +217,7 @@ export default function CoordinadoresPage() {
           <select
             value={filterActivo}
             onChange={(e) => setFilterActivo(e.target.value as any)}
-            className="input max-w-[200px] bg-white cursor-pointer"
+            className="input w-full sm:max-w-[200px] bg-white cursor-pointer"
           >
             <option value="all">Todos los estados</option>
             <option value="active">Solo Activos</option>
@@ -387,9 +387,9 @@ export default function CoordinadoresPage() {
 
       {/* Modal de Creación */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs overflow-y-auto z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-5 sm:p-6 border border-slate-200 shadow-2xl rounded-2xl bg-white">
+            <div>
               <h3 className="text-lg font-medium text-gray-900 mb-4">Crear Nuevo Coordinador</h3>
               <form onSubmit={handleCreate}>
                 <div className="space-y-4">
@@ -474,9 +474,9 @@ export default function CoordinadoresPage() {
 
       {/* Modal de Edición */}
       {showEditModal && selectedCoordinador && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs overflow-y-auto z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-5 sm:p-6 border border-slate-200 shadow-2xl rounded-2xl bg-white">
+            <div>
               <h3 className="text-lg font-medium text-gray-900 mb-4">Editar Coordinador</h3>
               <form onSubmit={handleEdit}>
                 <div className="space-y-4">

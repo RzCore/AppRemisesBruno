@@ -158,9 +158,31 @@ export default function EstadisticasPage() {
 
         {/* Lista de remiserías con estadísticas */}
         {remiserias.length > 0 ? (
-          <div className="card p-6">
+          <div className="card p-4 sm:p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Detalle por Remisería</h3>
-            <div className="overflow-x-auto">
+            {/* Vista móvil */}
+            <div className="block md:hidden divide-y divide-gray-100">
+              {remiserias.map((remiseria) => (
+                <div key={remiseria.id} className="py-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-gray-900 truncate">{remiseria.nombreFantasia}</p>
+                    <p className="text-xs text-gray-500 truncate">{remiseria.razonSocial}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {remiseria.duenios?.length || 0} dueño(s) • {new Date(remiseria.createdAt).toLocaleDateString('es-AR')}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2 py-1 text-xs font-medium rounded-full shrink-0 ${
+                      remiseria.estado ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}
+                  >
+                    {remiseria.estado ? 'Activa' : 'Inactiva'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* Vista escritorio */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>

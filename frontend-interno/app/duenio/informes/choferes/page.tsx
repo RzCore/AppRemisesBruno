@@ -129,24 +129,24 @@ export default function InformeChoferesPage() {
     <div className="min-h-screen bg-gray-50 print:bg-white">
       {/* Header */}
       <header className="bg-white shadow-sm border-b print:hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap justify-between items-center gap-2 py-3 min-h-[56px]">
+            <div className="flex items-center min-w-0">
               <button
                 onClick={() => router.push('/duenio/dashboard')}
-                className="flex items-center text-gray-600 hover:text-gray-900 mr-4 p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                className="flex items-center text-gray-600 hover:text-gray-900 mr-2 sm:mr-4 p-1.5 sm:p-2 rounded-lg hover:bg-gray-100 transition-colors shrink-0"
               >
-                <ArrowLeft className="w-5 h-5 mr-1" />
-                <span>Volver</span>
+                <ArrowLeft className="w-5 h-5 sm:mr-1" />
+                <span className="hidden sm:inline">Volver</span>
               </button>
-              <div className="h-6 w-[1px] bg-gray-200 mr-4"></div>
-              <div className="flex items-center">
-                <Users className="w-6 h-6 text-red-600 mr-2" />
-                <h1 className="text-xl font-bold text-gray-900">Liquidación y Rendimiento por Chofer</h1>
+              <div className="hidden sm:block h-6 w-[1px] bg-gray-200 mr-4"></div>
+              <div className="flex items-center min-w-0">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 mr-2 shrink-0" />
+                <h1 className="text-base sm:text-xl font-bold text-gray-900 truncate">Rendimiento por Chofer</h1>
               </div>
             </div>
             
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2 shrink-0">
               <button
                 onClick={handleRefresh}
                 disabled={loadingReport}
@@ -157,10 +157,10 @@ export default function InformeChoferesPage() {
               </button>
               <button
                 onClick={handlePrint}
-                className="flex items-center space-x-1.5 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all font-medium text-sm"
+                className="flex items-center space-x-1.5 px-3 sm:px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all font-medium text-xs sm:text-sm"
               >
                 <Printer className="w-4 h-4" />
-                <span>Imprimir Liquidación</span>
+                <span className="hidden sm:inline">Imprimir Liquidación</span>
               </button>
             </div>
           </div>
@@ -294,8 +294,49 @@ export default function InformeChoferesPage() {
                   <p className="text-xs mt-1">Intente cambiar el filtro de agencia o realizar otra búsqueda</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 text-left">
+                <>
+                  {/* VISTA MÓVIL (CARDS) */}
+                  <div className="block md:hidden divide-y divide-gray-100 print:hidden">
+                    {filteredLiquidaciones.map((l) => (
+                      <div key={l.choferId} className="p-4 space-y-2.5 bg-white">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-gray-900 truncate">{l.nombreCompleto}</p>
+                            <p className="text-xs text-gray-500">
+                              #{l.numeroChofer} • {l.telefono}
+                            </p>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-800 shrink-0">
+                            {l.viajesCompletados} viajes
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                          <div>
+                            <span className="text-[10px] text-gray-400 block">Bruto</span>
+                            <span className="font-bold text-gray-900">
+                              ${l.facturacionBruta.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-blue-600 block">Chofer</span>
+                            <span className="font-bold text-blue-700">
+                              ${l.comisionChofer.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-green-600 block">Agencia</span>
+                            <span className="font-bold text-green-700">
+                              ${l.saldoAgencia.toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* VISTA ESCRITORIO (TABLA) */}
+                  <div className="hidden md:block overflow-x-auto print:block">
+                    <table className="min-w-full divide-y divide-gray-200 text-left">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">N° Chofer</th>
@@ -361,6 +402,7 @@ export default function InformeChoferesPage() {
                     </tfoot>
                   </table>
                 </div>
+                </>
               )}
             </div>
 

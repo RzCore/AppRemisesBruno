@@ -1294,7 +1294,7 @@ export default function HistorialLiquidacionesPage() {
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                   Esquema de Distribución y Liquidación
                 </h4>
-                <div className="grid grid-cols-3 gap-2 text-center p-3 rounded-xl border border-slate-200 bg-white">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center p-3 rounded-xl border border-slate-200 bg-white">
                   <div className="p-2 border-r border-slate-100">
                     <span className="text-[10px] text-slate-400 block font-semibold">Bruto Total</span>
                     <span className="text-sm font-bold text-slate-900 block mt-0.5">

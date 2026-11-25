@@ -188,8 +188,8 @@ export default function DuenioLayout({
         </header>
 
         {/* Page Content with bottom padding for mobile bar */}
-        <main ref={mainRef} className="flex-1 overflow-y-auto bg-slate-50/50 pb-24 lg:pb-8">
-          <div className="max-w-7xl mx-auto p-3 sm:p-6 lg:p-8">
+        <main ref={mainRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50/50 pb-24 lg:pb-8">
+          <div className="max-w-7xl mx-auto p-3 sm:p-6 lg:p-8 min-w-0 w-full">
             {children}
           </div>
         </main>

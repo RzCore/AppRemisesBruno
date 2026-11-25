@@ -1512,7 +1512,103 @@ export default function ArtPage() {
 
             return (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
+                {/* VISTA MÓVIL (CARDS TÁCTILES) */}
+                <div className="block md:hidden divide-y divide-slate-100">
+                  {listaFiltrada.map((v) => {
+                    const selectedCh = choferSeleccionadoPorViaje[v.id] ?? v.choferId ?? '';
+                    return (
+                      <div key={v.id} className="p-4 space-y-3 bg-white">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="inline-flex px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px]">
+                              ART - {v.artEmpresa?.nombre || 'Empresa'}
+                            </span>
+                            <h4 className="font-bold text-slate-900 text-sm mt-1 break-words">
+                              {v.clienteNombre || 'Sin nombre'}
+                            </h4>
+                            {v.clienteTelefono && (
+                              <p className="text-xs text-slate-500">{v.clienteTelefono}</p>
+                            )}
+                            {v.numeroSiniestro && (
+                              <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                                Sin: {v.numeroSiniestro}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="font-bold text-slate-900 text-xs">
+                              {new Date(v.fecha).toLocaleDateString('es-AR')}
+                            </div>
+                            <div className="text-xs font-bold text-indigo-700">
+                              Turno {v.horaTurno || new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1 text-xs">
+                          <div className="text-slate-700 break-words">
+                            <strong className="text-emerald-700">Orig:</strong> {v.origen}
+                          </div>
+                          <div className="text-slate-700 break-words">
+                            <strong className="text-indigo-700">Dest:</strong> {v.destino}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                            <span className="text-xs font-semibold text-slate-600">Hora Salida:</span>
+                            <input
+                              type="time"
+                              value={horaSalidaPorViaje[v.id] ?? v.horaSalidaChofer ?? ''}
+                              onChange={(e) =>
+                                setHoraSalidaPorViaje((prev) => ({ ...prev, [v.id]: e.target.value }))
+                              }
+                              className="px-2 py-1 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white"
+                            />
+                          </div>
+
+                          <select
+                            value={selectedCh}
+                            onChange={(e) =>
+                              setChoferSeleccionadoPorViaje((prev) => ({
+                                ...prev,
+                                [v.id]: e.target.value
+                              }))
+                            }
+                            className={`w-full px-3 py-2 rounded-xl border text-xs font-semibold ${
+                              selectedCh
+                                ? 'border-emerald-300 bg-emerald-50/40 text-slate-900'
+                                : 'border-amber-300 bg-amber-50/50 text-amber-900'
+                            }`}
+                          >
+                            <option value="">-- Seleccionar Chofer --</option>
+                            {choferesList.map((c: any) => (
+                              <option key={c.id} value={c.id}>
+                                {c.nombre} {c.apellido} (#{c.numeroChofer})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={asignandoViajeId === v.id || !selectedCh}
+                          onClick={() => handleAsignarChoferDesdeTabla(v)}
+                          className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold shadow-xs transition-all"
+                        >
+                          {asignandoViajeId === v.id
+                            ? 'Guardando...'
+                            : v.choferId
+                            ? 'Reasignar Chofer'
+                            : 'Asignar Chofer'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* VISTA ESCRITORIO (TABLA) */}
+                <div className="hidden md:block overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-200 text-xs">
                     <thead className="bg-slate-50">
                       <tr>
@@ -2277,7 +2373,7 @@ export default function ArtPage() {
               </div>
 
               {/* Resumen numérico en la hoja impresa */}
-              <div className="mt-4 pt-3 border-t border-slate-200 grid grid-cols-4 gap-4 text-xs">
+              <div className="mt-4 pt-3 border-t border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs">
                 <div>
                   <span className="text-slate-500 block">Total Viajes:</span>
                   <span className="font-bold text-sm text-slate-900">{facturacionData?.resumen?.totalViajes || 0}</span>
@@ -2435,7 +2531,7 @@ export default function ArtPage() {
                         </div>
 
                         {/* Desglose Financiero */}
-                        <div className="grid grid-cols-4 gap-2 text-center text-xs bg-slate-50 p-2 rounded-xl border border-slate-100">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs bg-slate-50 p-2 rounded-xl border border-slate-100">
                           <div>
                             <span className="text-[10px] text-slate-400 block">Km/Espera</span>
                             <span className="font-semibold text-slate-800">{Number(viaje.distanciaKmConPasajero || viaje.distanciaKm || 0).toFixed(1)}k/{esperaMin}m</span>
@@ -3616,7 +3712,7 @@ export default function ArtPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Trayecto:</span>
-                <span className="font-medium text-slate-700 truncate max-w-[260px]">{viajeParaReasignar.origen} &rarr; {viajeParaReasignar.destino}</span>
+                <span className="font-medium text-slate-700 break-words flex-1 min-w-0 text-right">{viajeParaReasignar.origen} &rarr; {viajeParaReasignar.destino}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Chofer asignado actual:</span>
@@ -3734,7 +3830,7 @@ export default function ArtPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Trayecto planificado:</span>
-                <span className="font-medium text-slate-700 truncate max-w-[260px]">{viajeParaAuxilio.origen} &rarr; {viajeParaAuxilio.destino}</span>
+                <span className="font-medium text-slate-700 break-words flex-1 min-w-0 text-right">{viajeParaAuxilio.origen} &rarr; {viajeParaAuxilio.destino}</span>
               </div>
             </div>
 
@@ -3981,7 +4077,7 @@ export default function ArtPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Recorrido:</span>
-                <span className="font-medium text-slate-700 truncate max-w-[260px]">{viajeParaCoordinacion.origen} &rarr; {viajeParaCoordinacion.destino}</span>
+                <span className="font-medium text-slate-700 break-words flex-1 min-w-0 text-right">{viajeParaCoordinacion.origen} &rarr; {viajeParaCoordinacion.destino}</span>
               </div>
             </div>
 

@@ -126,24 +126,24 @@ export default function InformeSemanalPage() {
     <div className="min-h-screen bg-gray-50 print:bg-white">
       {/* Header */}
       <header className="bg-white shadow-sm border-b print:hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap justify-between items-center gap-2 py-3 min-h-[56px]">
+            <div className="flex items-center min-w-0">
               <button
                 onClick={() => router.push('/duenio/dashboard')}
-                className="flex items-center text-gray-600 hover:text-gray-900 mr-4 p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                className="flex items-center text-gray-600 hover:text-gray-900 mr-2 sm:mr-4 p-1.5 sm:p-2 rounded-lg hover:bg-gray-100 transition-colors shrink-0"
               >
-                <ArrowLeft className="w-5 h-5 mr-1" />
-                <span>Volver</span>
+                <ArrowLeft className="w-5 h-5 sm:mr-1" />
+                <span className="hidden sm:inline">Volver</span>
               </button>
-              <div className="h-6 w-[1px] bg-gray-200 mr-4"></div>
-              <div className="flex items-center">
-                <BarChart3 className="w-6 h-6 text-green-600 mr-2" />
-                <h1 className="text-xl font-bold text-gray-900">Informe Semanal y Analíticas</h1>
+              <div className="hidden sm:block h-6 w-[1px] bg-gray-200 mr-4"></div>
+              <div className="flex items-center min-w-0">
+                <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 mr-2 shrink-0" />
+                <h1 className="text-base sm:text-xl font-bold text-gray-900 truncate">Informe Semanal</h1>
               </div>
             </div>
             
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2 shrink-0">
               <button
                 onClick={handleRefresh}
                 disabled={loadingReport}
@@ -154,10 +154,10 @@ export default function InformeSemanalPage() {
               </button>
               <button
                 onClick={handlePrint}
-                className="flex items-center space-x-1.5 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all font-medium text-sm"
+                className="flex items-center space-x-1.5 px-3 sm:px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all font-medium text-xs sm:text-sm"
               >
                 <Printer className="w-4 h-4" />
-                <span>Imprimir Reporte</span>
+                <span className="hidden sm:inline">Imprimir Reporte</span>
               </button>
             </div>
           </div>
