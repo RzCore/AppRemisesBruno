@@ -789,20 +789,64 @@ export const artEmpresaController = {
       const minute = parseInt(horaParts[1] || '0', 10);
       const fechaCalculada = new Date(year, month, day, hour, minute, 0);
 
-      // Buscar o asociar cliente si se brindó teléfono o DNI
+      // Buscar o crear automáticamente el cliente (pasajero ART suele viajar seguido)
       let clienteId: string | null = null;
-      if (clienteTelefono || clienteDni) {
+      const cleanTel = clienteTelefono ? String(clienteTelefono).replace(/\D/g, '') : '';
+      const cleanDni = clienteDni ? String(clienteDni).replace(/\D/g, '') : '';
+      const cleanNombreCompleto = clienteNombre.trim();
+
+      if (cleanTel || cleanDni) {
         const clienteExistente = await prisma.cliente.findFirst({
           where: {
             remiseriaId,
             OR: [
-              ...(clienteTelefono ? [{ telefono: clienteTelefono.trim() }] : []),
-              ...(clienteDni ? [{ dni: clienteDni.trim() }] : [])
+              ...(cleanTel ? [{ telefono: cleanTel }, { telefono: clienteTelefono.trim() }] : []),
+              ...(cleanDni ? [{ dni: cleanDni }] : [])
             ]
           }
         });
         if (clienteExistente) {
           clienteId = clienteExistente.id;
+        }
+      }
+
+      if (!clienteId && cleanNombreCompleto) {
+        try {
+          const bcrypt = await import('bcryptjs');
+          const partes = cleanNombreCompleto.split(/\s+/);
+          const nombreCliente = partes[0] || 'Pasajero';
+          const apellidoCliente = partes.length > 1 ? partes.slice(1).join(' ') : 'ART';
+          const uniqueSuffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+          const dniFinal = cleanDni || `ART${uniqueSuffix.slice(-8)}`;
+          const telFinal = cleanTel || (clienteTelefono ? clienteTelefono.trim() : `S/T-${uniqueSuffix.slice(-6)}`);
+          const dummyEmail = `art_${uniqueSuffix}@cliente.brunoremises.local`;
+          const passwordHash = await bcrypt.hash(dniFinal, 10);
+
+          const nuevoUser = await prisma.user.create({
+            data: {
+              email: dummyEmail,
+              passwordHash,
+              rol: 'CLIENTE'
+            }
+          });
+
+          const nuevoCliente = await prisma.cliente.create({
+            data: {
+              userId: nuevoUser.id,
+              remiseriaId,
+              nombre: nombreCliente,
+              apellido: apellidoCliente,
+              dni: dniFinal,
+              telefono: telFinal,
+              email: dummyEmail,
+              direccion: origen.trim(),
+              fechaNacimiento: new Date('1990-01-01'),
+              observaciones: `Pasajero ART (${art.nombre})`
+            }
+          });
+          clienteId = nuevoCliente.id;
+        } catch (errClienteArt) {
+          console.warn('Aviso: no se pudo auto-registrar el pasajero ART como cliente:', errClienteArt);
         }
       }
 

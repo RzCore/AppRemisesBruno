@@ -1548,12 +1548,21 @@ export const coordinatorDashboardController = {
         where: { userId: coordinadorId }
       });
 
-      if (!coordinador) {
-        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      let remiseriaIdScope: string | null = coordinador?.remiseriaId || null;
+      if (!remiseriaIdScope && req.user?.rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId: coordinadorId },
+          include: { remiserias: { select: { remiseriaId: true } } }
+        });
+        remiseriaIdScope = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+
+      if (!remiseriaIdScope) {
+        return res.status(404).json({ success: false, message: 'Usuario sin remisería asociada' });
       }
 
       const existente = await prisma.reserva.findFirst({
-        where: { id, remiseriaId: coordinador.remiseriaId }
+        where: { id, remiseriaId: remiseriaIdScope }
       });
 
       if (!existente) {
@@ -1603,12 +1612,21 @@ export const coordinatorDashboardController = {
         where: { userId: coordinadorId }
       });
 
-      if (!coordinador) {
-        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      let remiseriaIdScope: string | null = coordinador?.remiseriaId || null;
+      if (!remiseriaIdScope && req.user?.rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId: coordinadorId },
+          include: { remiserias: { select: { remiseriaId: true } } }
+        });
+        remiseriaIdScope = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+
+      if (!remiseriaIdScope) {
+        return res.status(404).json({ success: false, message: 'Usuario sin remisería asociada' });
       }
 
       const existente = await prisma.reserva.findFirst({
-        where: { id, remiseriaId: coordinador.remiseriaId }
+        where: { id, remiseriaId: remiseriaIdScope }
       });
 
       if (!existente) {
@@ -2114,8 +2132,17 @@ export const coordinatorDashboardController = {
         where: { userId: coordinadorId }
       });
 
-      if (!coordinador) {
-        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      let remiseriaIdScope: string | null = coordinador?.remiseriaId || null;
+      if (!remiseriaIdScope && req.user?.rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId: coordinadorId },
+          include: { remiserias: { select: { remiseriaId: true } } }
+        });
+        remiseriaIdScope = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+
+      if (!remiseriaIdScope) {
+        return res.status(404).json({ success: false, message: 'Usuario sin remisería asociada' });
       }
 
       const searchTerm = q.trim();
@@ -2564,14 +2591,23 @@ export const coordinatorDashboardController = {
         where: { userId: coordinadorId }
       });
 
-      if (!coordinador) {
-        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      let remiseriaIdScope: string | null = coordinador?.remiseriaId || null;
+      if (!remiseriaIdScope && req.user?.rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId: coordinadorId },
+          include: { remiserias: { select: { remiseriaId: true } } }
+        });
+        remiseriaIdScope = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+
+      if (!remiseriaIdScope) {
+        return res.status(404).json({ success: false, message: 'Usuario sin remisería asociada' });
       }
 
       const { fechaDesde, fechaHasta, canceladoPor } = req.query;
 
       const whereClause: any = {
-        remiseriaId: coordinador.remiseriaId,
+        remiseriaId: remiseriaIdScope,
         estado: 'CANCELADO'
       };
 
@@ -2701,8 +2737,17 @@ export const coordinatorDashboardController = {
         where: { userId: coordinadorId }
       });
 
-      if (!coordinador) {
-        return res.status(404).json({ success: false, message: 'Coordinador no encontrado' });
+      let remiseriaIdScope: string | null = coordinador?.remiseriaId || null;
+      if (!remiseriaIdScope && req.user?.rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId: coordinadorId },
+          include: { remiserias: { select: { remiseriaId: true } } }
+        });
+        remiseriaIdScope = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+
+      if (!remiseriaIdScope) {
+        return res.status(404).json({ success: false, message: 'Usuario sin remisería asociada' });
       }
 
       const { tarifaEspecialActiva, porcentajeRecargoTarifa, bajadaBandera, valorKm, valorHoraEspera } = req.body;
@@ -2715,7 +2760,7 @@ export const coordinatorDashboardController = {
       if (valorHoraEspera !== undefined) dataToUpdate.valorHoraEspera = parseFloat(valorHoraEspera);
 
       const updatedRemiseria = await prisma.remiseria.update({
-        where: { id: coordinador.remiseriaId },
+        where: { id: remiseriaIdScope },
         data: dataToUpdate
       });
 
@@ -2723,7 +2768,7 @@ export const coordinatorDashboardController = {
         const { getIO } = await import('../lib/socket');
         const io = getIO();
         if (io) {
-          io.to(coordinador.remiseriaId).emit('tarifa_configuracion_actualizada', {
+          io.to(remiseriaIdScope).emit('tarifa_configuracion_actualizada', {
             tarifaEspecialActiva: updatedRemiseria.tarifaEspecialActiva,
             porcentajeRecargoTarifa: updatedRemiseria.porcentajeRecargoTarifa,
             bajadaBandera: updatedRemiseria.bajadaBandera,

@@ -1200,7 +1200,7 @@ export default function DuenioClientesPage() {
                     min="0"
                     step="any"
                     placeholder="0 para sin límite"
-                    value={configCCForm.limite}
+                    value={configCCForm.limite || ''}
                     onChange={(e) => setConfigCCForm({ ...configCCForm, limite: parseFloat(e.target.value) || 0 })}
                     className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-primary-500"
                   />
@@ -1289,7 +1289,8 @@ export default function DuenioClientesPage() {
                             min="0"
                             step="any"
                             required
-                            value={configCCForm.tarifaPrecioTramo}
+                            placeholder="0"
+                            value={configCCForm.tarifaPrecioTramo || ''}
                             onChange={(e) => setConfigCCForm({ ...configCCForm, tarifaPrecioTramo: parseFloat(e.target.value) || 0 })}
                             className="w-full pl-6 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
                           />
@@ -1308,7 +1309,8 @@ export default function DuenioClientesPage() {
                             min="0"
                             step="any"
                             required
-                            value={configCCForm.tarifaValorKm}
+                            placeholder="0"
+                            value={configCCForm.tarifaValorKm || ''}
                             onChange={(e) => setConfigCCForm({ ...configCCForm, tarifaValorKm: parseFloat(e.target.value) || 0 })}
                             className="w-full pl-6 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
                           />
@@ -1326,7 +1328,8 @@ export default function DuenioClientesPage() {
                             type="number"
                             min="0"
                             step="any"
-                            value={configCCForm.tarifaValorHoraEspera}
+                            placeholder="0"
+                            value={configCCForm.tarifaValorHoraEspera || ''}
                             onChange={(e) => setConfigCCForm({ ...configCCForm, tarifaValorHoraEspera: parseFloat(e.target.value) || 0 })}
                             className="w-full pl-6 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
                           />
