@@ -1167,15 +1167,26 @@ export const coordinatorDashboardController = {
         include: { remiseria: true }
       });
 
-      if (!coordinador) {
+      let remiseriaActual = coordinador?.remiseria || null;
+      const esDuenioSolicitante = req.user?.rol === 'DUENIO';
+
+      if (!remiseriaActual && esDuenioSolicitante) {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId: coordinadorId },
+          include: { remiserias: { include: { remiseria: true } } }
+        });
+        remiseriaActual = duenio?.remiserias?.[0]?.remiseria || null;
+      }
+
+      if (!remiseriaActual) {
         return res.status(404).json({
           success: false,
-          message: 'Coordinador no encontrado'
+          message: 'Remisería no encontrada para el usuario'
         });
       }
 
-      const rawValorKm = coordinador.remiseria?.valorKm;
-      const rawBajadaBandera = coordinador.remiseria?.bajadaBandera;
+      const rawValorKm = remiseriaActual?.valorKm;
+      const rawBajadaBandera = remiseriaActual?.bajadaBandera;
       let valorKm = rawValorKm && rawValorKm > 0 ? rawValorKm : 1200;
       let bajadaBandera = rawBajadaBandera && rawBajadaBandera > 0 ? rawBajadaBandera : 3500;
       let artEmpresaAplicada: any = null;
@@ -1308,8 +1319,8 @@ export const coordinatorDashboardController = {
 
       if (!esLocalArt && usarDesdeBase && finalLatOrigen && finalLonOrigen) {
         // Cobrar desde la base hasta el destino (Base -> Origen + Origen -> Destino)
-        const baseLat = typeof coordinador.remiseria?.latitud === 'number' ? coordinador.remiseria.latitud : DEFAULT_BASE_LAT;
-        const baseLon = typeof coordinador.remiseria?.longitud === 'number' ? coordinador.remiseria.longitud : DEFAULT_BASE_LON;
+        const baseLat = typeof remiseriaActual?.latitud === 'number' ? remiseriaActual.latitud : DEFAULT_BASE_LAT;
+        const baseLon = typeof remiseriaActual?.longitud === 'number' ? remiseriaActual.longitud : DEFAULT_BASE_LON;
         distBaseAOrigenKm = await calcularDistanciaRutaKm(baseLat, baseLon, finalLatOrigen, finalLonOrigen);
         distanciaFacturable = Math.round((distBaseAOrigenKm + distanciaKm) * 10) / 10;
         ajusteRemoto = {
@@ -1325,8 +1336,8 @@ export const coordinatorDashboardController = {
           lonOrigen: finalLonOrigen,
           latDestino: finalLatDestino,
           lonDestino: finalLonDestino,
-          baseLat: coordinador.remiseria?.latitud,
-          baseLon: coordinador.remiseria?.longitud,
+          baseLat: remiseriaActual?.latitud,
+          baseLon: remiseriaActual?.longitud,
         });
         distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
       }
@@ -1356,6 +1367,14 @@ export const coordinatorDashboardController = {
         precioEstimado = Math.round(precioEstimado / 50) * 50;
       }
 
+      // Precio confidencial ART (solo se devuelve al DUENIO)
+      let precioArtEstimado: number | undefined = undefined;
+      if (esDuenioSolicitante && artObj) {
+        precioArtEstimado = esLocalArt
+          ? (artObj.precioTramo || 0)
+          : Math.round(distanciaFacturable * (artObj.valorKm || 0));
+      }
+
       res.json({
         success: true,
         data: {
@@ -1371,6 +1390,7 @@ export const coordinatorDashboardController = {
           precio: precioEstimado,
           precioEstimado,
           precioSugerido: precioEstimado,
+          ...(precioArtEstimado !== undefined ? { precioArtEstimado } : {}),
           bajadaBandera,
           valorKm,
           calculatedViaRoute,

@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { artEmpresaService, remiseriaService, choferService } from '@/lib/api';
+import { artEmpresaService, remiseriaService, choferService, coordinadorDashboardService } from '@/lib/api';
 import { ArtEmpresa, CreateArtEmpresaData, UpdateArtEmpresaData, FacturacionArtResponse, CierreFacturacionArt } from '@/types';
 import {
   Briefcase,
@@ -80,6 +80,182 @@ export default function ArtPage() {
 
   // Modal Reasignar / Editar ART en viaje
   const [modalViajeArtOpen, setModalViajeArtOpen] = useState(false);
+
+  // Modal Crear y Asignar Nuevo Viaje ART (desde el módulo del Dueño)
+  const [isModalNuevoViajeArtOpen, setIsModalNuevoViajeArtOpen] = useState(false);
+  const [creandoViajeArt, setCreandoViajeArt] = useState(false);
+  const [calculandoRutaArt, setCalculandoRutaArt] = useState(false);
+  const [nuevoViajeArtForm, setNuevoViajeArtForm] = useState({
+    artEmpresaId: '',
+    choferId: '',
+    clienteNombre: '',
+    clienteTelefono: '',
+    numeroSiniestro: '',
+    origen: '',
+    destino: '',
+    fecha: new Date().toISOString().split('T')[0],
+    horaSalidaChofer: '08:00',
+    horaTurno: '',
+    esViajeLocal: true,
+    cobrarDesdeBase: false,
+    distanciaKm: 0,
+    precioArt: 0,
+    precio: 0,
+    observaciones: ''
+  });
+
+  const calcularPreciosLocalArt = (
+    artId: string,
+    esLocal: boolean,
+    km: number
+  ): { precioArt: number; precioChofer: number } => {
+    const art = artList.find((a) => a.id === artId);
+    if (!art) return { precioArt: 0, precioChofer: 0 };
+
+    const precioArt = esLocal
+      ? Number(art.precioTramo || 0)
+      : Math.round((km || 0) * Number(art.valorKm || 0));
+
+    let precioChofer = 0;
+    if (art.pagaChoferTipo === 'PERSONALIZADO') {
+      precioChofer = esLocal
+        ? Number(art.choferPrecioTramo || 0)
+        : Math.round((km || 0) * Number(art.choferValorKm || 0));
+    } else {
+      precioChofer = precioArt;
+    }
+
+    return { precioArt, precioChofer };
+  };
+
+  const abrirModalNuevoViajeArt = () => {
+    const primeraArt = artList.find((a) => a.activo) || artList[0];
+    const artId = primeraArt?.id || '';
+    const preciosInit = calcularPreciosLocalArt(artId, true, 0);
+    setNuevoViajeArtForm({
+      artEmpresaId: artId,
+      choferId: choferesList[0]?.id || '',
+      clienteNombre: '',
+      clienteTelefono: '',
+      numeroSiniestro: '',
+      origen: '',
+      destino: '',
+      fecha: new Date().toISOString().split('T')[0],
+      horaSalidaChofer: new Date().toTimeString().slice(0, 5),
+      horaTurno: '',
+      esViajeLocal: true,
+      cobrarDesdeBase: false,
+      distanciaKm: 0,
+      precioArt: preciosInit.precioArt,
+      precio: preciosInit.precioChofer,
+      observaciones: ''
+    });
+    setIsModalNuevoViajeArtOpen(true);
+  };
+
+  const handleCalcularRutaNuevoViajeArt = async (override?: { esViajeLocal?: boolean; cobrarDesdeBase?: boolean; artEmpresaId?: string }) => {
+    const origenTrim = nuevoViajeArtForm.origen.trim();
+    const destinoTrim = nuevoViajeArtForm.destino.trim();
+    const artId = override?.artEmpresaId ?? nuevoViajeArtForm.artEmpresaId;
+    const esLocal = override?.esViajeLocal ?? nuevoViajeArtForm.esViajeLocal;
+    const desdeBase = override?.cobrarDesdeBase ?? nuevoViajeArtForm.cobrarDesdeBase;
+
+    if (!origenTrim || !destinoTrim) {
+      toast.error('Ingresá origen y destino para calcular la distancia');
+      return;
+    }
+
+    try {
+      setCalculandoRutaArt(true);
+      const res = await coordinadorDashboardService.calcularPrecio(origenTrim, destinoTrim, {
+        artEmpresaId: artId || undefined,
+        esViajeLocal: esLocal,
+        cobrarDesdeBase: !esLocal ? desdeBase : false
+      });
+
+      if (res.success && res.data) {
+        const km = Number(res.data.distanciaKm || 0);
+        const precioChofer = Number(res.data.precio ?? res.data.precioEstimado ?? 0);
+        const calcLocal = calcularPreciosLocalArt(artId, esLocal, km);
+        const precioArtFinal =
+          res.data.precioArtEstimado !== undefined
+            ? Number(res.data.precioArtEstimado)
+            : calcLocal.precioArt;
+
+        setNuevoViajeArtForm((prev) => ({
+          ...prev,
+          distanciaKm: km,
+          precioArt: precioArtFinal,
+          precio: precioChofer > 0 ? precioChofer : calcLocal.precioChofer
+        }));
+        toast.success(
+          esLocal
+            ? `Viaje local: tarifa fija $${precioArtFinal.toLocaleString('es-AR')} (${km} km)`
+            : `Distancia calculada: ${km} km${desdeBase && res.data.distBaseAOrigenKm ? ` (incluye ${res.data.distBaseAOrigenKm} km desde base)` : ''}`
+        );
+      } else {
+        toast.error(res.message || 'No se pudo calcular la distancia');
+      }
+    } catch {
+      toast.error('Error al calcular distancia');
+    } finally {
+      setCalculandoRutaArt(false);
+    }
+  };
+
+  const handleCrearViajeArtSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevoViajeArtForm.artEmpresaId) {
+      toast.error('Seleccioná una ART o Empresa');
+      return;
+    }
+    if (!nuevoViajeArtForm.choferId) {
+      toast.error('Seleccioná un chofer');
+      return;
+    }
+    if (!nuevoViajeArtForm.clienteNombre.trim() || !nuevoViajeArtForm.origen.trim() || !nuevoViajeArtForm.destino.trim()) {
+      toast.error('Completá pasajero, origen y destino');
+      return;
+    }
+
+    try {
+      setCreandoViajeArt(true);
+      const res = await artEmpresaService.crearViajeArt({
+        artEmpresaId: nuevoViajeArtForm.artEmpresaId,
+        choferId: nuevoViajeArtForm.choferId,
+        clienteNombre: nuevoViajeArtForm.clienteNombre.trim(),
+        clienteTelefono: nuevoViajeArtForm.clienteTelefono.trim() || undefined,
+        numeroSiniestro: nuevoViajeArtForm.numeroSiniestro.trim() || undefined,
+        origen: nuevoViajeArtForm.origen.trim(),
+        destino: nuevoViajeArtForm.destino.trim(),
+        fecha: nuevoViajeArtForm.fecha,
+        horaSalidaChofer: nuevoViajeArtForm.horaSalidaChofer,
+        horaTurno: nuevoViajeArtForm.horaTurno || '',
+        distanciaKm: Number(nuevoViajeArtForm.distanciaKm) || 0,
+        precio: Number(nuevoViajeArtForm.precio) || 0,
+        precioArt: Number(nuevoViajeArtForm.precioArt) || 0,
+        observaciones: [
+          nuevoViajeArtForm.esViajeLocal ? '[VIAJE LOCAL]' : nuevoViajeArtForm.cobrarDesdeBase ? '[POR KM - DESDE BASE]' : '[POR KM]',
+          nuevoViajeArtForm.observaciones.trim()
+        ].filter(Boolean).join(' ')
+      });
+
+      if (res.success) {
+        toast.success('Viaje ART creado y asignado al chofer correctamente');
+        setIsModalNuevoViajeArtOpen(false);
+        cargarDatos();
+        if (activeTab === 'facturacion') {
+          cargarFacturacion();
+        }
+      } else {
+        toast.error(res.message || 'No se pudo crear el viaje ART');
+      }
+    } catch {
+      toast.error('Error de red al crear el viaje ART');
+    } finally {
+      setCreandoViajeArt(false);
+    }
+  };
   const [viajeSeleccionado, setViajeSeleccionado] = useState<any | null>(null);
   const [nuevoArtIdViaje, setNuevoArtIdViaje] = useState<string>('');
   const [nuevoSiniestroViaje, setNuevoSiniestroViaje] = useState<string>('');
@@ -925,13 +1101,21 @@ export default function ArtPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={cargarDatos}
             className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors"
             title="Refrescar datos"
           >
             <RefreshCw className="w-5 h-5" />
+          </button>
+          <button
+            onClick={abrirModalNuevoViajeArt}
+            disabled={artList.length === 0}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold text-sm shadow-sm shadow-emerald-200 transition-all active:scale-95"
+          >
+            <Car className="w-5 h-5" />
+            Nuevo Viaje ART
           </button>
           <button
             onClick={handleAbrirModalCrear}
@@ -3889,6 +4073,332 @@ export default function ArtPage() {
                   ) : (
                     'Confirmar Cobro'
                   )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CREAR Y ASIGNAR NUEVO VIAJE ART / EMPRESA (DUEÑO)       */}
+      {/* ============================================================== */}
+      {isModalNuevoViajeArtOpen && (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-white px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700">
+                  <Car className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Crear y Asignar Viaje ART / Empresa</h3>
+                  <p className="text-xs text-slate-500">Se asignará directamente al chofer seleccionado.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalNuevoViajeArtOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCrearViajeArtSubmit} className="p-6 space-y-5">
+              {/* ART y Chofer */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">ART / Empresa *</label>
+                  <select
+                    required
+                    value={nuevoViajeArtForm.artEmpresaId}
+                    onChange={(e) => {
+                      const artId = e.target.value;
+                      const precios = calcularPreciosLocalArt(artId, nuevoViajeArtForm.esViajeLocal, nuevoViajeArtForm.distanciaKm);
+                      setNuevoViajeArtForm((prev) => ({
+                        ...prev,
+                        artEmpresaId: artId,
+                        precioArt: precios.precioArt,
+                        precio: precios.precioChofer
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">-- Seleccionar ART --</option>
+                    {artList.filter((a) => a.activo).map((art) => (
+                      <option key={art.id} value={art.id}>
+                        {art.nombre} (Local: ${art.precioTramo} | Km: ${art.valorKm})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Chofer Asignado *</label>
+                  <select
+                    required
+                    value={nuevoViajeArtForm.choferId}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, choferId: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">-- Seleccionar Chofer --</option>
+                    {choferesList.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre} {c.apellido} (#{c.numeroChofer}) {c.vehiculo?.patente ? `• ${c.vehiculo.patente}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Pasajero y Siniestro */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Pasajero / Paciente *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Nombre y Apellido"
+                    value={nuevoViajeArtForm.clienteNombre}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, clienteNombre: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 2346..."
+                    value={nuevoViajeArtForm.clienteTelefono}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, clienteTelefono: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">N° Siniestro / Bono</label>
+                  <input
+                    type="text"
+                    placeholder="Opcional"
+                    value={nuevoViajeArtForm.numeroSiniestro}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, numeroSiniestro: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Origen y Destino */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Origen *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Dirección y localidad de origen"
+                    value={nuevoViajeArtForm.origen}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, origen: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Destino *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Dirección y localidad de destino"
+                    value={nuevoViajeArtForm.destino}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, destino: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Fecha y Horarios */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Fecha *</label>
+                  <input
+                    type="date"
+                    required
+                    value={nuevoViajeArtForm.fecha}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, fecha: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Hora Salida Chofer *</label>
+                  <input
+                    type="time"
+                    required
+                    value={nuevoViajeArtForm.horaSalidaChofer}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, horaSalidaChofer: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Hora Turno Médico</label>
+                  <input
+                    type="time"
+                    value={nuevoViajeArtForm.horaTurno}
+                    onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, horaTurno: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Tipo de Tarifa: Local vs Por Km + Cobrar desde Base */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase">Tipo de Viaje y Tarifa</span>
+                  <button
+                    type="button"
+                    disabled={calculandoRutaArt || !nuevoViajeArtForm.origen.trim() || !nuevoViajeArtForm.destino.trim()}
+                    onClick={() => handleCalcularRutaNuevoViajeArt()}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    {calculandoRutaArt ? 'Calculando...' : 'Calcular distancia y precios'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const precios = calcularPreciosLocalArt(nuevoViajeArtForm.artEmpresaId, true, nuevoViajeArtForm.distanciaKm);
+                      setNuevoViajeArtForm((prev) => ({
+                        ...prev,
+                        esViajeLocal: true,
+                        cobrarDesdeBase: false,
+                        precioArt: precios.precioArt,
+                        precio: precios.precioChofer
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      nuevoViajeArtForm.esViajeLocal
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                    }`}
+                  >
+                    Viaje Local (Tarifa fija)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const precios = calcularPreciosLocalArt(nuevoViajeArtForm.artEmpresaId, false, nuevoViajeArtForm.distanciaKm);
+                      setNuevoViajeArtForm((prev) => ({
+                        ...prev,
+                        esViajeLocal: false,
+                        precioArt: precios.precioArt,
+                        precio: precios.precioChofer
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      !nuevoViajeArtForm.esViajeLocal
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                    }`}
+                  >
+                    Por Km (No local)
+                  </button>
+                </div>
+
+                {!nuevoViajeArtForm.esViajeLocal && (
+                  <label className="flex items-start gap-2 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={nuevoViajeArtForm.cobrarDesdeBase}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setNuevoViajeArtForm((prev) => ({ ...prev, cobrarDesdeBase: checked }));
+                        if (nuevoViajeArtForm.origen.trim() && nuevoViajeArtForm.destino.trim()) {
+                          handleCalcularRutaNuevoViajeArt({ cobrarDesdeBase: checked, esViajeLocal: false });
+                        }
+                      }}
+                      className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-[11px] text-slate-700 leading-tight">
+                      <strong className="text-slate-900">Cobrar desde la base hasta el destino</strong>
+                      <span className="block text-[10px] text-slate-500">
+                        Para cuando el móvil debe salir a buscar al pasajero a otra localidad.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Distancia (km)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={nuevoViajeArtForm.distanciaKm}
+                      onChange={(e) => {
+                        const km = parseFloat(e.target.value) || 0;
+                        const precios = calcularPreciosLocalArt(nuevoViajeArtForm.artEmpresaId, nuevoViajeArtForm.esViajeLocal, km);
+                        setNuevoViajeArtForm((prev) => ({
+                          ...prev,
+                          distanciaKm: km,
+                          precioArt: precios.precioArt,
+                          precio: precios.precioChofer
+                        }));
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-700 mb-1">Factura a ART ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={nuevoViajeArtForm.precioArt}
+                      onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, precioArt: parseFloat(e.target.value) || 0 }))}
+                      className="w-full px-3 py-2 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-800 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-blue-700 mb-1">Pago al Chofer ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={nuevoViajeArtForm.precio}
+                      onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, precio: parseFloat(e.target.value) || 0 }))}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-xl text-xs font-bold text-blue-800 bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Observaciones */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Observaciones</label>
+                <textarea
+                  rows={2}
+                  placeholder="Indicaciones para el chofer, piso/consultorio, espera, etc."
+                  value={nuevoViajeArtForm.observaciones}
+                  onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, observaciones: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsModalNuevoViajeArtOpen(false)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={creandoViajeArt}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  {creandoViajeArt ? 'Creando viaje...' : 'Crear y Asignar al Chofer'}
                 </button>
               </div>
             </form>
