@@ -471,6 +471,7 @@ export const choferController = {
             direccion,
             categoriaLicencia,
             vtoLicencia: new Date(vtoLicencia),
+            estado: 'ACTIVO',
             observaciones: observaciones || null,
             esPropietario: esPropietario || false,
             esFranquero: Boolean(esFranquero),

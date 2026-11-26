@@ -4,6 +4,10 @@ import { authenticateToken } from '../middleware/auth';
 
 const router = express.Router();
 
+// Rutas públicas de auto-registro de choferes (antes de authenticateToken)
+router.get('/remiserias-disponibles', choferController.getRemiseriasDisponibles);
+router.post('/registro', choferController.registroPublico);
+
 // Aplicar middleware de autenticación a todas las rutas protegidas
 router.use(authenticateToken);
 
@@ -48,10 +52,12 @@ router.get('/', choferController.getAll);
 router.get('/remiseria/:remiseriaId', choferController.getByRemiseria);
 router.get('/:id', choferController.getById);
 
-// Gestión de choferes exclusiva del Dueño / Admin
+// Gestión de choferes exclusiva del Dueño / Admin (y aprobación/rechazo)
 router.post('/', choferController.create);
 router.put('/:id', choferController.update);
 router.delete('/:id', choferController.delete);
 router.patch('/:id/toggle-status', choferController.toggleStatus);
+router.patch('/:id/aprobar', choferController.aprobarChofer);
+router.patch('/:id/rechazar', choferController.rechazarChofer);
 
 export default router;
