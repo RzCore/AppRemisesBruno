@@ -808,105 +808,39 @@ export const coordinatorDashboardController = {
         });
       }
 
-      const [reservas, viajesArtProgramados] = await Promise.all([
-        prisma.reserva.findMany({
-          where: {
-            remiseriaId: coordinador.remiseriaId,
-            estado: 'ACTIVA'
+      // Reservados muestra únicamente reservas de clientes particulares (excluye viajes/reservas de ART)
+      const reservas = await prisma.reserva.findMany({
+        where: {
+          remiseriaId: coordinador.remiseriaId,
+          estado: 'ACTIVA',
+          artEmpresaId: null
+        },
+        include: {
+          chofer: {
+            select: {
+              id: true,
+              nombre: true,
+              apellido: true,
+              telefono: true
+            }
           },
-          include: {
-            chofer: {
-              select: {
-                id: true,
-                nombre: true,
-                apellido: true,
-                telefono: true
-              }
-            },
-            vehiculo: {
-              select: {
-                id: true,
-                patente: true,
-                marca: true,
-                modelo: true
-              }
-            },
-            artEmpresa: true
-          },
-          orderBy: {
-            fechaInicio: 'asc'
+          vehiculo: {
+            select: {
+              id: true,
+              patente: true,
+              marca: true,
+              modelo: true
+            }
           }
-        }),
-        prisma.viaje.findMany({
-          where: {
-            remiseriaId: coordinador.remiseriaId,
-            artEmpresaId: { not: null },
-            estado: { in: ['ACEPTADO', 'PENDIENTE', 'EN_CAMINO'] }
-          },
-          include: {
-            chofer: {
-              select: {
-                id: true,
-                nombre: true,
-                apellido: true,
-                telefono: true,
-                numeroChofer: true
-              }
-            },
-            vehiculo: {
-              select: {
-                id: true,
-                patente: true,
-                marca: true,
-                modelo: true
-              }
-            },
-            artEmpresa: true
-          },
-          orderBy: {
-            fecha: 'asc'
-          }
-        })
-      ]);
-
-      // Mapear viajes de ART programados al formato consumible por la tabla de reservados
-      const viajesArtComoReservas = viajesArtProgramados.map(v => ({
-        id: v.id,
-        isViajeArt: true,
-        clienteNombre: v.clienteNombre || 'Pasajero ART',
-        clienteTelefono: v.clienteTelefono || '',
-        clienteEmail: v.clienteEmail || null,
-        origen: v.origen,
-        destino: v.destino,
-        fechaInicio: v.fecha,
-        fechaFin: null,
-        horaInicio: v.horaSalidaChofer || '08:00',
-        horaTurno: v.horaTurno || null,
-        horaSalidaChofer: v.horaSalidaChofer || null,
-        tipo: 'ART_PROGRAMADO',
-        estado: v.estado,
-        observaciones: v.observaciones,
-        numeroSiniestro: v.numeroSiniestro,
-        precioArt: v.precioArt,
-        precioChofer: v.precio,
-        choferId: v.choferId,
-        chofer: v.chofer,
-        vehiculoId: v.vehiculoId,
-        vehiculo: v.vehiculo,
-        artEmpresaId: v.artEmpresaId,
-        artEmpresa: v.artEmpresa,
-        createdAt: v.createdAt
-      }));
-
-      const combinadas = [...viajesArtComoReservas, ...reservas].sort((a, b) => {
-        const timeA = new Date(a.fechaInicio).getTime();
-        const timeB = new Date(b.fechaInicio).getTime();
-        return timeA - timeB;
+        },
+        orderBy: {
+          fechaInicio: 'asc'
+        }
       });
 
       res.json({
         success: true,
-        data: combinadas
+        data: reservas
       });
     } catch (error) {
       console.error('Error getting reservas:', error);
@@ -2000,7 +1934,8 @@ export const coordinatorDashboardController = {
         prisma.reserva.count({
           where: {
             remiseriaId: coordinador.remiseriaId,
-            estado: 'ACTIVA'
+            estado: 'ACTIVA',
+            artEmpresaId: null
           }
         }),
         prisma.vehiculo.count({

@@ -517,9 +517,12 @@ export default function CoordinadorDashboard() {
         setViajesHistorial(historialRes.data.map(mapViaje));
       }
       if (reservasRes?.success && reservasRes.data) {
-        setReservas(reservasRes.data.map((r: any) => {
+        const soloClientes = reservasRes.data.filter(
+          (r: any) => !r.isViajeArt && r.tipo !== 'ART_PROGRAMADO' && !r.artEmpresaId
+        );
+        setReservas(soloClientes.map((r: any) => {
           const formattedDate = new Date(r.fechaInicio).toLocaleDateString();
-          const isArt = Boolean(r.isViajeArt || r.tipo === 'ART_PROGRAMADO');
+          const isArt = false;
           return {
             id: r.id,
             cliente: r.clienteNombre,
