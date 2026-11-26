@@ -227,6 +227,7 @@ export const vehiculoController = {
         tipo, 
         capacidad, 
         propietario, 
+        propietarioEmail,
         vtoVtv, 
         vtoMatafuego, 
         vtoSeguro, 
@@ -301,6 +302,7 @@ export const vehiculoController = {
           tipo,
           capacidad,
           propietario,
+          propietarioEmail: propietarioEmail ? String(propietarioEmail).trim().toLowerCase() : null,
           vtoVtv: vtoVtv ? new Date(vtoVtv) : null,
           vtoMatafuego: vtoMatafuego ? new Date(vtoMatafuego) : null,
           vtoSeguro: vtoSeguro ? new Date(vtoSeguro) : null,
@@ -398,6 +400,7 @@ export const vehiculoController = {
         tipo, 
         capacidad, 
         propietario, 
+        propietarioEmail,
         vtoVtv, 
         vtoMatafuego, 
         vtoSeguro, 
@@ -469,6 +472,9 @@ export const vehiculoController = {
       if (tipo) updateData.tipo = tipo;
       if (capacidad) updateData.capacidad = capacidad;
       if (propietario) updateData.propietario = propietario;
+      if (propietarioEmail !== undefined) {
+        updateData.propietarioEmail = propietarioEmail ? String(propietarioEmail).trim().toLowerCase() : null;
+      }
       if (vtoVtv !== undefined) updateData.vtoVtv = vtoVtv ? new Date(vtoVtv) : null;
       if (vtoMatafuego !== undefined) updateData.vtoMatafuego = vtoMatafuego ? new Date(vtoMatafuego) : null;
       if (vtoSeguro !== undefined) updateData.vtoSeguro = vtoSeguro ? new Date(vtoSeguro) : null;

@@ -728,6 +728,7 @@ export const choferService = {
       distanciaKmConPasajero?: number;
       distanciaKmSinPasajero?: number;
       metodoPago?: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE';
+      destinoTransferencia?: 'CUENTA_PROPIA' | 'CUENTA_AGENCIA';
       precioFinal?: number;
       pin?: string;
       montoPeajes?: number;
@@ -924,7 +925,30 @@ export const choferService = {
     }
   },
 
-  finalizarTurno: async (data: { odometroFin?: number; observaciones?: string; choferId?: string }): Promise<ApiResponse<any>> => {
+  asignarVehiculo: async (
+    choferId: string,
+    vehiculoId: string | null
+  ): Promise<ApiResponse<Chofer>> => {
+    try {
+      const response = await api.patch(`/choferes/${choferId}/asignar-vehiculo`, {
+        vehiculoId: vehiculoId || null,
+      });
+      return handleApiResponse<Chofer>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al asignar vehículo al chofer',
+      };
+    }
+  },
+
+  finalizarTurno: async (data: {
+    odometroFin?: number;
+    observaciones?: string;
+    choferId?: string;
+    gastoCombustible?: { monto: number; subtipoCombustible?: 'NAFTA_GASOIL' | 'GNC'; descripcion?: string };
+    otroGasto?: { monto: number; tipo?: string; descripcion?: string };
+  }): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/choferes/turno/finalizar', data);
       return handleApiResponse<any>(response);
@@ -1691,7 +1715,7 @@ export const coordinadorDashboardService = {
     metodoPagoChofer?: 'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS';
     montoEfectivo?: number;
     montoTransferencia?: number;
-    quienPagaSaldoAFavor?: 'COORDINADOR' | 'PENDIENTE_DUENIO';
+    quienPagaSaldoAFavor?: 'COORDINADOR' | 'PENDIENTE_DUENIO' | 'PAGADO_DUENIO';
   }): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/coordinator-dashboard/liquidaciones/crear', payload);

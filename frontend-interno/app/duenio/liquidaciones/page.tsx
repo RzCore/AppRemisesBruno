@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { coordinadorDashboardService, vehiculoService } from '@/lib/api';
+import { coordinadorDashboardService, vehiculoService, choferService } from '@/lib/api';
+import { Chofer, LiquidacionPendienteResumen } from '@/types';
 import {
   FileText,
   User,
@@ -20,7 +21,8 @@ import {
   Banknote,
   CreditCard,
   UserCheck,
-  Edit2
+  Edit2,
+  Eye
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -28,13 +30,26 @@ export default function HistorialLiquidacionesPage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  // Pestaña activa: 'choferes' | 'propietarios'
-  const [activeTab, setActiveTab] = useState<'choferes' | 'propietarios'>('choferes');
+  // Pestaña activa: 'choferes' | 'propietarios' | 'cierre'
+  const [activeTab, setActiveTab] = useState<'choferes' | 'propietarios' | 'cierre'>('choferes');
 
   // Datos generales
   const [liquidaciones, setLiquidaciones] = useState<any[]>([]);
   const [vehiculos, setVehiculos] = useState<any[]>([]);
+  const [choferesList, setChoferesList] = useState<Chofer[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Estado para pestaña "Realizar Cierre de Caja" (Dueño)
+  const [cierreChoferId, setCierreChoferId] = useState<string>('');
+  const [cierrePendingData, setCierrePendingData] = useState<LiquidacionPendienteResumen | null>(null);
+  const [cierreLoadingPending, setCierreLoadingPending] = useState(false);
+  const [cierreCombustible, setCierreCombustible] = useState<string>('');
+  const [cierreObservaciones, setCierreObservaciones] = useState<string>('');
+  const [cierreMetodoPago, setCierreMetodoPago] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS'>('EFECTIVO');
+  const [cierreMontoEfectivo, setCierreMontoEfectivo] = useState<string>('');
+  const [cierreMontoTransferencia, setCierreMontoTransferencia] = useState<string>('');
+  const [cierreQuienPaga, setCierreQuienPaga] = useState<'PAGADO_DUENIO' | 'PENDIENTE_DUENIO'>('PAGADO_DUENIO');
+  const [cierreSubmitting, setCierreSubmitting] = useState(false);
 
   // Filtros Tab 1: Choferes
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,6 +59,7 @@ export default function HistorialLiquidacionesPage() {
 
   // Modal de Confirmación de Recepción de Dinero / Pago de Saldo a Favor
   const [recepcionModalLiq, setRecepcionModalLiq] = useState<any | null>(null);
+  const [detalleViajesModalLiq, setDetalleViajesModalLiq] = useState<any | null>(null);
   const [metodoEntrega, setMetodoEntrega] = useState<'COORDINADOR' | 'CHOFER_MANO' | 'TRANSFERENCIA'>('COORDINADOR');
   const [notasRecepcion, setNotasRecepcion] = useState('');
   const [submittingRecepcion, setSubmittingRecepcion] = useState(false);
@@ -65,9 +81,10 @@ export default function HistorialLiquidacionesPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [liqRes, vehRes] = await Promise.all([
+      const [liqRes, vehRes, chofRes] = await Promise.all([
         coordinadorDashboardService.getHistorialDuenio(),
-        vehiculoService.getAll()
+        vehiculoService.getAll(),
+        choferService.getAll()
       ]);
 
       if (liqRes.success && liqRes.data) {
@@ -78,6 +95,10 @@ export default function HistorialLiquidacionesPage() {
 
       if (vehRes.success && vehRes.data) {
         setVehiculos(vehRes.data);
+      }
+
+      if (chofRes.success && chofRes.data) {
+        setChoferesList(chofRes.data.filter((c) => c.estado !== 'DADO_DE_BAJA'));
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -172,6 +193,180 @@ export default function HistorialLiquidacionesPage() {
     (sum, l) => sum + (l.gananciaPropietario || 0),
     0
   );
+  const totalTransferenciaAgenciaChoferes = filteredLiquidaciones.reduce(
+    (sum, l) => sum + (l.totalTransferenciaAgencia ?? l.totalTransferenciaViajes ?? 0),
+    0
+  );
+  const totalTransferenciaPropiaChoferes = filteredLiquidaciones.reduce(
+    (sum, l) => sum + (l.totalTransferenciaPropia || 0),
+    0
+  );
+
+  // Handlers de Cierre de Caja desde panel del Dueño
+  const resetCierreForm = () => {
+    setCierreCombustible('');
+    setCierreObservaciones('');
+    setCierreMetodoPago('EFECTIVO');
+    setCierreMontoEfectivo('');
+    setCierreMontoTransferencia('');
+    setCierreQuienPaga('PAGADO_DUENIO');
+  };
+
+  const handleSelectChoferCierre = async (choferId: string) => {
+    setCierreChoferId(choferId);
+    setCierrePendingData(null);
+    resetCierreForm();
+    if (!choferId) return;
+    try {
+      setCierreLoadingPending(true);
+      const res = await coordinadorDashboardService.getLiquidacionesPendientes(choferId);
+      if (res.success && res.data) {
+        setCierrePendingData(res.data);
+      } else {
+        toast.error(res.message || 'Error al obtener viajes pendientes');
+      }
+    } catch {
+      toast.error('Error al obtener viajes pendientes');
+    } finally {
+      setCierreLoadingPending(false);
+    }
+  };
+
+  const cierreCalculos = useMemo(() => {
+    if (!cierrePendingData) {
+      return {
+        totalRecaudado: 0,
+        totalEfectivo: 0,
+        totalTransferencia: 0,
+        totalTransferenciaAgencia: 0,
+        totalTransferenciaPropia: 0,
+        totalCuentaCorriente: 0,
+        comisionChofer: 0,
+        comisionAgencia: 0,
+        comisionAgencia20: 0,
+        comisionAgencia15: 0,
+        gananciaPropietario: 0,
+        saldoNeto: 0,
+        montoARendirChofer: 0,
+        saldoAFavorChofer: 0,
+      };
+    }
+    const { chofer, resumen } = cierrePendingData;
+    const totalRecaudado = resumen.totalRecaudado || 0;
+    const totalEfectivo = resumen.totalEfectivo ?? 0;
+    const totalTransferencia = resumen.totalTransferencia ?? 0;
+    const totalTransferenciaAgencia = resumen.totalTransferenciaAgencia ?? totalTransferencia;
+    const totalTransferenciaPropia = resumen.totalTransferenciaPropia ?? 0;
+    const totalCuentaCorriente = resumen.totalCuentaCorriente ?? 0;
+    const comisionChofer = resumen.comisionChofer || 0;
+    const comisionAgencia = resumen.comisionAgencia || 0;
+    const comisionAgencia20 = resumen.comisionAgencia20 ?? 0;
+    const comisionAgencia15 = resumen.comisionAgencia15 ?? 0;
+    const combustibleVal = chofer.esPropietario ? 0 : Math.max(0, parseFloat(cierreCombustible) || 0);
+    const gananciaPropietario = chofer.esPropietario
+      ? 0
+      : Math.max(0, (resumen.gananciaPropietario || 0) - combustibleVal);
+    const saldoNeto = Math.round((totalEfectivo + totalTransferenciaPropia - comisionChofer - combustibleVal) * 100) / 100;
+    const montoARendirChofer = saldoNeto > 0 ? saldoNeto : 0;
+    const saldoAFavorChofer = saldoNeto < 0 ? Math.round(Math.abs(saldoNeto) * 100) / 100 : 0;
+    return {
+      totalRecaudado,
+      totalEfectivo,
+      totalTransferencia,
+      totalTransferenciaAgencia,
+      totalTransferenciaPropia,
+      totalCuentaCorriente,
+      comisionChofer,
+      comisionAgencia,
+      comisionAgencia20,
+      comisionAgencia15,
+      gananciaPropietario,
+      saldoNeto,
+      montoARendirChofer,
+      saldoAFavorChofer,
+    };
+  }, [cierrePendingData, cierreCombustible]);
+
+  const cierreMontoOperacion =
+    cierreCalculos.montoARendirChofer > 0
+      ? cierreCalculos.montoARendirChofer
+      : cierreCalculos.saldoAFavorChofer > 0 && cierreQuienPaga === 'PAGADO_DUENIO'
+      ? cierreCalculos.saldoAFavorChofer
+      : 0;
+
+  const handleSubmitCierreDuenio = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cierreChoferId || !cierrePendingData || cierreSubmitting) return;
+    if (cierrePendingData.viajes.length === 0) {
+      toast.error('No hay viajes completados pendientes de liquidación para este chofer.');
+      return;
+    }
+
+    const necesitaMedio =
+      cierreCalculos.montoARendirChofer > 0 ||
+      (cierreCalculos.saldoAFavorChofer > 0 && cierreQuienPaga === 'PAGADO_DUENIO');
+    let montoEfec = 0;
+    let montoTransf = 0;
+    if (necesitaMedio) {
+      if (cierreMetodoPago === 'EFECTIVO') {
+        montoEfec = cierreMontoOperacion;
+      } else if (cierreMetodoPago === 'TRANSFERENCIA') {
+        montoTransf = cierreMontoOperacion;
+      } else {
+        montoEfec = parseFloat(cierreMontoEfectivo) || 0;
+        montoTransf = parseFloat(cierreMontoTransferencia) || 0;
+        if (Math.abs(montoEfec + montoTransf - cierreMontoOperacion) > 1) {
+          toast.error(`Efectivo + Transferencia debe sumar $${cierreMontoOperacion.toLocaleString('es-AR')}`);
+          return;
+        }
+      }
+    }
+
+    if (
+      !confirm(
+        `¿Confirmás el cierre de caja de ${cierrePendingData.chofer.nombre} ${cierrePendingData.chofer.apellido}?\nRecaudado: $${cierreCalculos.totalRecaudado.toLocaleString('es-AR')} • Comisión Agencia: $${cierreCalculos.comisionAgencia.toLocaleString('es-AR')}`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setCierreSubmitting(true);
+      const payload: any = {
+        choferId: cierreChoferId,
+        combustible: cierrePendingData.chofer.esPropietario ? 0 : parseFloat(cierreCombustible) || 0,
+        observaciones: cierreObservaciones.trim(),
+      };
+      if (cierreCalculos.montoARendirChofer > 0) {
+        payload.metodoPagoChofer = cierreMetodoPago;
+        payload.montoEfectivo = montoEfec;
+        payload.montoTransferencia = montoTransf;
+      } else if (cierreCalculos.saldoAFavorChofer > 0) {
+        payload.quienPagaSaldoAFavor = cierreQuienPaga;
+        if (cierreQuienPaga === 'PAGADO_DUENIO') {
+          payload.metodoPagoChofer = cierreMetodoPago;
+          payload.montoEfectivo = montoEfec;
+          payload.montoTransferencia = montoTransf;
+        }
+      }
+
+      const res = await coordinadorDashboardService.crearLiquidacion(payload);
+      if (res.success) {
+        toast.success('¡Cierre de caja registrado correctamente!');
+        setCierreChoferId('');
+        setCierrePendingData(null);
+        resetCierreForm();
+        await loadData();
+        setActiveTab('choferes');
+      } else {
+        toast.error(res.message || 'Error al registrar cierre de caja');
+      }
+    } catch {
+      toast.error('Error al registrar cierre de caja');
+    } finally {
+      setCierreSubmitting(false);
+    }
+  };
 
   // Filtrado de liquidaciones para Tab 2 (Propietarios de Autos)
   const liquidacionesPropietario = useMemo(() => {
@@ -225,10 +420,103 @@ export default function HistorialLiquidacionesPage() {
     window.print();
   };
 
-  // Generación de PDF directo con jsPDF + autoTable (respeta filtros aplicados)
-  const handleDescargarPdfCierres = async () => {
-    if (filteredLiquidaciones.length === 0) {
-      toast.error('No hay cierres para exportar con los filtros actuales.');
+  // Semáforo financiero de cada liquidación:
+  // ROJO = El dueño le debe pagar al chofer (ej. viajes Cta. Cte. no pagados por coordinador)
+  // ÁMBAR = El chofer le debe entregar dinero al dueño/agencia (pendiente de cobro)
+  // VERDE = OK / Saldado (ya recibido, pagado por coordinador o saldo en $0)
+  const getEstadoFinancieroLiq = (liq: any) => {
+    const saldoAFavor = Number(liq.saldoAFavorChofer || 0);
+    const saldoNeto = Number(liq.saldoNeto || 0);
+    const recibido = Boolean(liq.dineroRecibido);
+
+    if (saldoAFavor > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO' && !recibido) {
+      return {
+        tipo: 'PAGAR_CHOFER' as const,
+        label: 'DEBE PAGAR AL CHOFER',
+        sublabel: 'Cta. Cte. / Transf. no abonado por coord.',
+        rowClass: 'bg-red-50/80 hover:bg-red-100/70 border-l-4 border-l-red-600',
+        cardClass: 'bg-red-50/70 border-l-4 border-l-red-600',
+        badgeClass: 'bg-red-100 text-red-800 border-red-300',
+        pdfFill: [254, 226, 226] as [number, number, number],
+        pdfText: [185, 28, 28] as [number, number, number],
+      };
+    }
+
+    if (saldoNeto > 0 && !recibido) {
+      return {
+        tipo: 'COBRAR_CHOFER' as const,
+        label: 'CHOFER DEBE AL DUEÑO',
+        sublabel: 'Pendiente de cobro / entrega',
+        rowClass: 'bg-amber-50/70 hover:bg-amber-100/60 border-l-4 border-l-amber-500',
+        cardClass: 'bg-amber-50/60 border-l-4 border-l-amber-500',
+        badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
+        pdfFill: [254, 243, 199] as [number, number, number],
+        pdfText: [180, 83, 9] as [number, number, number],
+      };
+    }
+
+    return {
+      tipo: 'OK' as const,
+      label: 'OK / SALDADO',
+      sublabel:
+        saldoAFavor > 0 && liq.quienPagaSaldoAFavor === 'COORDINADOR'
+          ? 'Pagó Coordinador'
+          : saldoAFavor > 0 && (liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO' || recibido)
+          ? 'Pagado por Dueño'
+          : recibido
+          ? getMetodoEntregaLabel(liq.metodoEntregaDuenio)
+          : 'Balance en $0',
+      rowClass: 'bg-emerald-50/35 hover:bg-emerald-50/70 border-l-4 border-l-emerald-500',
+      cardClass: 'bg-emerald-50/35 border-l-4 border-l-emerald-500',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      pdfFill: [209, 250, 229] as [number, number, number],
+      pdfText: [4, 120, 87] as [number, number, number],
+    };
+  };
+
+  const getTitularViaje = (v: any): string => {
+    if (v?.artEmpresa?.nombre) return `ART: ${v.artEmpresa.nombre}`;
+    if (v?.cliente) {
+      const full = `${v.cliente.nombre || ''} ${v.cliente.apellido || ''}`.trim();
+      if (full) return full;
+    }
+    if (v?.clienteNombre) return v.clienteNombre;
+    return '—';
+  };
+
+  const getMedioPagoViajeInfo = (v: any) => {
+    if (v?.metodoPago === 'CUENTA_CORRIENTE') {
+      return {
+        label: 'Cuenta Corriente',
+        short: 'Cta. Cte.',
+        badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
+      };
+    }
+    if (v?.metodoPago === 'TRANSFERENCIA') {
+      if (v?.destinoTransferencia === 'CUENTA_PROPIA') {
+        return {
+          label: 'Transf. Cuenta Propia',
+          short: 'Tr. Propia',
+          badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+        };
+      }
+      return {
+        label: 'Transf. Cuenta Agencia',
+        short: 'Tr. Agencia',
+        badgeClass: 'bg-blue-100 text-blue-800 border-blue-200',
+      };
+    }
+    return {
+      label: 'Efectivo',
+      short: 'Efectivo',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    };
+  };
+
+  // Generación de PDF directo con jsPDF + autoTable (con semáforo de colores y detalle completo de viajes)
+  const generarPdfLiquidaciones = async (lista: any[], tituloArchivo: string) => {
+    if (lista.length === 0) {
+      toast.error('No hay cierres para exportar.');
       return;
     }
 
@@ -240,76 +528,93 @@ export default function HistorialLiquidacionesPage() {
 
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const fechaHoy = new Date().toLocaleDateString('es-AR');
+      const fmt = (n: number) => `$${(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 
       // Encabezado
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
-      doc.text('REMISES BRUNO — REPORTE DE CIERRES DE CAJA', 14, 16);
+      doc.text('REMISES BRUNO — INFORME DE LIQUIDACIONES Y VIAJES', 14, 15);
 
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
-      const filtroTipoLabel =
-        filterTipo === 'all' ? 'Todos' : filterTipo === 'propietario' ? 'Auto Propio' : 'Auto Asignado';
-      const filtroRecLabel =
-        filterRecepcion === 'all' ? 'Todos' : filterRecepcion === 'recibido' ? 'Recibidos' : 'Pendientes';
+      const cantPagarChofer = lista.filter((l) => getEstadoFinancieroLiq(l).tipo === 'PAGAR_CHOFER').length;
+      const cantCobrarChofer = lista.filter((l) => getEstadoFinancieroLiq(l).tipo === 'COBRAR_CHOFER').length;
+      const cantOk = lista.filter((l) => getEstadoFinancieroLiq(l).tipo === 'OK').length;
+
       doc.text(
-        `Fecha de emisión: ${fechaHoy}  |  Registros: ${filteredLiquidaciones.length}  |  Condición: ${filtroTipoLabel}  |  Estado: ${filtroRecLabel}${
-          searchTerm ? `  |  Búsqueda: "${searchTerm}"` : ''
-        }`,
+        `Fecha de emisión: ${fechaHoy}  |  Cierres: ${lista.length}  |  ROJO (Pagar a chofer): ${cantPagarChofer}  |  NARANJA (Chofer debe): ${cantCobrarChofer}  |  VERDE (OK/Saldado): ${cantOk}`,
         14,
-        22
+        21
       );
 
-      // Totales de viajes y rendiciones por medio de pago
-      const totViajesEfec = filteredLiquidaciones.reduce((s, l) => s + (l.totalEfectivoViajes || 0), 0);
-      const totViajesTransf = filteredLiquidaciones.reduce((s, l) => s + (l.totalTransferenciaViajes || 0), 0);
-      const totViajesCC = filteredLiquidaciones.reduce((s, l) => s + (l.totalCuentaCorrienteViajes || 0), 0);
-      const totCobradoEfec = filteredLiquidaciones
-        .filter((l) => (l.saldoNeto ?? 0) > 0)
-        .reduce((s, l) => s + (l.montoEfectivo || 0), 0);
-      const totCobradoTransf = filteredLiquidaciones
-        .filter((l) => (l.saldoNeto ?? 0) > 0)
-        .reduce((s, l) => s + (l.montoTransferencia || 0), 0);
+      // Totales ejecutivos
+      const totRec = lista.reduce((s, l) => s + (l.totalRecaudado || 0), 0);
+      const totAgencia = lista.reduce((s, l) => s + (l.comisionAgencia || 0), 0);
+      const totViajesEfec = lista.reduce((s, l) => s + (l.totalEfectivoViajes || 0), 0);
+      const totViajesTrAg = lista.reduce((s, l) => s + (l.totalTransferenciaAgencia ?? l.totalTransferenciaViajes ?? 0), 0);
+      const totViajesTrProp = lista.reduce((s, l) => s + (l.totalTransferenciaPropia || 0), 0);
+      const totViajesCC = lista.reduce((s, l) => s + (l.totalCuentaCorrienteViajes || 0), 0);
+      const totPagarChofer = lista
+        .filter((l) => getEstadoFinancieroLiq(l).tipo === 'PAGAR_CHOFER')
+        .reduce((s, l) => s + (l.saldoAFavorChofer || 0), 0);
+      const totCobrarChofer = lista
+        .filter((l) => getEstadoFinancieroLiq(l).tipo === 'COBRAR_CHOFER')
+        .reduce((s, l) => s + (l.saldoNeto || 0), 0);
 
-      const fmt = (n: number) => `$${(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-
-      // Resumen Ejecutivo
       autoTable(doc, {
-        startY: 26,
+        startY: 25,
         head: [[
-          'Total Recaudado',
+          'Total Bruto',
           'Comisión Agencia',
-          'Viajes Efectivo',
-          'Viajes Transf.',
-          'Viajes Cta. Cte.',
-          'Cobrado Efec.',
-          'Cobrado Transf.',
-          'Saldos a Favor'
+          'Efectivo',
+          'Transf. Agencia',
+          'Transf. Propia',
+          'Cta. Cte.',
+          'A Pagar Choferes',
+          'A Cobrar Choferes'
         ]],
         body: [[
-          fmt(totalRecaudadoChoferes),
-          fmt(totalAgenciaChoferes),
+          fmt(totRec),
+          fmt(totAgencia),
           fmt(totViajesEfec),
-          fmt(totViajesTransf),
+          fmt(totViajesTrAg),
+          fmt(totViajesTrProp),
           fmt(totViajesCC),
-          fmt(totCobradoEfec),
-          fmt(totCobradoTransf),
-          fmt(totalSaldoAFavorChoferes)
+          fmt(totPagarChofer),
+          fmt(totCobrarChofer)
         ]],
         theme: 'grid',
-        headStyles: { fillColor: [15, 23, 42], fontSize: 8, halign: 'center' },
-        bodyStyles: { fontSize: 8, fontStyle: 'bold', halign: 'right' }
+        headStyles: { fillColor: [15, 23, 42], fontSize: 7.5, halign: 'center' },
+        bodyStyles: { fontSize: 8, fontStyle: 'bold', halign: 'right' },
+        didParseCell: (hookData: any) => {
+          if (hookData.section === 'body') {
+            if (hookData.column.index === 6 && totPagarChofer > 0) {
+              hookData.cell.styles.fillColor = [254, 226, 226];
+              hookData.cell.styles.textColor = [185, 28, 28];
+            } else if (hookData.column.index === 7 && totCobrarChofer > 0) {
+              hookData.cell.styles.fillColor = [254, 243, 199];
+              hookData.cell.styles.textColor = [180, 83, 9];
+            } else if (hookData.column.index === 3) {
+              hookData.cell.styles.fillColor = [219, 234, 254];
+              hookData.cell.styles.textColor = [29, 78, 216];
+            }
+          }
+        }
       });
 
       const formatPagoPdf = (liq: any) => {
         if ((liq.saldoAFavorChofer || 0) > 0) {
+          const estaPagado =
+            liq.quienPagaSaldoAFavor === 'COORDINADOR' ||
+            liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO' ||
+            Boolean(liq.dineroRecibido);
           const estado =
             liq.quienPagaSaldoAFavor === 'COORDINADOR'
               ? 'Pagó Coord.'
-              : liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO'
+              : liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO' || liq.dineroRecibido
               ? 'Pagó Dueño'
-              : 'Pend. Dueño';
-          return `A favor ${fmt(liq.saldoAFavorChofer)} (${estado})`;
+              : 'Debe pagar Agencia';
+          return `${estaPagado ? 'Pagado a chofer' : 'Pagar a chofer'} ${fmt(liq.saldoAFavorChofer)} (${estado})`;
         }
         if (liq.metodoPagoChofer === 'AMBOS') {
           return `Ambos (Ef: ${fmt(liq.montoEfectivo)} / Tr: ${fmt(liq.montoTransferencia)})`;
@@ -320,10 +625,12 @@ export default function HistorialLiquidacionesPage() {
         if (liq.metodoPagoChofer === 'EFECTIVO') {
           return `Efectivo ${fmt(liq.montoEfectivo || liq.saldoNeto || 0)}`;
         }
-        return '—';
+        return 'Saldo $0';
       };
 
-      const rows = filteredLiquidaciones.map((liq) => {
+      const estadosPorFila = lista.map((liq) => getEstadoFinancieroLiq(liq));
+
+      const rows = lista.map((liq, idx) => {
         const operador =
           liq.coordinador?.coordinador?.nombre ||
           liq.coordinador?.duenio?.nombre ||
@@ -333,9 +640,10 @@ export default function HistorialLiquidacionesPage() {
           hour: '2-digit',
           minute: '2-digit'
         })}`;
-        const viajesDesglose = `Ef: ${fmt(liq.totalEfectivoViajes || 0)} | Tr: ${fmt(
-          liq.totalTransferenciaViajes || 0
-        )} | CC: ${fmt(liq.totalCuentaCorrienteViajes || 0)}`;
+        const trAg = liq.totalTransferenciaAgencia ?? liq.totalTransferenciaViajes ?? 0;
+        const trProp = liq.totalTransferenciaPropia || 0;
+        const viajesDesglose = `Ef: ${fmt(liq.totalEfectivoViajes || 0)} | TrAg: ${fmt(trAg)} | TrPr: ${fmt(trProp)} | CC: ${fmt(liq.totalCuentaCorrienteViajes || 0)}`;
+        const est = estadosPorFila[idx];
 
         return [
           fechaStr,
@@ -345,7 +653,7 @@ export default function HistorialLiquidacionesPage() {
           fmt(liq.comisionAgencia),
           viajesDesglose,
           formatPagoPdf(liq),
-          liq.dineroRecibido ? getMetodoEntregaLabel(liq.metodoEntregaDuenio) : 'Pendiente'
+          `${est.label}\n(${est.sublabel})`
         ];
       });
 
@@ -358,22 +666,182 @@ export default function HistorialLiquidacionesPage() {
           'Operador',
           'Recaudado',
           'Agencia',
-          'Viajes (Ef / Tr / CC)',
+          'Viajes (Ef / TrAg / TrPr / CC)',
           'Rendición / Saldo a Favor',
-          'Control Dueño'
+          'Estado Financiero'
         ]],
         body: rows,
-        theme: 'striped',
+        theme: 'grid',
         headStyles: { fillColor: [30, 41, 59], fontSize: 7.5 },
-        bodyStyles: { fontSize: 7.5 },
+        bodyStyles: { fontSize: 7 },
         columnStyles: {
           3: { halign: 'right' },
-          4: { halign: 'right' }
+          4: { halign: 'right' },
+          7: { halign: 'center', fontStyle: 'bold' }
+        },
+        didParseCell: (hookData: any) => {
+          if (hookData.section === 'body') {
+            const est = estadosPorFila[hookData.row.index];
+            if (est && (hookData.column.index === 7 || hookData.column.index === 6)) {
+              hookData.cell.styles.fillColor = est.pdfFill;
+              hookData.cell.styles.textColor = est.pdfText;
+            }
+          }
         }
       });
 
-      const fileDate = new Date().toISOString().slice(0, 10);
-      doc.save(`cierre_cajas_${fileDate}.pdf`);
+      // Sección 2: Control específico de Transferencias a Cuenta de la Agencia (para conciliar Banco / MP)
+      const viajesTransfAgenciaRows: any[][] = [];
+      let totalTransfAgenciaDetalle = 0;
+
+      // Sección 3: Detalle completo de todos los viajes incluidos en los cierres (con Titular de Cuenta Corriente)
+      const todosLosViajesRows: any[][] = [];
+      const tipoFilaViaje: Array<'CC' | 'TR_AG' | 'TR_PR' | 'EF'> = [];
+
+      for (const liq of lista) {
+        const choferLabel = `${liq.chofer?.nombre || ''} ${liq.chofer?.apellido || ''}`.trim();
+        const viajesLiq = Array.isArray(liq.viajes) ? liq.viajes : [];
+        for (const v of viajesLiq) {
+          const fStr = `${new Date(v.fecha).toLocaleDateString('es-AR')} ${new Date(v.fecha).toLocaleTimeString('es-AR', {
+            hour: '2-digit',
+            minute: '2-digit'
+          })}`;
+          const medio = getMedioPagoViajeInfo(v);
+          const titular = getTitularViaje(v);
+          const importe = Number(v.precio || 0);
+
+          todosLosViajesRows.push([
+            fStr,
+            choferLabel,
+            `${v.origen || ''} → ${v.destino || ''}`,
+            medio.label,
+            titular,
+            `${Number(v.distanciaKmConPasajero || 0).toFixed(1)} km`,
+            fmt(importe)
+          ]);
+
+          if (v.metodoPago === 'CUENTA_CORRIENTE') {
+            tipoFilaViaje.push('CC');
+          } else if (v.metodoPago === 'TRANSFERENCIA' && v.destinoTransferencia === 'CUENTA_PROPIA') {
+            tipoFilaViaje.push('TR_PR');
+          } else if (v.metodoPago === 'TRANSFERENCIA') {
+            tipoFilaViaje.push('TR_AG');
+            totalTransfAgenciaDetalle += importe;
+            viajesTransfAgenciaRows.push([
+              fStr,
+              choferLabel,
+              titular,
+              `${v.origen || ''} → ${v.destino || ''}`,
+              fmt(importe)
+            ]);
+          } else {
+            tipoFilaViaje.push('EF');
+          }
+        }
+      }
+
+      if (viajesTransfAgenciaRows.length > 0) {
+        const afterResumenY = (doc as any).lastAutoTable?.finalY || 90;
+        const startTransfY = afterResumenY + 10 > 175 ? 20 : afterResumenY + 10;
+        if (startTransfY === 20) {
+          doc.addPage();
+        }
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(29, 78, 216);
+        doc.text(
+          `TRANSFERENCIAS A CUENTA DE LA AGENCIA (${viajesTransfAgenciaRows.length} viajes — Total a verificar en cuenta: ${fmt(totalTransfAgenciaDetalle)})`,
+          14,
+          startTransfY
+        );
+
+        autoTable(doc, {
+          startY: startTransfY + 4,
+          head: [[
+            'Fecha / Hora',
+            'Chofer',
+            'Pasajero / Cliente',
+            'Recorrido (Origen → Destino)',
+            'Importe Acreditado'
+          ]],
+          body: [
+            ...viajesTransfAgenciaRows,
+            ['', '', '', 'TOTAL EN CUENTA AGENCIA', fmt(totalTransfAgenciaDetalle)]
+          ],
+          theme: 'grid',
+          headStyles: { fillColor: [29, 78, 216], fontSize: 7.5 },
+          bodyStyles: { fontSize: 7.5 },
+          columnStyles: {
+            4: { halign: 'right', fontStyle: 'bold' }
+          },
+          didParseCell: (hookData: any) => {
+            if (hookData.section === 'body' && hookData.row.index === viajesTransfAgenciaRows.length) {
+              hookData.cell.styles.fillColor = [219, 234, 254];
+              hookData.cell.styles.textColor = [30, 64, 175];
+              hookData.cell.styles.fontStyle = 'bold';
+            }
+          }
+        });
+      }
+
+      if (todosLosViajesRows.length > 0) {
+        const afterPrevY = (doc as any).lastAutoTable?.finalY || 90;
+        const startDetalleY = afterPrevY + 10 > 175 ? 20 : afterPrevY + 10;
+        if (startDetalleY === 20) {
+          doc.addPage();
+        }
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text(`DETALLE COMPLETO DE TODOS LOS VIAJES (${todosLosViajesRows.length} viajes)`, 14, startDetalleY);
+
+        autoTable(doc, {
+          startY: startDetalleY + 4,
+          head: [[
+            'Fecha / Hora',
+            'Chofer',
+            'Recorrido (Origen → Destino)',
+            'Medio de Pago',
+            'Titular Cta. Cte. / Cliente',
+            'Km',
+            'Importe'
+          ]],
+          body: todosLosViajesRows,
+          theme: 'striped',
+          headStyles: { fillColor: [30, 41, 59], fontSize: 7.5 },
+          bodyStyles: { fontSize: 7 },
+          columnStyles: {
+            5: { halign: 'right' },
+            6: { halign: 'right', fontStyle: 'bold' }
+          },
+          didParseCell: (hookData: any) => {
+            if (hookData.section === 'body') {
+              const tipo = tipoFilaViaje[hookData.row.index];
+              if (tipo === 'CC') {
+                hookData.cell.styles.fillColor = [243, 232, 255];
+                if (hookData.column.index === 3 || hookData.column.index === 4) {
+                  hookData.cell.styles.textColor = [107, 33, 168];
+                  hookData.cell.styles.fontStyle = 'bold';
+                }
+              } else if (tipo === 'TR_AG') {
+                hookData.cell.styles.fillColor = [219, 234, 254];
+                if (hookData.column.index === 3 || hookData.column.index === 6) {
+                  hookData.cell.styles.textColor = [29, 78, 216];
+                  hookData.cell.styles.fontStyle = 'bold';
+                }
+              } else if (tipo === 'TR_PR') {
+                hookData.cell.styles.fillColor = [238, 242, 255];
+                if (hookData.column.index === 3) {
+                  hookData.cell.styles.textColor = [67, 56, 202];
+                  hookData.cell.styles.fontStyle = 'bold';
+                }
+              }
+            }
+          }
+        });
+      }
+
+      doc.save(tituloArchivo);
       toast.success('PDF descargado correctamente');
     } catch (error) {
       console.error('Error generando PDF:', error);
@@ -381,6 +849,17 @@ export default function HistorialLiquidacionesPage() {
     } finally {
       setGenerandoPdf(false);
     }
+  };
+
+  const handleDescargarPdfCierres = async () => {
+    const fileDate = new Date().toISOString().slice(0, 10);
+    await generarPdfLiquidaciones(filteredLiquidaciones, `liquidaciones_detalle_${fileDate}.pdf`);
+  };
+
+  const handleDescargarPdfIndividual = async (liq: any) => {
+    const slug = `${liq.chofer?.nombre || 'chofer'}_${liq.chofer?.apellido || ''}`.replace(/\s+/g, '_').toLowerCase();
+    const fileDate = new Date(liq.fecha).toISOString().slice(0, 10);
+    await generarPdfLiquidaciones([liq], `cierre_${slug}_${fileDate}.pdf`);
   };
 
   const openRecepcionModal = (liq: any) => {
@@ -443,22 +922,24 @@ export default function HistorialLiquidacionesPage() {
 
   const renderPagoBadge = (liq: any) => {
     if ((liq.saldoAFavorChofer || 0) > 0) {
+      const pendienteDePago = liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO' && !liq.dineroRecibido;
       const estadoLabel =
         liq.quienPagaSaldoAFavor === 'COORDINADOR'
           ? 'Pagó Coordinador'
-          : liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO'
+          : liq.quienPagaSaldoAFavor === 'PAGADO_DUENIO' || liq.dineroRecibido
           ? 'Pagado por Dueño'
-          : 'Pendiente Dueño';
-      const badgeColor =
-        liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
-          ? 'bg-amber-100 text-amber-800 border-amber-200'
-          : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+          : 'Debe pagar Agencia (Dueño)';
+      const badgeColor = pendienteDePago
+        ? 'bg-red-100 text-red-800 border-red-300'
+        : 'bg-emerald-50 text-emerald-700 border-emerald-200';
       return (
         <div className="flex flex-col gap-0.5">
           <span className={`inline-flex w-fit px-2 py-0.5 rounded-md border text-[10px] font-bold ${badgeColor}`}>
-            A favor: ${liq.saldoAFavorChofer.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+            {pendienteDePago ? 'Pagar a chofer:' : 'Pagado a chofer:'} ${liq.saldoAFavorChofer.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
           </span>
-          <span className="text-[10px] text-slate-500 font-medium">{estadoLabel}</span>
+          <span className={`text-[10px] font-medium ${pendienteDePago ? 'text-red-700 font-bold' : 'text-slate-500'}`}>
+            {estadoLabel}
+          </span>
         </div>
       );
     }
@@ -523,28 +1004,39 @@ export default function HistorialLiquidacionesPage() {
       </div>
 
       {/* Selector de Pestañas */}
-      <div className="bg-slate-200/70 p-1.5 rounded-2xl flex max-w-xl mx-auto shadow-inner print:hidden">
+      <div className="bg-slate-200/70 p-1.5 rounded-2xl flex flex-wrap sm:flex-nowrap max-w-3xl mx-auto shadow-inner print:hidden gap-1">
         <button
           onClick={() => setActiveTab('choferes')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
             activeTab === 'choferes'
               ? 'bg-white text-slate-900 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <User className="w-4 h-4" />
-          Rendiciones de Choferes
+          Rendiciones
+        </button>
+        <button
+          onClick={() => setActiveTab('cierre')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'cierre'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'text-emerald-700 hover:bg-white/60'
+          }`}
+        >
+          <Banknote className="w-4 h-4" />
+          Hacer Cierre de Caja
         </button>
         <button
           onClick={() => setActiveTab('propietarios')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
             activeTab === 'propietarios'
               ? 'bg-white text-primary-700 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Car className="w-4 h-4" />
-          Liquidación a Propietarios de Autos
+          Propietarios
         </button>
       </div>
 
@@ -553,8 +1045,8 @@ export default function HistorialLiquidacionesPage() {
       {/* ========================================================= */}
       {activeTab === 'choferes' && (
         <div className="space-y-6 animate-in fade-in duration-200 print:hidden">
-          {/* Tarjetas Informativas Choferes (sin Combustible) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          {/* Tarjetas Informativas Choferes (incluye Transferencias a Cuenta Agencia) */}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
                 Total Recaudado
@@ -575,15 +1067,27 @@ export default function HistorialLiquidacionesPage() {
               <span className="text-[10px] text-emerald-600 mt-1 block">20% local • 15% ≥20km</span>
             </div>
 
-            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
-              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block">
-                Saldos a Favor Choferes
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-blue-200 shadow-xs bg-blue-50/30">
+              <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider block">
+                🏦 Transf. Cuenta Agencia
               </span>
-              <span className="text-xl sm:text-2xl font-black text-amber-800 block mt-1">
-                ${totalSaldoAFavorChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              <span className="text-xl sm:text-2xl font-black text-blue-800 block mt-1">
+                ${totalTransferenciaAgenciaChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-amber-600 mt-1 block">
-                Pend. Dueño: ${totalSaldoAFavorPendienteDuenio.toLocaleString('es-AR')}
+              <span className="text-[10px] text-indigo-600 mt-1 block">
+                Propia chofer: ${totalTransferenciaPropiaChoferes.toLocaleString('es-AR')}
+              </span>
+            </div>
+
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-red-200 bg-red-50/30 shadow-xs">
+              <span className="text-[11px] font-semibold text-red-700 uppercase tracking-wider block">
+                Pagar a Choferes
+              </span>
+              <span className="text-xl sm:text-2xl font-black text-red-700 block mt-1">
+                ${totalSaldoAFavorPendienteDuenio.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              </span>
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                Total histórico: ${totalSaldoAFavorChoferes.toLocaleString('es-AR')}
               </span>
             </div>
 
@@ -640,6 +1144,23 @@ export default function HistorialLiquidacionesPage() {
               </button>
             </div>
 
+            {/* Leyenda de semáforo de estados */}
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-white flex flex-wrap items-center gap-2 text-[11px] font-bold">
+              <span className="text-slate-500 uppercase tracking-wider text-[10px] mr-1">Semáforo:</span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 text-red-800 border border-red-300">
+                <span className="w-2 h-2 rounded-full bg-red-600" />
+                Debe pagar al chofer ({filteredLiquidaciones.filter((l) => getEstadoFinancieroLiq(l).tipo === 'PAGAR_CHOFER').length})
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                Chofer debe al dueño ({filteredLiquidaciones.filter((l) => getEstadoFinancieroLiq(l).tipo === 'COBRAR_CHOFER').length})
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                OK / Saldado ({filteredLiquidaciones.filter((l) => getEstadoFinancieroLiq(l).tipo === 'OK').length})
+              </span>
+            </div>
+
             {loading ? (
               <div className="text-center py-16">
                 <div className="loading-spinner border-primary-500 mx-auto"></div>
@@ -662,12 +1183,17 @@ export default function HistorialLiquidacionesPage() {
                       liq.coordinador?.email ||
                       'N/A';
                     return (
-                      <div key={liq.id} className="p-4 space-y-3 bg-white hover:bg-slate-50/50">
+                      <div key={liq.id} className={`p-4 space-y-3 ${getEstadoFinancieroLiq(liq).cardClass}`}>
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <h4 className="font-bold text-slate-900 text-sm">
                               {liq.chofer?.nombre} {liq.chofer?.apellido}
                             </h4>
+                            <span
+                              className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getEstadoFinancieroLiq(liq).badgeClass}`}
+                            >
+                              {getEstadoFinancieroLiq(liq).label}
+                            </span>
                             <p className="text-[11px] text-slate-400">
                               {new Date(liq.fecha).toLocaleDateString('es-AR')} •{' '}
                               {new Date(liq.fecha).toLocaleTimeString('es-AR', {
@@ -736,21 +1262,33 @@ export default function HistorialLiquidacionesPage() {
                                 : 'Pendiente de entrega'}
                             </span>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => openRecepcionModal(liq)}
-                            className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${
-                              liq.dineroRecibido
-                                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                            }`}
-                          >
-                            {liq.dineroRecibido
-                              ? 'Editar'
-                              : liq.saldoAFavorChofer > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
-                              ? 'Marcar Pagado'
-                              : 'Marcar Recibido'}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setDetalleViajesModalLiq(liq)}
+                              className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 flex items-center gap-1"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Viajes ({liq.viajes?.length || 0})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openRecepcionModal(liq)}
+                              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all active:scale-95 ${
+                                liq.dineroRecibido
+                                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                  : getEstadoFinancieroLiq(liq).tipo === 'PAGAR_CHOFER'
+                                  ? 'bg-red-600 hover:bg-red-700 text-white shadow-xs'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                              }`}
+                            >
+                              {liq.dineroRecibido
+                                ? 'Editar'
+                                : liq.saldoAFavorChofer > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
+                                ? 'Marcar Pagado'
+                                : 'Marcar Recibido'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -798,8 +1336,9 @@ export default function HistorialLiquidacionesPage() {
                           liq.coordinador?.duenio?.nombre ||
                           liq.coordinador?.email ||
                           'N/A';
+                        const estFin = getEstadoFinancieroLiq(liq);
                         return (
-                          <tr key={liq.id} className="hover:bg-slate-50/50 transition-colors text-slate-700">
+                          <tr key={liq.id} className={`${estFin.rowClass} transition-colors text-slate-700`}>
                             <td className="px-4 py-3.5 whitespace-nowrap">
                               <span className="font-semibold text-slate-900 block">
                                 {new Date(liq.fecha).toLocaleDateString('es-AR')}
@@ -816,15 +1355,26 @@ export default function HistorialLiquidacionesPage() {
                               <div className="font-bold text-slate-900">
                                 {liq.chofer?.nombre} {liq.chofer?.apellido}
                               </div>
-                              <span
-                                className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold mt-0.5 ${
-                                  liq.chofer?.esPropietario
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-blue-50 text-blue-700 border border-blue-200'
-                                }`}
-                              >
-                                {liq.chofer?.esPropietario ? 'Auto Propio' : 'Auto Agencia'}
-                              </span>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span
+                                  className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    liq.chofer?.esPropietario
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  }`}
+                                >
+                                  {liq.chofer?.esPropietario ? 'Auto Propio' : 'Auto Agencia'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetalleViajesModalLiq(liq)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-blue-700 border border-slate-200 cursor-pointer"
+                                  title="Ver listado completo de viajes"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  {liq.viajes?.length || 0} viajes
+                                </button>
+                              </div>
                             </td>
                             <td className="px-4 py-3.5 whitespace-nowrap">
                               <span className="font-medium text-slate-800 block">{creadorNombre}</span>
@@ -834,12 +1384,17 @@ export default function HistorialLiquidacionesPage() {
                               <span className="font-black text-slate-900 block">
                                 ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                               </span>
-                              {((liq.totalTransferenciaViajes || 0) > 0 || (liq.totalCuentaCorrienteViajes || 0) > 0) && (
-                                <span className="text-[10px] text-slate-400 block">
-                                  {(liq.totalTransferenciaViajes || 0) > 0 ? `Tr: $${liq.totalTransferenciaViajes.toLocaleString('es-AR')} ` : ''}
-                                  {(liq.totalCuentaCorrienteViajes || 0) > 0 ? `CC: $${liq.totalCuentaCorrienteViajes.toLocaleString('es-AR')}` : ''}
-                                </span>
-                              )}
+                              <span className="text-[10px] text-slate-500 block">
+                                {(liq.totalTransferenciaAgencia ?? liq.totalTransferenciaViajes ?? 0) > 0
+                                  ? `TrAg: $${(liq.totalTransferenciaAgencia ?? liq.totalTransferenciaViajes).toLocaleString('es-AR')} `
+                                  : ''}
+                                {(liq.totalTransferenciaPropia || 0) > 0
+                                  ? `TrPr: $${liq.totalTransferenciaPropia.toLocaleString('es-AR')} `
+                                  : ''}
+                                {(liq.totalCuentaCorrienteViajes || 0) > 0
+                                  ? `CC: $${liq.totalCuentaCorrienteViajes.toLocaleString('es-AR')}`
+                                  : ''}
+                              </span>
                             </td>
                             <td className="px-4 py-3.5 whitespace-nowrap text-right font-bold text-emerald-700 bg-emerald-50/20">
                               ${liq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -854,36 +1409,46 @@ export default function HistorialLiquidacionesPage() {
                               {liq.observaciones || <span className="text-slate-300 italic">-</span>}
                             </td>
                             <td className="px-4 py-3.5 whitespace-nowrap text-center">
-                              {liq.dineroRecibido ? (
-                                <div className="inline-flex items-center gap-1.5">
-                                  <span
-                                    title={liq.notasRecepcion || undefined}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold"
-                                  >
-                                    <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-                                    {getMetodoEntregaLabel(liq.metodoEntregaDuenio)}
-                                  </span>
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${estFin.badgeClass}`}
+                                >
+                                  {estFin.label}
+                                </span>
+                                {liq.dineroRecibido ? (
+                                  <div className="inline-flex items-center gap-1">
+                                    <span
+                                      title={liq.notasRecepcion || undefined}
+                                      className="text-[10px] font-semibold text-emerald-700"
+                                    >
+                                      {getMetodoEntregaLabel(liq.metodoEntregaDuenio)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openRecepcionModal(liq)}
+                                      title="Editar"
+                                      className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
                                   <button
                                     type="button"
                                     onClick={() => openRecepcionModal(liq)}
-                                    title="Editar"
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-white text-[10px] font-bold shadow-xs active:scale-95 transition-all ${
+                                      estFin.tipo === 'PAGAR_CHOFER'
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : estFin.tipo === 'COBRAR_CHOFER'
+                                        ? 'bg-amber-600 hover:bg-amber-700'
+                                        : 'bg-emerald-600 hover:bg-emerald-700'
+                                    }`}
                                   >
-                                    <Edit2 className="w-3.5 h-3.5" />
+                                    <CheckCircle className="w-3 h-3" />
+                                    {estFin.tipo === 'PAGAR_CHOFER' ? 'Marcar Pagado' : 'Marcar Recibido'}
                                   </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => openRecepcionModal(liq)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-xs active:scale-95 transition-all"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5" />
-                                  {liq.saldoAFavorChofer > 0 && liq.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO'
-                                    ? 'Marcar Pagado'
-                                    : 'Marcar Recibido'}
-                                </button>
-                              )}
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1401,6 +1966,456 @@ export default function HistorialLiquidacionesPage() {
           </div>
         </div>
       )}
+
+      {/* ========================================================= */}
+      {/* PESTAÑA 3: REALIZAR CIERRE DE CAJA A UN CHOFER (DUEÑO) */}
+      {/* ========================================================= */}
+      {activeTab === 'cierre' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200 print:hidden">
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <User className="w-5 h-5 text-emerald-600" />
+                Seleccionar Chofer
+              </h3>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5">Chofer Activo</label>
+                <select
+                  value={cierreChoferId}
+                  onChange={(e) => handleSelectChoferCierre(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm font-medium text-slate-800 bg-white focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="">-- Elegir un chofer --</option>
+                  {choferesList.map((ch) => (
+                    <option key={ch.id} value={ch.id}>
+                      {ch.nombre} {ch.apellido} (#{ch.numeroChofer}) {ch.esFranquero ? '[Franquero] ' : ''}
+                      {ch.esPropietario ? '[Propietario]' : '[Comisionista]'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {cierrePendingData && (
+              <form
+                onSubmit={handleSubmitCierreDuenio}
+                className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4"
+              >
+                <h3 className="text-base font-bold text-slate-900">Parámetros del Cierre</h3>
+
+                {!cierrePendingData.chofer.esPropietario && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Combustible / GNC ($)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={cierreCombustible}
+                      onChange={(e) => setCierreCombustible(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-slate-800"
+                    />
+                  </div>
+                )}
+
+                {cierrePendingData.viajes.length > 0 && cierreCalculos.saldoAFavorChofer > 0 && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 space-y-2">
+                    <div className="flex justify-between text-xs font-bold text-amber-900">
+                      <span>Saldo a favor del chofer</span>
+                      <span>${cierreCalculos.saldoAFavorChofer.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setCierreQuienPaga('PAGADO_DUENIO')}
+                        className={`p-2 rounded-lg text-xs font-bold border ${
+                          cierreQuienPaga === 'PAGADO_DUENIO'
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white text-slate-700 border-amber-200'
+                        }`}
+                      >
+                        Pago ahora al chofer (Dueño)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCierreQuienPaga('PENDIENTE_DUENIO')}
+                        className={`p-2 rounded-lg text-xs font-bold border ${
+                          cierreQuienPaga === 'PENDIENTE_DUENIO'
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white text-slate-700 border-amber-200'
+                        }`}
+                      >
+                        Dejar pendiente de pago
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {cierrePendingData.viajes.length > 0 && cierreMontoOperacion > 0 && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-700">
+                      {cierreCalculos.montoARendirChofer > 0 ? 'Medio de pago del chofer' : 'Medio de pago al chofer'}
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['EFECTIVO', 'TRANSFERENCIA', 'AMBOS'] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => {
+                            setCierreMetodoPago(m);
+                            if (m === 'AMBOS') {
+                              const mitad = Math.round((cierreMontoOperacion / 2) * 100) / 100;
+                              setCierreMontoEfectivo(String(mitad));
+                              setCierreMontoTransferencia(String(Math.round((cierreMontoOperacion - mitad) * 100) / 100));
+                            }
+                          }}
+                          className={`py-2 px-2 rounded-xl border text-xs font-bold ${
+                            cierreMetodoPago === m
+                              ? 'bg-emerald-50 border-emerald-600 text-emerald-800'
+                              : 'bg-white border-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {m === 'TRANSFERENCIA' ? 'Transf.' : m === 'EFECTIVO' ? 'Efectivo' : 'Ambos'}
+                        </button>
+                      ))}
+                    </div>
+                    {cierreMetodoPago === 'AMBOS' && (
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={cierreMontoEfectivo}
+                          onChange={(e) => setCierreMontoEfectivo(e.target.value)}
+                          placeholder="Efectivo ($)"
+                          className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={cierreMontoTransferencia}
+                          onChange={(e) => setCierreMontoTransferencia(e.target.value)}
+                          placeholder="Transf. ($)"
+                          className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Observaciones</label>
+                  <textarea
+                    rows={2}
+                    value={cierreObservaciones}
+                    onChange={(e) => setCierreObservaciones(e.target.value)}
+                    placeholder="Notas del cierre..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={cierreSubmitting || cierrePendingData.viajes.length === 0}
+                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm disabled:opacity-50"
+                >
+                  {cierreSubmitting ? 'Registrando cierre...' : 'Confirmar Cierre de Caja'}
+                </button>
+              </form>
+            )}
+          </div>
+
+          <div className="lg:col-span-2 space-y-4">
+            {!cierreChoferId ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
+                <Banknote className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                <p className="text-sm font-bold text-slate-700">Seleccioná un chofer a la izquierda</p>
+                <p className="text-xs mt-1">
+                  Podrás ver sus viajes completados pendientes y realizar el cierre de caja directamente desde tu panel de dueño.
+                </p>
+              </div>
+            ) : cierreLoadingPending ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-sm text-slate-500">
+                Cargando viajes pendientes...
+              </div>
+            ) : cierrePendingData ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">
+                      {cierrePendingData.chofer.nombre} {cierrePendingData.chofer.apellido} (#{cierrePendingData.chofer.numeroChofer})
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      {cierrePendingData.viajes.length} viajes completados pendientes de liquidar
+                    </p>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+                    {cierrePendingData.chofer.esPropietario ? 'Propietario' : 'Comisionista (30%)'}
+                  </span>
+                </div>
+
+                {cierrePendingData.viajes.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-6 text-center">
+                    Este chofer no tiene viajes completados pendientes de cierre.
+                  </p>
+                ) : (
+                  <>
+                    <div
+                      className={`p-4 rounded-2xl border flex items-center justify-between ${
+                        cierreCalculos.saldoAFavorChofer > 0
+                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      }`}
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold uppercase block opacity-80">
+                          {cierreCalculos.saldoAFavorChofer > 0
+                            ? 'Saldo a Favor del Chofer'
+                            : 'Monto Neto a Entregar por el Chofer'}
+                        </span>
+                        <span className="text-xs opacity-75">
+                          Efec (${cierreCalculos.totalEfectivo.toLocaleString('es-AR')})
+                          {cierreCalculos.totalTransferenciaPropia > 0
+                            ? ` + Transf. Propia ($${cierreCalculos.totalTransferenciaPropia.toLocaleString('es-AR')})`
+                            : ''}{' '}
+                          − Chofer (${cierreCalculos.comisionChofer.toLocaleString('es-AR')})
+                        </span>
+                      </div>
+                      <span className="text-2xl font-black">
+                        $
+                        {(cierreCalculos.saldoAFavorChofer > 0
+                          ? cierreCalculos.saldoAFavorChofer
+                          : cierreCalculos.montoARendirChofer
+                        ).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <span className="text-slate-500 block font-semibold">Bruto</span>
+                        <span className="text-lg font-black text-slate-900">${cierreCalculos.totalRecaudado.toLocaleString('es-AR')}</span>
+                      </div>
+                      <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100">
+                        <span className="text-emerald-700 block font-semibold">Efectivo</span>
+                        <span className="text-lg font-black text-emerald-800">${cierreCalculos.totalEfectivo.toLocaleString('es-AR')}</span>
+                      </div>
+                      <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100">
+                        <span className="text-blue-700 block font-semibold">🏦 Transf. Agencia</span>
+                        <span className="text-lg font-black text-blue-800">${cierreCalculos.totalTransferenciaAgencia.toLocaleString('es-AR')}</span>
+                      </div>
+                      <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100">
+                        <span className="text-indigo-700 block font-semibold">📱 Transf. Propia</span>
+                        <span className="text-lg font-black text-indigo-800">${cierreCalculos.totalTransferenciaPropia.toLocaleString('es-AR')}</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 text-slate-100 rounded-2xl p-4 font-mono text-xs space-y-1.5">
+                      <div className="flex justify-between"><span>Bruto</span><span className="font-bold">= ${cierreCalculos.totalRecaudado.toLocaleString('es-AR')}</span></div>
+                      {!cierrePendingData.chofer.esPropietario && (
+                        <div className="flex justify-between text-emerald-300"><span>30 % chofer</span><span>= ${cierreCalculos.comisionChofer.toLocaleString('es-AR')}</span></div>
+                      )}
+                      <div className="flex justify-between text-amber-300"><span>20 % agencia</span><span>= ${cierreCalculos.comisionAgencia20.toLocaleString('es-AR')}</span></div>
+                      <div className="flex justify-between text-amber-300"><span>15 % agencia</span><span>= ${cierreCalculos.comisionAgencia15.toLocaleString('es-AR')}</span></div>
+                      {!cierrePendingData.chofer.esPropietario && (
+                        <div className="flex justify-between text-rose-300"><span>Combustible</span><span>= ${(parseFloat(cierreCombustible) || 0).toLocaleString('es-AR')}</span></div>
+                      )}
+                      <div className="border-t border-dashed border-slate-600 pt-2 mt-1 flex justify-between text-sm font-black text-emerald-400">
+                        <span>{cierrePendingData.chofer.esPropietario ? 'Neto Chofer Propietario' : 'Auto'}</span>
+                        <span>= ${(cierrePendingData.chofer.esPropietario ? cierreCalculos.comisionChofer : cierreCalculos.gananciaPropietario).toLocaleString('es-AR')}</span>
+                      </div>
+                    </div>
+
+                    {/* Listado completo de viajes pendientes del chofer */}
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                          Listado Completo de Viajes ({cierrePendingData.viajes.length})
+                        </h4>
+                        <span className="text-[11px] text-slate-500">Incluye titular de Cuenta Corriente</span>
+                      </div>
+                      <div className="overflow-x-auto max-h-[340px]">
+                        <table className="min-w-full divide-y divide-slate-200 text-xs">
+                          <thead className="bg-slate-50 sticky top-0">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-500">Fecha</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-500">Recorrido</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-500">Medio de Pago</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-500">Titular / Cta. Cte.</th>
+                              <th className="px-3 py-2 text-right font-semibold text-slate-500">Km</th>
+                              <th className="px-3 py-2 text-right font-semibold text-slate-500">Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {cierrePendingData.viajes.map((v: any) => {
+                              const medio = getMedioPagoViajeInfo(v);
+                              const titular = getTitularViaje(v);
+                              return (
+                                <tr key={v.id} className={v.metodoPago === 'CUENTA_CORRIENTE' ? 'bg-purple-50/50' : ''}>
+                                  <td className="px-3 py-2 whitespace-nowrap text-slate-500">
+                                    {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
+                                    {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-800 max-w-[220px] truncate" title={`${v.origen} → ${v.destino}`}>
+                                    <span className="font-semibold">{v.origen}</span> → {v.destino}
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap">
+                                    <span className={`inline-flex px-2 py-0.5 rounded-md border text-[10px] font-bold ${medio.badgeClass}`}>
+                                      {medio.label}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap">
+                                    <span className={v.metodoPago === 'CUENTA_CORRIENTE' ? 'font-bold text-purple-900' : 'text-slate-600'}>
+                                      {titular}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-right text-slate-500">
+                                    {Number(v.distanciaKmConPasajero || 0).toFixed(1)}
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-right font-black text-slate-900">
+                                    ${Number(v.precio || 0).toLocaleString('es-AR')}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DETALLE COMPLETO DE VIAJES DE UNA LIQUIDACIÓN */}
+      {detalleViajesModalLiq && (() => {
+        const est = getEstadoFinancieroLiq(detalleViajesModalLiq);
+        const viajesLista = Array.isArray(detalleViajesModalLiq.viajes) ? detalleViajesModalLiq.viajes : [];
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
+            <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+              <div className="p-5 border-b border-slate-100 flex items-start justify-between gap-3 bg-slate-50/70">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                      Viajes de {detalleViajesModalLiq.chofer?.nombre} {detalleViajesModalLiq.chofer?.apellido}
+                    </h3>
+                    <span className={`inline-flex px-2.5 py-0.5 rounded-full border text-[11px] font-extrabold ${est.badgeClass}`}>
+                      {est.label}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Cierre del {new Date(detalleViajesModalLiq.fecha).toLocaleDateString('es-AR')} a las{' '}
+                    {new Date(detalleViajesModalLiq.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs • {est.sublabel}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDescargarPdfIndividual(detalleViajesModalLiq)}
+                    disabled={generandoPdf}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    PDF Cierre
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetalleViajesModalLiq(null)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 overflow-y-auto space-y-4">
+                {/* Resumen rápido */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500 block font-semibold">Bruto</span>
+                    <span className="text-base font-black text-slate-900">${Number(detalleViajesModalLiq.totalRecaudado || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <span className="text-emerald-700 block font-semibold">Efectivo</span>
+                    <span className="text-base font-black text-emerald-800">${Number(detalleViajesModalLiq.totalEfectivoViajes || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
+                    <span className="text-blue-700 block font-semibold">🏦 Tr. Agencia</span>
+                    <span className="text-base font-black text-blue-800">${Number(detalleViajesModalLiq.totalTransferenciaAgencia ?? detalleViajesModalLiq.totalTransferenciaViajes ?? 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
+                    <span className="text-indigo-700 block font-semibold">📱 Tr. Propia</span>
+                    <span className="text-base font-black text-indigo-800">${Number(detalleViajesModalLiq.totalTransferenciaPropia || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-purple-50 border border-purple-200">
+                    <span className="text-purple-700 block font-semibold">🏛️ Cta. Cte.</span>
+                    <span className="text-base font-black text-purple-800">${Number(detalleViajesModalLiq.totalCuentaCorrienteViajes || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                </div>
+
+                {/* Tabla de viajes */}
+                {viajesLista.length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-8">No hay viajes asociados a esta liquidación.</p>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Fecha / Hora</th>
+                          <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Origen → Destino</th>
+                          <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Medio de Pago</th>
+                          <th className="px-3 py-2.5 text-left font-semibold text-slate-500">Titular Cta. Cte. / Cliente</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Km</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-slate-500">Importe</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {viajesLista.map((v: any) => {
+                          const medio = getMedioPagoViajeInfo(v);
+                          const titular = getTitularViaje(v);
+                          return (
+                            <tr key={v.id} className={v.metodoPago === 'CUENTA_CORRIENTE' ? 'bg-purple-50/50' : ''}>
+                              <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">
+                                {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
+                                {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-800">
+                                <span className="font-semibold">{v.origen}</span> → {v.destino}
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-0.5 rounded-md border text-[10px] font-bold ${medio.badgeClass}`}>
+                                  {medio.label}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <span className={v.metodoPago === 'CUENTA_CORRIENTE' ? 'font-bold text-purple-900' : 'text-slate-600'}>
+                                  {titular}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap text-right text-slate-500">
+                                {Number(v.distanciaKmConPasajero || 0).toFixed(1)} km
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap text-right font-black text-slate-900">
+                                ${Number(v.precio || 0).toLocaleString('es-AR')}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MODAL PARA CONFIRMAR RECEPCIÓN DE DINERO / PAGO SALDO A FAVOR */}
       {recepcionModalLiq && (

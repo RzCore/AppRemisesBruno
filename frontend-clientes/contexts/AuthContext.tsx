@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@/types';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -126,6 +127,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             sessionStorage.setItem(STORAGE_REFRESH_KEY, refreshToken);
             localStorage.setItem(STORAGE_REFRESH_KEY, refreshToken);
           }
+
+          // Refrescar perfil del cliente en segundo plano (ej. cuentaCorrienteHabilitada, tarifas, saldo)
+          fetch(`${getApiBaseUrl()}/cliente/profile`, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((json) => {
+              if (json?.success && json.data) {
+                const { user: _nestedUser, ...freshCliente } = json.data;
+                const mergedUser: User = {
+                  ...userData,
+                  cliente: {
+                    ...(userData.cliente || {}),
+                    ...freshCliente,
+                  },
+                };
+                setUser(mergedUser);
+                const serialized = JSON.stringify(mergedUser);
+                sessionStorage.setItem(STORAGE_USER_KEY, serialized);
+                localStorage.setItem(STORAGE_USER_KEY, serialized);
+                setClientDomainCookie(COOKIE_USER_KEY, serialized);
+              }
+            })
+            .catch(() => {});
         } else {
           throw new Error('Sesión no pertenece a un cliente');
         }

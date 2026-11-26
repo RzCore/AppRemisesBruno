@@ -190,8 +190,12 @@ const MOTIVOS_CANCELACION = [
 ];
 
 export default function ClienteApp() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, updateUser } = useAuth();
   const router = useRouter();
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Inputs y Autocompletado de Origen / Destino
   const [origen, setOrigen] = useState('');
@@ -507,6 +511,35 @@ export default function ClienteApp() {
       }
     }).catch(() => {});
 
+    // Escuchar actualizaciones de cuenta corriente habilitada/deshabilitada por el dueño en vivo
+    socket.on('cliente_cuenta_corriente_actualizada', (data: any) => {
+      const currentUser = userRef.current;
+      if (currentUser?.cliente && data?.clienteId === currentUser.cliente.id) {
+        const estabaHabilitada = Boolean(currentUser.cliente.cuentaCorrienteHabilitada);
+        const nuevaHabilitada = Boolean(data.cuentaCorrienteHabilitada);
+        updateUser({
+          ...currentUser,
+          cliente: {
+            ...currentUser.cliente,
+            cuentaCorrienteHabilitada: nuevaHabilitada,
+            limiteCuentaCorriente: data.limiteCuentaCorriente ?? currentUser.cliente.limiteCuentaCorriente,
+            saldoCuentaCorriente: data.saldoCuentaCorriente ?? currentUser.cliente.saldoCuentaCorriente,
+            tipoTarifa: data.tipoTarifa ?? currentUser.cliente.tipoTarifa,
+            tarifaValorKm: data.tarifaValorKm ?? currentUser.cliente.tarifaValorKm,
+            tarifaPrecioTramo: data.tarifaPrecioTramo ?? currentUser.cliente.tarifaPrecioTramo,
+            tarifaValorHoraEspera: data.tarifaValorHoraEspera ?? currentUser.cliente.tarifaValorHoraEspera,
+          },
+        });
+        if (!estabaHabilitada && nuevaHabilitada) {
+          toast.success('🏛️ ¡Tu Cuenta Corriente fue habilitada! Ya podés elegirla como método de pago.', {
+            duration: 6000,
+          });
+        } else if (estabaHabilitada && !nuevaHabilitada) {
+          setMetodoPago((prev) => (prev === 'CUENTA_CORRIENTE' ? 'EFECTIVO' : prev));
+        }
+      }
+    });
+
     // Escuchar actualizaciones de apertura/cierre de la agencia en vivo
     socket.on('agencia_estado_actualizado', (data: any) => {
       if (data?.estadoOperativo) {
@@ -692,9 +725,47 @@ export default function ClienteApp() {
     buscarViajeActivo();
     cargarDisponibilidad();
 
+    const refrescarPerfilCliente = async () => {
+      try {
+        const res = await clienteService.getProfile();
+        const currentUser = userRef.current;
+        if (res.success && res.data && currentUser) {
+          const { user: _nestedUser, ...freshCliente } = res.data as any;
+          const prevCC = Boolean(currentUser.cliente?.cuentaCorrienteHabilitada);
+          const nextCC = Boolean(freshCliente.cuentaCorrienteHabilitada);
+          const prevSaldo = Number(currentUser.cliente?.saldoCuentaCorriente || 0);
+          const nextSaldo = Number(freshCliente.saldoCuentaCorriente || 0);
+          const prevTipoTarifa = currentUser.cliente?.tipoTarifa;
+          const nextTipoTarifa = freshCliente.tipoTarifa;
+          if (prevCC !== nextCC || prevSaldo !== nextSaldo || prevTipoTarifa !== nextTipoTarifa) {
+            updateUser({
+              ...currentUser,
+              cliente: {
+                ...(currentUser.cliente || {}),
+                ...freshCliente,
+              },
+            });
+          }
+        }
+      } catch {}
+    };
+
+    refrescarPerfilCliente();
+    const handleFocusRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        refrescarPerfilCliente();
+      }
+    };
+    window.addEventListener('focus', refrescarPerfilCliente);
+    document.addEventListener('visibilitychange', handleFocusRefresh);
+
     const dispInterval = setInterval(cargarDisponibilidad, 6000);
-    return () => clearInterval(dispInterval);
-  }, [user, authLoading, router]);
+    return () => {
+      clearInterval(dispInterval);
+      window.removeEventListener('focus', refrescarPerfilCliente);
+      document.removeEventListener('visibilitychange', handleFocusRefresh);
+    };
+  }, [user?.id, authLoading, router]);
 
   // Polling de Resiliencia (QA): Si hay viaje activo y el socket se corta por 4G móvil,
   // sincroniza automáticamente cada 4.5 segundos para evitar que la UI quede colgada
@@ -2043,7 +2114,11 @@ export default function ClienteApp() {
                     ${precioTotalClienteLive.toLocaleString('es-AR')}
                   </p>
                   <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 block">
-                    {activeViaje.metodoPago === 'TRANSFERENCIA' ? 'Transferencia' : 'Efectivo'}
+                    {activeViaje.metodoPago === 'CUENTA_CORRIENTE'
+                      ? 'Cuenta Corriente'
+                      : activeViaje.metodoPago === 'TRANSFERENCIA'
+                      ? 'Transferencia'
+                      : 'Efectivo'}
                   </span>
                 </div>
               </div>

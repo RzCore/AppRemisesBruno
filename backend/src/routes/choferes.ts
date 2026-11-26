@@ -54,6 +54,9 @@ router.get('/', choferController.getAll);
 router.get('/remiseria/:remiseriaId', choferController.getByRemiseria);
 router.get('/:id', choferController.getById);
 
+// Asignación de vehículo (Dueño, Admin y Coordinador)
+router.patch('/:id/asignar-vehiculo', choferController.asignarVehiculo);
+
 // Gestión de choferes exclusiva del Dueño / Admin (y aprobación/rechazo)
 router.post('/', choferController.create);
 router.put('/:id', choferController.update);

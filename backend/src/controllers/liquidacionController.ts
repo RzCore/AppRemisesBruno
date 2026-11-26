@@ -11,11 +11,15 @@ interface CalculoLiquidacionResult {
   totalRecaudado: number;
   totalEfectivoViajes: number;
   totalTransferenciaViajes: number;
+  totalTransferenciaAgencia: number;
+  totalTransferenciaPropia: number;
   totalCuentaCorrienteViajes: number;
   totalCortaDistancia: number;
   totalLargaDistancia: number;
   cantidadCortaDistancia: number;
   cantidadLargaDistancia: number;
+  comisionAgencia20: number;
+  comisionAgencia15: number;
   comisionChofer: number;
   comisionAgencia: number;
   gananciaPropietario: number;
@@ -29,13 +33,20 @@ function round2(n: number): number {
 }
 
 function calcularLiquidacionViajes(
-  viajes: Array<{ precio: any; metodoPago?: string | null; distanciaKmConPasajero?: number | null }>,
+  viajes: Array<{
+    precio: any;
+    metodoPago?: string | null;
+    destinoTransferencia?: string | null;
+    distanciaKmConPasajero?: number | null;
+  }>,
   esPropietario: boolean,
   combustible = 0
 ): CalculoLiquidacionResult {
   let totalRecaudado = 0;
   let totalEfectivoViajes = 0;
   let totalTransferenciaViajes = 0;
+  let totalTransferenciaAgencia = 0;
+  let totalTransferenciaPropia = 0;
   let totalCuentaCorrienteViajes = 0;
   let totalCortaDistancia = 0;
   let totalLargaDistancia = 0;
@@ -44,6 +55,8 @@ function calcularLiquidacionViajes(
 
   let comisionChofer = 0;
   let comisionAgencia = 0;
+  let comisionAgencia20 = 0;
+  let comisionAgencia15 = 0;
   let gananciaPropietarioBruta = 0;
 
   for (const v of viajes) {
@@ -64,6 +77,11 @@ function calcularLiquidacionViajes(
 
     if (v.metodoPago === 'TRANSFERENCIA') {
       totalTransferenciaViajes += precio;
+      if (v.destinoTransferencia === 'CUENTA_PROPIA') {
+        totalTransferenciaPropia += precio;
+      } else {
+        totalTransferenciaAgencia += precio;
+      }
     } else if (v.metodoPago === 'CUENTA_CORRIENTE') {
       totalCuentaCorrienteViajes += precio;
     } else {
@@ -72,6 +90,11 @@ function calcularLiquidacionViajes(
 
     const comAgenciaViaje = (precio * agenciaPct) / 100;
     comisionAgencia += comAgenciaViaje;
+    if (esLargaDistancia) {
+      comisionAgencia15 += comAgenciaViaje;
+    } else {
+      comisionAgencia20 += comAgenciaViaje;
+    }
 
     if (esPropietario) {
       // Propietario: 80% (< 20 km) | 85% (>= 20 km)
@@ -89,12 +112,10 @@ function calcularLiquidacionViajes(
     ? 0
     : Math.max(0, gananciaPropietarioBruta - combustibleVal);
 
-  // El chofer solo cobró en mano los viajes en EFECTIVO.
-  // Los viajes en TRANSFERENCIA y CUENTA_CORRIENTE van a la cuenta de la agencia.
-  // saldoNeto = totalEfectivoViajes - comisionChofer - combustibleVal
-  // > 0 => el chofer entrega dinero a la caja
-  // < 0 => saldo a favor del chofer (la agencia le debe pagar)
-  const saldoNeto = round2(totalEfectivoViajes - comisionChofer - combustibleVal);
+  // El chofer cobró directamente: viajes en EFECTIVO + viajes en TRANSFERENCIA a su CUENTA_PROPIA.
+  // Los viajes en TRANSFERENCIA a CUENTA_AGENCIA y CUENTA_CORRIENTE van a la cuenta de la agencia.
+  // saldoNeto = (totalEfectivoViajes + totalTransferenciaPropia) - comisionChofer - combustibleVal
+  const saldoNeto = round2(totalEfectivoViajes + totalTransferenciaPropia - comisionChofer - combustibleVal);
   const saldoAFavorChofer = saldoNeto < 0 ? round2(Math.abs(saldoNeto)) : 0;
   const montoARendirChofer = saldoNeto > 0 ? round2(saldoNeto) : 0;
 
@@ -102,11 +123,15 @@ function calcularLiquidacionViajes(
     totalRecaudado: round2(totalRecaudado),
     totalEfectivoViajes: round2(totalEfectivoViajes),
     totalTransferenciaViajes: round2(totalTransferenciaViajes),
+    totalTransferenciaAgencia: round2(totalTransferenciaAgencia),
+    totalTransferenciaPropia: round2(totalTransferenciaPropia),
     totalCuentaCorrienteViajes: round2(totalCuentaCorrienteViajes),
     totalCortaDistancia: round2(totalCortaDistancia),
     totalLargaDistancia: round2(totalLargaDistancia),
     cantidadCortaDistancia,
     cantidadLargaDistancia,
+    comisionAgencia20: round2(comisionAgencia20),
+    comisionAgencia15: round2(comisionAgencia15),
     comisionChofer: round2(comisionChofer),
     comisionAgencia: round2(comisionAgencia),
     gananciaPropietario: round2(gananciaPropietario),
@@ -173,6 +198,22 @@ export const liquidacionController = {
           estado: 'COMPLETADO',
           liquidacionId: null
         },
+        include: {
+          cliente: {
+            select: {
+              id: true,
+              nombre: true,
+              apellido: true,
+              telefono: true
+            }
+          },
+          artEmpresa: {
+            select: {
+              id: true,
+              nombre: true
+            }
+          }
+        },
         orderBy: {
           fecha: 'desc'
         }
@@ -199,11 +240,15 @@ export const liquidacionController = {
             totalRecaudado: calc.totalRecaudado,
             totalEfectivo: calc.totalEfectivoViajes,
             totalTransferencia: calc.totalTransferenciaViajes,
+            totalTransferenciaAgencia: calc.totalTransferenciaAgencia,
+            totalTransferenciaPropia: calc.totalTransferenciaPropia,
             totalCuentaCorriente: calc.totalCuentaCorrienteViajes,
             totalCortaDistancia: calc.totalCortaDistancia,
             totalLargaDistancia: calc.totalLargaDistancia,
             cantidadCortaDistancia: calc.cantidadCortaDistancia,
             cantidadLargaDistancia: calc.cantidadLargaDistancia,
+            comisionAgencia20: calc.comisionAgencia20,
+            comisionAgencia15: calc.comisionAgencia15,
             comisionChofer: calc.comisionChofer,
             comisionAgencia: calc.comisionAgencia,
             combustible: 0,
@@ -349,16 +394,16 @@ export const liquidacionController = {
           montoTransferenciaFinal = round2(transf);
         }
       } else if (calc.saldoAFavorChofer > 0) {
-        const quien = quienPagaSaldoAFavor || 'PENDIENTE_DUENIO';
-        if (!['COORDINADOR', 'PENDIENTE_DUENIO'].includes(quien)) {
+        const quien = quienPagaSaldoAFavor || (rol === 'DUENIO' ? 'PAGADO_DUENIO' : 'PENDIENTE_DUENIO');
+        if (!['COORDINADOR', 'PENDIENTE_DUENIO', 'PAGADO_DUENIO'].includes(quien)) {
           return res.status(400).json({
             success: false,
-            message: 'Debe indicar si el saldo a favor lo paga el COORDINADOR o queda PENDIENTE_DUENIO.'
+            message: 'Debe indicar si el saldo a favor lo paga el COORDINADOR, el DUENIO o queda PENDIENTE_DUENIO.'
           });
         }
         quienPagaFinal = quien;
 
-        if (quien === 'COORDINADOR') {
+        if (quien === 'COORDINADOR' || quien === 'PAGADO_DUENIO') {
           const metodo = metodoPagoChofer || 'EFECTIVO';
           if (!metodosPagoValidos.includes(metodo)) {
             return res.status(400).json({
@@ -388,6 +433,8 @@ export const liquidacionController = {
         }
       }
 
+      const cerradoDirectoPorDuenio = rol === 'DUENIO' && quienPagaFinal !== 'PENDIENTE_DUENIO';
+
       // Registrar la liquidación y relacionar los viajes en una transacción
       const liquidacion = await prisma.$transaction(async (tx) => {
         const liq = await tx.liquidacion.create({
@@ -401,6 +448,8 @@ export const liquidacionController = {
             gananciaPropietario: calc.gananciaPropietario,
             totalEfectivoViajes: calc.totalEfectivoViajes,
             totalTransferenciaViajes: calc.totalTransferenciaViajes,
+            totalTransferenciaAgencia: calc.totalTransferenciaAgencia,
+            totalTransferenciaPropia: calc.totalTransferenciaPropia,
             totalCuentaCorrienteViajes: calc.totalCuentaCorrienteViajes,
             saldoNeto: calc.saldoNeto,
             saldoAFavorChofer: calc.saldoAFavorChofer,
@@ -408,7 +457,12 @@ export const liquidacionController = {
             metodoPagoChofer: metodoPagoFinal,
             montoEfectivo: montoEfectivoFinal,
             montoTransferencia: montoTransferenciaFinal,
-            observaciones: observaciones || null
+            observaciones: observaciones || null,
+            dineroRecibido: cerradoDirectoPorDuenio,
+            metodoEntregaDuenio: cerradoDirectoPorDuenio
+              ? (metodoPagoFinal === 'TRANSFERENCIA' ? 'TRANSFERENCIA' : 'CHOFER_MANO')
+              : null,
+            fechaRecepcionDuenio: cerradoDirectoPorDuenio ? new Date() : null
           }
         });
 
@@ -597,7 +651,23 @@ export const liquidacionController = {
               origen: true,
               destino: true,
               metodoPago: true,
+              destinoTransferencia: true,
               distanciaKmConPasajero: true,
+              clienteNombre: true,
+              cliente: {
+                select: {
+                  id: true,
+                  nombre: true,
+                  apellido: true,
+                  telefono: true
+                }
+              },
+              artEmpresa: {
+                select: {
+                  id: true,
+                  nombre: true
+                }
+              },
               vehiculo: {
                 select: {
                   id: true,
@@ -607,6 +677,9 @@ export const liquidacionController = {
                   propietario: true
                 }
               }
+            },
+            orderBy: {
+              fecha: 'desc'
             }
           },
           coordinador: {

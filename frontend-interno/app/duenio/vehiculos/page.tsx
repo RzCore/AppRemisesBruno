@@ -56,6 +56,7 @@ export default function VehiculosPage() {
     tipo: '',
     capacidad: 4,
     propietario: '',
+    propietarioEmail: '',
     vtoVtv: '',
     vtoMatafuego: '',
     vtoSeguro: '',
@@ -147,6 +148,7 @@ export default function VehiculosPage() {
         tipo: formData.tipo,
         capacidad: formData.capacidad,
         propietario: formData.propietario,
+        propietarioEmail: formData.propietarioEmail?.trim() || '',
         vtoVtv: formData.vtoVtv || undefined,
         vtoMatafuego: formData.vtoMatafuego || undefined,
         vtoSeguro: formData.vtoSeguro || undefined,
@@ -252,6 +254,7 @@ export default function VehiculosPage() {
       tipo: vehiculo.tipo,
       capacidad: vehiculo.capacidad,
       propietario: vehiculo.propietario,
+      propietarioEmail: vehiculo.propietarioEmail || '',
       vtoVtv: vehiculo.vtoVtv ? vehiculo.vtoVtv.split('T')[0] : '',
       vtoMatafuego: vehiculo.vtoMatafuego ? vehiculo.vtoMatafuego.split('T')[0] : '',
       vtoSeguro: vehiculo.vtoSeguro ? vehiculo.vtoSeguro.split('T')[0] : '',
@@ -321,6 +324,7 @@ export default function VehiculosPage() {
       tipo: '',
       capacidad: 4,
       propietario: '',
+      propietarioEmail: '',
       vtoVtv: '',
       vtoMatafuego: '',
       vtoSeguro: '',
@@ -1116,6 +1120,25 @@ export default function VehiculosPage() {
                         </div>
                       );
                     })()}
+
+                    {/* Email del propietario del vehículo para envío automático del cierre de turno */}
+                    {tipoPropietario !== 'CHOFER' && (
+                      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-700">
+                          Email del Propietario del Vehículo (Opcional)
+                        </label>
+                        <input
+                          type="email"
+                          value={formData.propietarioEmail || ''}
+                          onChange={(e) => setFormData({ ...formData, propietarioEmail: e.target.value })}
+                          className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:ring-2 focus:ring-blue-500"
+                          placeholder="propietario@email.com"
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          Cada vez que un chofer no propietario cierre su turno con este auto, se enviará automáticamente el detalle del turno a este correo.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 

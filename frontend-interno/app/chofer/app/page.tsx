@@ -144,10 +144,21 @@ export default function ChoferApp() {
   // Modal y selección de método de pago al finalizar viaje
   const [modalFinalizarViaje, setModalFinalizarViaje] = useState(false);
   const [metodoPagoSeleccionado, setMetodoPagoSeleccionado] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE'>('EFECTIVO');
+  const [destinoTransferenciaSeleccionado, setDestinoTransferenciaSeleccionado] = useState<'CUENTA_PROPIA' | 'CUENTA_AGENCIA' | null>(null);
   const [montoFinalACobrar, setMontoFinalACobrar] = useState<number | null>(null);
   const [peajesInputChofer, setPeajesInputChofer] = useState('');
   const [observacionesPeajeChofer, setObservacionesPeajeChofer] = useState('');
   const [mostrarPeajesManual, setMostrarPeajesManual] = useState(false);
+
+  // Control de rechazos consecutivos (sanción al 2do rechazo seguido)
+  const [rechazosConsecutivos, setRechazosConsecutivos] = useState<number>(0);
+  const [modalConfirmarRechazoOpen, setModalConfirmarRechazoOpen] = useState<boolean>(false);
+
+  // Gastos de cierre de turno (por si olvidó cargar combustible/GNC u otros gastos)
+  const [cierreCombustibleMonto, setCierreCombustibleMonto] = useState<string>('');
+  const [cierreCombustibleSubtipo, setCierreCombustibleSubtipo] = useState<'NAFTA_GASOIL' | 'GNC'>('NAFTA_GASOIL');
+  const [cierreOtrosGastosMonto, setCierreOtrosGastosMonto] = useState<string>('');
+  const [cierreOtrosGastosDesc, setCierreOtrosGastosDesc] = useState<string>('');
 
   // Modal para agregar parada intermedia solicitada por el cliente
   const [isAddStopModalOpenChofer, setIsAddStopModalOpenChofer] = useState(false);
@@ -1071,6 +1082,9 @@ export default function ChoferApp() {
       if (chofer?.id) {
         choferIdRef.current = chofer.id;
       }
+      if (chofer?.rechazosConsecutivos !== undefined) {
+        setRechazosConsecutivos(Number(chofer.rechazosConsecutivos || 0));
+      }
 
       const activoActual = forzarActivo !== undefined ? forzarActivo : Boolean(chofer?.isOnline);
 
@@ -1450,6 +1464,10 @@ export default function ChoferApp() {
         toast.error('No puedes desconectarte mientras tienes un viaje en curso.');
         return;
       }
+      setCierreCombustibleMonto('');
+      setCierreCombustibleSubtipo('NAFTA_GASOIL');
+      setCierreOtrosGastosMonto('');
+      setCierreOtrosGastosDesc('');
       setModalArqueoCierreOpen(true);
       setCargandoArqueo(true);
       try {
@@ -1510,6 +1528,8 @@ export default function ChoferApp() {
         tripDistanceRef.current = { con: 0, sin: 0 };
         setViajeActual(res.data);
         setAlertaViaje(null);
+        setRechazosConsecutivos(0);
+        setModalConfirmarRechazoOpen(false);
         setViajeEnColaTabla(null);
         setParadaVirtualEstado((prev) => ({
           ...prev,
@@ -1532,8 +1552,16 @@ export default function ChoferApp() {
     }
   };
 
-  const rechazarViaje = async () => {
+  const rechazarViaje = async (confirmadoSancion = false) => {
     if (!alertaViaje) return;
+
+    // Antes de rechazar el 2do viaje consecutivo, notificar advertencia de sanción
+    if (rechazosConsecutivos >= 1 && !confirmadoSancion) {
+      setModalConfirmarRechazoOpen(true);
+      return;
+    }
+
+    setModalConfirmarRechazoOpen(false);
     const viajeId = alertaViaje.id;
     const nuevosRechazados = [...viajesRechazados, viajeId];
     setViajesRechazados(nuevosRechazados);
@@ -1544,11 +1572,25 @@ export default function ChoferApp() {
     }
     setAlertaViaje(null);
     try {
-      await choferService.rechazarViaje(viajeId);
+      const res: any = await choferService.rechazarViaje(viajeId);
+      if (res?.sancionAplicada) {
+        setRechazosConsecutivos(0);
+        toast.error(
+          '⚠️ Sanción aplicada: por rechazar 2 viajes seguidos fuiste enviado al último lugar de la lista.',
+          { duration: 7000 }
+        );
+        await sincronizarEstado(isActive);
+      } else {
+        const nuevoConteo = typeof res?.rechazosConsecutivos === 'number' ? res.rechazosConsecutivos : rechazosConsecutivos + 1;
+        setRechazosConsecutivos(nuevoConteo);
+        toast('Viaje rechazado (1/2). Atención: si rechazás el próximo pasarás al último lugar de la lista.', {
+          icon: '⚠️',
+          duration: 5500,
+        });
+      }
     } catch {
-      // ignore
+      toast('Solicitud rechazada. Seguimos buscando viajes...');
     }
-    toast('Solicitud rechazada. Seguimos buscando viajes...');
   };
 
   const avisarEstoyLlegando = async () => {
@@ -1707,6 +1749,7 @@ export default function ChoferApp() {
     setPeajesInputChofer(viajeActual.montoPeajes ? String(viajeActual.montoPeajes) : '');
     setObservacionesPeajeChofer(viajeActual.observacionesPeaje || '');
     setMostrarPeajesManual(false);
+    setDestinoTransferenciaSeleccionado(null);
     if (viajeActual.metodoPago === 'CUENTA_CORRIENTE') {
       setMetodoPagoSeleccionado('CUENTA_CORRIENTE');
     } else {
@@ -1717,6 +1760,11 @@ export default function ChoferApp() {
 
   const confirmarFinalizarViaje = async () => {
     if (!viajeActual || actionLoading) return;
+
+    if (metodoPagoSeleccionado === 'TRANSFERENCIA' && !destinoTransferenciaSeleccionado) {
+      toast.error('Debés seleccionar si la transferencia fue a la Cuenta de la Agencia o a tu Cuenta Propia.');
+      return;
+    }
 
     if (String(viajeActual.id).startsWith('viaje-test')) {
       const vTest = viajeActual;
@@ -1743,6 +1791,10 @@ export default function ChoferApp() {
         distanciaKmConPasajero: distCon,
         distanciaKmSinPasajero: distSin,
         metodoPago: metodoPagoSeleccionado,
+        destinoTransferencia:
+          metodoPagoSeleccionado === 'TRANSFERENCIA' && destinoTransferenciaSeleccionado
+            ? destinoTransferenciaSeleccionado
+            : undefined,
         precioFinal: montoFinalACobrar !== null ? montoFinalACobrar : undefined,
         montoPeajes: peajesNum > 0 ? peajesNum : 0,
         observacionesPeaje: peajesNum > 0 && observacionesPeajeChofer ? observacionesPeajeChofer.trim() : undefined,
@@ -2650,7 +2702,7 @@ export default function ChoferApp() {
         </div>
       )}
 
-      {/* Alerta de Nuevo Viaje */}
+      {/* Alerta de Nuevo Viaje (datos ocultos hasta aceptar para evitar selección de viajes) */}
       {alertaViaje && (
         <div className="fixed inset-x-0 bottom-16 p-4 z-50 animate-slide-up">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-primary-100 dark:border-slate-800 overflow-hidden max-w-md mx-auto transition-colors">
@@ -2668,57 +2720,39 @@ export default function ChoferApp() {
                     : `📋 Turno #${alertaViaje.puestoTabla || 1} en la Tabla`}
                 </span>
               </div>
-              <span className="font-extrabold text-lg shrink-0">
-                ${Number(precioAlerta).toLocaleString('es-AR')}
-              </span>
+              {alertaViaje.segundosParaAceptar ? (
+                <span className="px-2.5 py-1 rounded-xl bg-white/15 font-extrabold text-sm shrink-0">
+                  {alertaViaje.segundosParaAceptar}s
+                </span>
+              ) : null}
             </div>
             <div className="p-4 space-y-3">
-              <div className="flex items-center gap-3 bg-gray-50 dark:bg-slate-800/80 p-2.5 rounded-xl border border-gray-100 dark:border-slate-700/60">
-                {clienteFotoAlerta ? (
-                  <img
-                    src={clienteFotoAlerta}
-                    alt="Foto Pasajero"
-                    className="w-10 h-10 rounded-full object-cover border-2 border-primary-500 shrink-0"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-slate-700 text-primary-700 dark:text-primary-300 flex items-center justify-center shrink-0 font-bold">
-                    <User className="w-5 h-5" />
-                  </div>
-                )}
+              <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-slate-700 text-primary-700 dark:text-primary-300 flex items-center justify-center shrink-0 font-bold">
+                  <Car className="w-5 h-5" />
+                </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-gray-400 dark:text-slate-400 font-bold uppercase tracking-wider">
-                    Pasajero a buscar
+                  <p className="text-xs font-bold text-gray-900 dark:text-white">
+                    Solicitud lista para despachar
                   </p>
-                  <p className="font-bold text-sm text-gray-900 dark:text-white truncate">
-                    {clienteNombreAlerta}
+                  <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-0.5 leading-snug">
+                    Aceptá el viaje para ver los datos completos del pasajero, origen, destino y tarifa.
                   </p>
                 </div>
               </div>
 
-              <div className="flex gap-3">
-                <MapPin className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs text-gray-400 dark:text-slate-400">ORIGEN</p>
-                  <p className="text-sm font-bold text-gray-900 dark:text-white">{alertaViaje.origen}</p>
+              {rechazosConsecutivos >= 1 && (
+                <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-xl text-[11px] text-amber-900 dark:text-amber-200 font-semibold">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    Ya rechazaste 1 viaje seguido. Si rechazás este viaje, pasarás al <strong>último lugar de la lista</strong>.
+                  </span>
                 </div>
-              </div>
-              <div className="flex gap-3">
-                <Navigation className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs text-gray-400 dark:text-slate-400">DESTINO</p>
-                  <p className="text-sm font-bold text-gray-900 dark:text-white">{alertaViaje.destino}</p>
-                </div>
-              </div>
-
-              {alertaViaje.observaciones && (
-                <p className="text-xs text-gray-600 dark:text-slate-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-800/40 p-2 rounded-lg">
-                  Nota: {alertaViaje.observaciones}
-                </p>
               )}
 
-              <div className="flex gap-3 pt-3 border-t border-gray-100 dark:border-slate-800">
+              <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-slate-800">
                 <button
-                  onClick={rechazarViaje}
+                  onClick={() => rechazarViaje(false)}
                   disabled={actionLoading}
                   className="flex-1 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-bold rounded-xl active:bg-gray-200 dark:active:bg-slate-700 disabled:opacity-50 text-sm"
                 >
@@ -2732,6 +2766,42 @@ export default function ChoferApp() {
                   {actionLoading ? 'ACEPTANDO...' : 'ACEPTAR VIAJE'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de advertencia previa al 2do rechazo consecutivo */}
+      {modalConfirmarRechazoOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/65 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 border border-amber-200 dark:border-amber-800 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Advertencia de Sanción</h3>
+                <p className="text-xs text-amber-700 dark:text-amber-400 font-semibold">2do rechazo consecutivo</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-slate-300 leading-relaxed">
+              Ya rechazaste un viaje anteriormente. Si rechazás este segundo viaje seguido, se aplicará una sanción y serás enviado al <strong>último lugar de la lista de choferes (Tabla)</strong>.
+            </p>
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setModalConfirmarRechazoOpen(false)}
+                className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Volver al viaje
+              </button>
+              <button
+                type="button"
+                onClick={() => rechazarViaje(true)}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Rechazar e ir último
+              </button>
             </div>
           </div>
         </div>
@@ -3405,6 +3475,45 @@ export default function ChoferApp() {
                   </button>
                 )}
               </div>
+
+              {/* Si el pago es por Transferencia, exigir indicar a qué cuenta fue */}
+              {metodoPagoSeleccionado === 'TRANSFERENCIA' && (
+                <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-800/60 space-y-2 animate-in fade-in">
+                  <label className="text-[11px] font-bold text-blue-900 dark:text-blue-200 block">
+                    ¿A qué cuenta se acreditó la transferencia? *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDestinoTransferenciaSeleccionado('CUENTA_AGENCIA')}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        destinoTransferenciaSeleccionado === 'CUENTA_AGENCIA'
+                          ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                          : 'border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 text-blue-900 dark:text-blue-200 hover:border-blue-400'
+                      }`}
+                    >
+                      <p className="text-xs font-extrabold">🏦 Cuenta Agencia</p>
+                      <p className={`text-[10px] mt-0.5 ${destinoTransferenciaSeleccionado === 'CUENTA_AGENCIA' ? 'text-blue-100' : 'text-blue-600 dark:text-blue-400'}`}>
+                        Ingresó a la agencia
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDestinoTransferenciaSeleccionado('CUENTA_PROPIA')}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        destinoTransferenciaSeleccionado === 'CUENTA_PROPIA'
+                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                          : 'border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 text-blue-900 dark:text-blue-200 hover:border-indigo-400'
+                      }`}
+                    >
+                      <p className="text-xs font-extrabold">📱 Cuenta Propia</p>
+                      <p className={`text-[10px] mt-0.5 ${destinoTransferenciaSeleccionado === 'CUENTA_PROPIA' ? 'text-indigo-100' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                        Ingresó a mi cuenta
+                      </p>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Registro inteligente de Peajes: visible en larga distancia o desplegable en caso local */}
@@ -3858,95 +3967,177 @@ export default function ChoferApp() {
                 <div className="w-6 h-6 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
                 <span>Calculando balance financiero del turno...</span>
               </div>
-            ) : arqueoData ? (
-              <div className="space-y-4">
-                {/* Tarjeta de Ganancia Neta de Bolsillo */}
-                <div className="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-2xl p-4 text-white text-center shadow-lg">
-                  <span className="text-[10px] text-emerald-100 uppercase tracking-wider block font-bold">
-                    Ganancia Neta de Bolsillo
-                  </span>
-                  <div className="text-3xl font-black font-mono my-1">
-                    ${Number(arqueoData.liquidacion?.gananciaNetaChofer || 0).toLocaleString('es-AR')}
+            ) : arqueoData ? (() => {
+              const esProp = Boolean(arqueoData.liquidacion?.esPropietario ?? arqueoData.chofer?.esPropietario);
+              const extraCombustible = Math.max(0, parseFloat(cierreCombustibleMonto) || 0);
+              const extraOtros = Math.max(0, parseFloat(cierreOtrosGastosMonto) || 0);
+              const brutoTurno = Number(arqueoData.viajes?.totalBruto || 0);
+              const chofer30 = esProp ? 0 : Number(arqueoData.liquidacion?.comisionChofer || 0);
+              const agencia20 = Number(arqueoData.liquidacion?.comisionAgencia20 || 0);
+              const agencia15 = Number(arqueoData.liquidacion?.comisionAgencia15 || 0);
+              const combTotal = Number(arqueoData.gastos?.totalCombustible || 0) + extraCombustible;
+              const otrosTotal = Number(arqueoData.gastos?.totalOtrosGastos || 0) + extraOtros;
+              const netoAutoLive = Math.round((brutoTurno - chofer30 - agencia20 - agencia15 - combTotal - otrosTotal) * 100) / 100;
+              const fmtArs = (n: number) => `$${Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+              return (
+                <div className="space-y-4">
+                  {/* Pregunta obligatoria/opcional por si se olvidó de cargar combustible o algún gasto */}
+                  <div className="bg-amber-50/80 dark:bg-amber-950/30 rounded-2xl p-3.5 border border-amber-200 dark:border-amber-800/60 space-y-3">
+                    <div>
+                      <p className="text-xs font-extrabold text-amber-900 dark:text-amber-200">
+                        ⛽ ¿Cargaste combustible/GNC u otro gasto que olvidaste anotar?
+                      </p>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                        Si ya los cargaste antes, dejá estos campos vacíos. Si los ingresás ahora, se suman al cierre automáticamente.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300">
+                          Combustible / GNC ($)
+                        </label>
+                        <div className="flex gap-1 bg-white dark:bg-slate-800 p-0.5 rounded-lg border border-amber-200 dark:border-slate-700">
+                          <button
+                            type="button"
+                            onClick={() => setCierreCombustibleSubtipo('NAFTA_GASOIL')}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              cierreCombustibleSubtipo === 'NAFTA_GASOIL'
+                                ? 'bg-amber-500 text-white'
+                                : 'text-gray-600 dark:text-slate-300'
+                            }`}
+                          >
+                            Nafta/Gasoil
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCierreCombustibleSubtipo('GNC')}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              cierreCombustibleSubtipo === 'GNC'
+                                ? 'bg-amber-500 text-white'
+                                : 'text-gray-600 dark:text-slate-300'
+                            }`}
+                          >
+                            GNC
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={cierreCombustibleMonto}
+                        onChange={(e) => setCierreCombustibleMonto(e.target.value)}
+                        placeholder="0 (ej. 15000)"
+                        className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-amber-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 block mb-1">
+                          Otros gastos ($)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={cierreOtrosGastosMonto}
+                          onChange={(e) => setCierreOtrosGastosMonto(e.target.value)}
+                          placeholder="0"
+                          className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-amber-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 block mb-1">
+                          Detalle (opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={cierreOtrosGastosDesc}
+                          onChange={(e) => setCierreOtrosGastosDesc(e.target.value)}
+                          placeholder="Ej: Lavado, peaje..."
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-amber-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <span className="text-[11px] text-emerald-100/90 font-medium">
-                    (Total Bruto - Comisión {arqueoData.liquidacion?.comisionPorcentaje}% - Gastos deducidos)
-                  </span>
+
+                  {/* Ticket de Cierre de Turno en formato solicitado */}
+                  <div className="bg-slate-900 text-slate-100 rounded-2xl p-4 font-mono text-xs space-y-2 shadow-lg border border-slate-800">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-300">Bruto ({arqueoData.viajes?.total || 0} viajes)</span>
+                      <span className="font-black text-white">= {fmtArs(brutoTurno)}</span>
+                    </div>
+                    {!esProp && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-emerald-300">30 % chofer</span>
+                        <span className="font-bold text-emerald-300">= {fmtArs(chofer30)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-300">20 % agencia</span>
+                      <span className="font-bold text-amber-300">= {fmtArs(agencia20)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-300">15 % agencia</span>
+                      <span className="font-bold text-amber-300">= {fmtArs(agencia15)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-rose-300">Combustible</span>
+                      <span className="font-bold text-rose-300">= {fmtArs(combTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-rose-300">Otros gastos</span>
+                      <span className="font-bold text-rose-300">= {fmtArs(otrosTotal)}</span>
+                    </div>
+                    <div className="border-t border-dashed border-slate-600 pt-2.5 mt-1 flex items-center justify-between text-base">
+                      <span className="font-black text-white">Auto</span>
+                      <span className="font-black text-emerald-400">= {fmtArs(netoAutoLive)}</span>
+                    </div>
+                  </div>
+
+                  {/* Desglose por medio de pago */}
+                  <div className="bg-gray-50 dark:bg-slate-800/60 rounded-2xl p-3.5 border border-gray-100 dark:border-slate-800 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-slate-300">💵 Efectivo</span>
+                      <span className="font-bold text-gray-900 dark:text-white">{fmtArs(arqueoData.viajes?.totalEfectivo || 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-slate-300">🏦 Transferencia Agencia</span>
+                      <span className="font-bold text-blue-700 dark:text-blue-400">{fmtArs(arqueoData.viajes?.totalTransferenciaAgencia || 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-slate-300">📱 Transferencia Propia</span>
+                      <span className="font-bold text-indigo-700 dark:text-indigo-400">{fmtArs(arqueoData.viajes?.totalTransferenciaPropia || 0)}</span>
+                    </div>
+                    {(arqueoData.viajes?.totalCuentaCorriente || 0) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600 dark:text-slate-300">🏛️ Cuenta Corriente</span>
+                        <span className="font-bold text-amber-700 dark:text-amber-400">{fmtArs(arqueoData.viajes?.totalCuentaCorriente || 0)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Kilometraje del Turno */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="p-2.5 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-150 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 block uppercase font-bold">Km c/ Pasajeros</span>
+                      <p className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
+                        {Number(arqueoData.turno?.kmConPasajero || kmConPasajero).toFixed(1)} km
+                      </p>
+                    </div>
+                    <div className="p-2.5 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-150 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 block uppercase font-bold">Km Totales Turno</span>
+                      <p className="font-extrabold text-sm text-slate-800 dark:text-slate-100">
+                        {Number(arqueoData.turno?.kmTotalConectado || kmTotalConectado).toFixed(1)} km
+                      </p>
+                    </div>
+                  </div>
                 </div>
-
-                {/* Desglose de Recaudación */}
-                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-gray-100 dark:border-slate-800 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600 dark:text-slate-300 flex items-center gap-1.5 font-medium">
-                      <Banknote className="w-4 h-4 text-emerald-600" />
-                      Total Cobrado en Efectivo ({arqueoData.viajes?.lista?.filter((v: any) => v.metodoPago === 'EFECTIVO').length || 0} viajes)
-                    </span>
-                    <span className="font-extrabold text-gray-900 dark:text-white">
-                      ${Number(arqueoData.viajes?.totalEfectivo || 0).toLocaleString('es-AR')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600 dark:text-slate-300 flex items-center gap-1.5 font-medium">
-                      <CreditCard className="w-4 h-4 text-blue-600" />
-                      Total por Transferencia ({arqueoData.viajes?.lista?.filter((v: any) => v.metodoPago === 'TRANSFERENCIA').length || 0} viajes)
-                    </span>
-                    <span className="font-extrabold text-gray-900 dark:text-white">
-                      ${Number(arqueoData.viajes?.totalTransferencia || 0).toLocaleString('es-AR')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-slate-700">
-                    <span className="font-bold text-gray-800 dark:text-slate-200">
-                      Total Bruto Recaudado ({arqueoData.viajes?.total || 0} viajes)
-                    </span>
-                    <span className="font-black text-gray-900 dark:text-white">
-                      ${Number(arqueoData.viajes?.totalBruto || 0).toLocaleString('es-AR')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
-                    <span className="font-medium">Gastos operativos turno (Nafta/GNC/Peajes)</span>
-                    <span className="font-bold">
-                      -${Number(arqueoData.gastos?.total || 0).toLocaleString('es-AR')}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-amber-700 dark:text-amber-400">
-                    <span className="font-medium">Comisión Agencia ({arqueoData.liquidacion?.comisionPorcentaje}%)</span>
-                    <span className="font-bold">
-                      -${Number(arqueoData.liquidacion?.comisionRemiseria || 0).toLocaleString('es-AR')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Saldo de rendición física */}
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800/50 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-amber-900 dark:text-amber-200 block">Comisión a Rendir en Base:</span>
-                    <span className="text-[10px] text-amber-700 dark:text-amber-400">A entregar al despachador al cerrar</span>
-                  </div>
-                  <span className="text-base font-black text-amber-900 dark:text-amber-100">
-                    ${Number(arqueoData.liquidacion?.aRendirCentral || 0).toLocaleString('es-AR')}
-                  </span>
-                </div>
-
-                {/* Kilometraje del Turno */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-150 dark:border-slate-800">
-                    <span className="text-[10px] text-gray-400 block uppercase font-bold">Km c/ Pasajeros</span>
-                    <p className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
-                      {Number(arqueoData.turno?.kmConPasajero || kmConPasajero).toFixed(1)} km
-                    </p>
-                  </div>
-                  <div className="p-2.5 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-150 dark:border-slate-800">
-                    <span className="text-[10px] text-gray-400 block uppercase font-bold">Km Totales Turno</span>
-                    <p className="font-extrabold text-sm text-slate-800 dark:text-slate-100">
-                      {Number(arqueoData.turno?.kmTotalConectado || kmTotalConectado).toFixed(1)} km
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
+              );
+            })() : null}
 
             <div className="flex gap-2 pt-2">
               <button
@@ -3959,8 +4150,39 @@ export default function ChoferApp() {
               <button
                 type="button"
                 onClick={async () => {
-                  setModalArqueoCierreOpen(false);
-                  await confirmarToggleStatus(undefined);
+                  setActionLoading(true);
+                  try {
+                    if (pendingDeltaRef.current.con > 0 || pendingDeltaRef.current.sin > 0) {
+                      await choferService.actualizarKmTurno({
+                        kmConPasajeroDelta: pendingDeltaRef.current.con,
+                        kmSinPasajeroDelta: pendingDeltaRef.current.sin,
+                        choferId: user?.chofer?.id,
+                      });
+                      pendingDeltaRef.current = { con: 0, sin: 0 };
+                    }
+                    const combNum = parseFloat(cierreCombustibleMonto) || 0;
+                    const otrosNum = parseFloat(cierreOtrosGastosMonto) || 0;
+                    const res = await choferService.finalizarTurno({
+                      choferId: user?.chofer?.id || choferIdRef.current,
+                      gastoCombustible: combNum > 0 ? { monto: combNum, subtipoCombustible: cierreCombustibleSubtipo } : undefined,
+                      otroGasto: otrosNum > 0 ? { monto: otrosNum, tipo: 'OTRO', descripcion: cierreOtrosGastosDesc.trim() || undefined } : undefined,
+                    });
+                    if (!res.success) {
+                      toast.error(res.message || 'Error al cerrar turno');
+                      return;
+                    }
+                    setModalArqueoCierreOpen(false);
+                    setIsActive(false);
+                    setAlertaViaje(null);
+                    setRechazosConsecutivos(0);
+                    localStorage.setItem('chofer_isActive', JSON.stringify(false));
+                    if (lastCoordsRef.current) {
+                      emitirUbicacionGps(lastCoordsRef.current[0], lastCoordsRef.current[1], 'fuera_servicio');
+                    }
+                    toast.success('Turno cerrado correctamente. ¡Buen descanso!');
+                  } finally {
+                    setActionLoading(false);
+                  }
                 }}
                 disabled={actionLoading}
                 className="flex-2 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md shadow-rose-600/30 cursor-pointer"

@@ -173,6 +173,8 @@ export interface Chofer {
   esPropietario?: boolean;
   esFranquero?: boolean;
   comisionPorcentaje?: number;
+  isOnline?: boolean;
+  rechazosConsecutivos?: number;
   fotoUrl?: string;
   createdAt: string;
   updatedAt: string;
@@ -219,6 +221,8 @@ export interface UpdateChoferData {
   esPropietario?: boolean;
   esFranquero?: boolean;
   comisionPorcentaje?: number;
+  isOnline?: boolean;
+  rechazosConsecutivos?: number;
   fotoUrl?: string;
 }
 
@@ -234,6 +238,7 @@ export interface Vehiculo {
   capacidad: number;
   estado: 'ACTIVO' | 'MANTENIMIENTO' | 'INACTIVO';
   propietario: string;
+  propietarioEmail?: string;
   vtoVtv?: string;
   vtoMatafuego?: string;
   vtoSeguro?: string;
@@ -282,6 +287,7 @@ export interface CreateVehiculoData {
   tipo: string;
   capacidad: number;
   propietario: string;
+  propietarioEmail?: string;
   vtoVtv?: string;
   vtoMatafuego?: string;
   vtoSeguro?: string;
@@ -299,6 +305,7 @@ export interface UpdateVehiculoData {
   tipo?: string;
   capacidad?: number;
   propietario?: string;
+  propietarioEmail?: string;
   vtoVtv?: string;
   vtoMatafuego?: string;
   vtoSeguro?: string;
@@ -714,6 +721,8 @@ export interface Liquidacion {
   gananciaPropietario: number;
   totalEfectivoViajes?: number;
   totalTransferenciaViajes?: number;
+  totalTransferenciaAgencia?: number;
+  totalTransferenciaPropia?: number;
   totalCuentaCorrienteViajes?: number;
   saldoNeto?: number;
   saldoAFavorChofer?: number;
@@ -740,11 +749,15 @@ export interface LiquidacionPendienteResumen {
     totalRecaudado: number;
     totalEfectivo?: number;
     totalTransferencia?: number;
+    totalTransferenciaAgencia?: number;
+    totalTransferenciaPropia?: number;
     totalCuentaCorriente?: number;
     totalCortaDistancia?: number;
     totalLargaDistancia?: number;
     cantidadCortaDistancia?: number;
     cantidadLargaDistancia?: number;
+    comisionAgencia20?: number;
+    comisionAgencia15?: number;
     comisionChofer: number;
     comisionAgencia: number;
     combustible: number;

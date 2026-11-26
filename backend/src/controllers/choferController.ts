@@ -709,6 +709,136 @@ export const choferController = {
     }
   },
 
+  // Asignar o cambiar vehículo de un chofer (Dueño, Admin y Coordinador)
+  async asignarVehiculo(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const { vehiculoId } = req.body;
+      const { rol, id: userId } = req.user!;
+
+      if (rol !== 'DUENIO' && rol !== 'ADMIN' && rol !== 'COORDINADOR') {
+        return res.status(403).json({
+          success: false,
+          message: 'No tenés permisos para asignar vehículos a choferes',
+        });
+      }
+
+      const existingChofer = await prisma.chofer.findUnique({ where: { id } });
+      if (!existingChofer) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chofer no encontrado',
+        });
+      }
+
+      if (rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId },
+          include: { remiserias: { select: { remiseriaId: true } } },
+        });
+        const remiseriaIds = duenio?.remiserias.map((r) => r.remiseriaId) || [];
+        if (!remiseriaIds.includes(existingChofer.remiseriaId)) {
+          return res.status(403).json({
+            success: false,
+            message: 'No tenés permisos para modificar choferes de esta remisería',
+          });
+        }
+      } else if (rol === 'COORDINADOR') {
+        const coordinador = await prisma.coordinador.findFirst({ where: { userId } });
+        if (!coordinador || coordinador.remiseriaId !== existingChofer.remiseriaId) {
+          return res.status(403).json({
+            success: false,
+            message: 'No tenés permisos para modificar choferes de otra remisería',
+          });
+        }
+      }
+
+      const vehiculoIdFinal = vehiculoId ? String(vehiculoId).trim() : null;
+      if (vehiculoIdFinal) {
+        const vehiculo = await prisma.vehiculo.findUnique({ where: { id: vehiculoIdFinal } });
+        if (!vehiculo) {
+          return res.status(400).json({
+            success: false,
+            message: 'Vehículo no encontrado',
+          });
+        }
+        if (vehiculo.remiseriaId !== existingChofer.remiseriaId) {
+          return res.status(403).json({
+            success: false,
+            message: 'El vehículo no pertenece a la misma remisería que el chofer',
+          });
+        }
+      }
+
+      const chofer = await prisma.chofer.update({
+        where: { id },
+        data: { vehiculoId: vehiculoIdFinal },
+        include: {
+          remiseria: {
+            select: {
+              id: true,
+              nombreFantasia: true,
+              direccion: true,
+              latitud: true,
+              longitud: true,
+            },
+          },
+          vehiculo: {
+            select: {
+              id: true,
+              patente: true,
+              marca: true,
+              modelo: true,
+              color: true,
+            },
+          },
+        },
+      });
+
+      try {
+        const { invalidarChoferCache } = await import('../lib/socket');
+        invalidarChoferCache(chofer.id);
+      } catch {}
+
+      if (req.user) {
+        await prisma.appUsage.create({
+          data: {
+            userId: req.user.id,
+            userEmail: req.user.email,
+            action: 'ASSIGN_VEHICULO_CHOFER',
+            details: JSON.stringify({
+              choferId: chofer.id,
+              nombre: `${chofer.nombre} ${chofer.apellido}`,
+              vehiculoId: vehiculoIdFinal,
+              patente: chofer.vehiculo?.patente || null,
+              rolOperador: rol,
+            }),
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent') || null,
+          },
+        });
+      }
+
+      const resumenDocumentacion = await emitirAlertaDocumentacionSiCorresponde(chofer.id, chofer.remiseriaId);
+
+      return res.json({
+        success: true,
+        data: chofer,
+        resumenDocumentacion,
+        alertasVencimiento: resumenDocumentacion?.alertas || [],
+        message: vehiculoIdFinal
+          ? `Vehículo ${chofer.vehiculo?.patente || ''} asignado a ${chofer.nombre} ${chofer.apellido}`
+          : `Vehículo desasignado de ${chofer.nombre} ${chofer.apellido}`,
+      });
+    } catch (error) {
+      console.error('Error asignando vehículo a chofer:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error interno del servidor',
+      });
+    }
+  },
+
   // Baja lógica del chofer
   async delete(req: AuthenticatedRequest, res: Response) {
     try {
@@ -1052,6 +1182,7 @@ export const choferController = {
         where: { id: choferId },
         data: {
           isOnline,
+          rechazosConsecutivos: 0,
           // Sistema de Tablas: al conectarse entra al final de la cola; al desconectarse sale de la cola
           enParadaVirtual: isOnline ? true : false,
           paradaVirtualIngreso: isOnline
@@ -1156,6 +1287,7 @@ export const choferController = {
           isOnline: true,
           enParadaVirtual: true,
           paradaVirtualIngreso: true,
+          rechazosConsecutivos: true,
           remiseriaId: true,
           vehiculoId: true,
           categoriaLicencia: true,
@@ -1396,10 +1528,15 @@ export const choferController = {
         const choferesConOfertaActiva = new Set<string>();
 
         for (const v of candidatosViajes) {
-          // Si fue asignado explícitamente a este chofer, mostrarlo directo
+          // Si fue asignado explícitamente a este chofer, mostrarlo directo (sin datos completos hasta aceptar)
           if (v.choferId === chofer.id) {
             viajesDisponibles.push({
-              ...v,
+              id: v.id,
+              estado: v.estado,
+              prioridad: v.prioridad,
+              fecha: v.fecha,
+              createdAt: v.createdAt,
+              esArt: Boolean(v.artEmpresaId),
               motivoOferta: 'ASIGNADO_DIRECTO',
               puestoTabla: puestoEnTabla || 1,
             });
@@ -1521,10 +1658,16 @@ export const choferController = {
             }
           }
 
-          // Solo notificar si ESTE chofer es el destinatario actual según la Tabla o Cercanía
+          // Solo notificar si ESTE chofer es el destinatario actual según la Tabla o Cercanía.
+          // Por privacidad y equidad, no se envían origen, destino, tarifa ni pasajero antes de aceptar.
           if (state.choferOfertadoId === chofer.id) {
             viajesDisponibles.push({
-              ...v,
+              id: v.id,
+              estado: v.estado,
+              prioridad: v.prioridad,
+              fecha: v.fecha,
+              createdAt: v.createdAt,
+              esArt: Boolean(v.artEmpresaId),
               motivoOferta: state.motivoOferta,
               puestoTabla: state.puestoTabla,
               distanciaOfertaMetros: state.distanciaMetros,
@@ -1895,6 +2038,7 @@ export const choferController = {
         data: {
           enParadaVirtual: false,
           paradaVirtualIngreso: null,
+          rechazosConsecutivos: 0,
         },
       });
 
@@ -2030,6 +2174,51 @@ export const choferController = {
         }
       }
 
+      // Control de rechazos consecutivos: al 2do rechazo seguido, sanción al último puesto de la Tabla
+      let sancionAplicada = false;
+      let rechazosConsecutivosActual = 0;
+
+      if (choferId) {
+        const choferActual = await prisma.chofer.findUnique({
+          where: { id: choferId },
+          select: { id: true, rechazosConsecutivos: true, remiseriaId: true, isOnline: true },
+        });
+
+        if (choferActual) {
+          const nuevoConteo = (choferActual.rechazosConsecutivos || 0) + 1;
+          if (nuevoConteo >= 2) {
+            sancionAplicada = true;
+            rechazosConsecutivosActual = 0;
+            await prisma.chofer.update({
+              where: { id: choferId },
+              data: {
+                rechazosConsecutivos: 0,
+                enParadaVirtual: choferActual.isOnline ? true : false,
+                paradaVirtualIngreso: choferActual.isOnline ? new Date() : null,
+              },
+            });
+
+            try {
+              const { getIO, invalidarChoferCache } = await import('../lib/socket');
+              invalidarChoferCache(choferId);
+              const io = getIO();
+              if (io && choferActual.remiseriaId) {
+                io.to(choferActual.remiseriaId).emit('parada_virtual_actualizada', {
+                  choferId,
+                  accion: 'SANCION_ULTIMO_LUGAR',
+                });
+              }
+            } catch {}
+          } else {
+            rechazosConsecutivosActual = nuevoConteo;
+            await prisma.chofer.update({
+              where: { id: choferId },
+              data: { rechazosConsecutivos: nuevoConteo },
+            });
+          }
+        }
+      }
+
       // Si el viaje estaba asignado a este chofer pero aún estaba PENDIENTE, liberarlo
       if (viaje.estado === 'PENDIENTE') {
         const viajeLiberado = await prisma.viaje.update({
@@ -2051,7 +2240,10 @@ export const choferController = {
             io.to(viaje.remiseriaId).emit('viaje_rechazado_por_chofer', {
               viajeId: viaje.id,
               choferId,
-              mensaje: `El móvil asignado rechazó el viaje. Ha vuelto a la cola sin asignar.`
+              sancionAplicada,
+              mensaje: sancionAplicada
+                ? `El móvil rechazó 2 viajes seguidos y fue enviado al último lugar de la tabla.`
+                : `El móvil asignado rechazó el viaje. Ha vuelto a la cola sin asignar.`
             });
             io.to(viaje.remiseriaId).emit('viaje_estado_actualizado', {
               viajeId: viaje.id,
@@ -2064,7 +2256,14 @@ export const choferController = {
         }
       }
 
-      res.json({ success: true, message: 'Viaje rechazado correctamente' });
+      res.json({
+        success: true,
+        sancionAplicada,
+        rechazosConsecutivos: rechazosConsecutivosActual,
+        message: sancionAplicada
+          ? 'Sanción aplicada: por rechazar 2 viajes seguidos fuiste enviado al último lugar de la lista.'
+          : 'Viaje rechazado (1/2). Atención: si rechazás el próximo viaje pasarás al último lugar de la lista.',
+      });
     } catch (error) {
       console.error('Error al rechazar viaje:', error);
       res.status(500).json({ success: false, message: 'Error interno del servidor' });
@@ -2075,7 +2274,7 @@ export const choferController = {
   async actualizarEstadoViaje(req: AuthenticatedRequest, res: Response) {
     try {
       const { viajeId } = req.params;
-      const { estado, distanciaKmConPasajero, distanciaKmSinPasajero, metodoPago } = req.body;
+      const { estado, distanciaKmConPasajero, distanciaKmSinPasajero, metodoPago, destinoTransferencia } = req.body;
 
       const estadosValidos = ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO', 'COMPLETADO', 'CANCELADO'];
       if (!estado || !estadosValidos.includes(estado)) {
@@ -2127,8 +2326,16 @@ export const choferController = {
       if (distSin !== undefined && !isNaN(distSin)) {
         updateData.distanciaKmSinPasajero = distSin;
       }
-      if (metodoPago && ['EFECTIVO', 'TRANSFERENCIA'].includes(metodoPago)) {
+      if (metodoPago && ['EFECTIVO', 'TRANSFERENCIA', 'CUENTA_CORRIENTE'].includes(metodoPago)) {
         updateData.metodoPago = metodoPago;
+      }
+      const metodoPagoEfectivo = updateData.metodoPago || viaje.metodoPago;
+      if (metodoPagoEfectivo === 'TRANSFERENCIA') {
+        if (destinoTransferencia && ['CUENTA_PROPIA', 'CUENTA_AGENCIA'].includes(destinoTransferencia)) {
+          updateData.destinoTransferencia = destinoTransferencia;
+        }
+      } else if (metodoPago && metodoPago !== 'TRANSFERENCIA') {
+        updateData.destinoTransferencia = null;
       }
 
       // Peajes abonados durante el viaje reportados al finalizar
@@ -3162,7 +3369,7 @@ export const choferController = {
   async finalizarTurno(req: AuthenticatedRequest, res: Response) {
     try {
       let choferId = req.user?.chofer?.id || req.body?.choferId;
-      const { odometroFin, observaciones } = req.body;
+      const { odometroFin, observaciones, gastoCombustible, otroGasto } = req.body || {};
 
       if (!choferId) {
         const fallbackChofer = await prisma.chofer.findFirst({
@@ -3178,11 +3385,64 @@ export const choferController = {
         });
       }
 
+      const choferInfo = await prisma.chofer.findUnique({
+        where: { id: choferId },
+        include: { vehiculo: true },
+      });
+
+      const ahoraCierre = new Date();
+
+      // Registrar gastos olvidados ingresados al cerrar turno (combustible/GNC y/u otros gastos)
+      const gastosACrear: Array<{
+        choferId: string;
+        vehiculoId: string | null;
+        tipo: any;
+        subtipoCombustible?: any;
+        monto: number;
+        fecha: Date;
+        descripcion: string | null;
+      }> = [];
+
+      if (gastoCombustible && Number(gastoCombustible.monto) > 0) {
+        const subtipo =
+          gastoCombustible.subtipoCombustible === 'GNC' ? 'GNC' : 'NAFTA_GASOIL';
+        gastosACrear.push({
+          choferId,
+          vehiculoId: choferInfo?.vehiculoId || null,
+          tipo: 'COMBUSTIBLE',
+          subtipoCombustible: subtipo,
+          monto: parseFloat(String(gastoCombustible.monto)),
+          fecha: ahoraCierre,
+          descripcion:
+            (gastoCombustible.descripcion && String(gastoCombustible.descripcion).trim()) ||
+            `Combustible (${subtipo === 'GNC' ? 'GNC' : 'Nafta/Gasoil'}) cargado al cierre de turno`,
+        });
+      }
+
+      if (otroGasto && Number(otroGasto.monto) > 0) {
+        const tiposValidos = ['REPARACION', 'MANTENIMIENTO', 'PEAJE', 'LAVADO', 'OTRO'];
+        const tipoElegido = tiposValidos.includes(otroGasto.tipo) ? otroGasto.tipo : 'OTRO';
+        gastosACrear.push({
+          choferId,
+          vehiculoId: choferInfo?.vehiculoId || null,
+          tipo: tipoElegido,
+          monto: parseFloat(String(otroGasto.monto)),
+          fecha: ahoraCierre,
+          descripcion:
+            (otroGasto.descripcion && String(otroGasto.descripcion).trim()) ||
+            'Gasto cargado al cierre de turno',
+        });
+      }
+
+      if (gastosACrear.length > 0) {
+        await prisma.gastoChofer.createMany({ data: gastosACrear });
+      }
+
       const turnosActivos = await prisma.turnoChofer.findMany({
         where: { choferId, activo: true },
       });
 
-      const odoVal = odometroFin !== undefined ? parseFloat(odometroFin) : null;
+      const odoVal = odometroFin !== undefined && odometroFin !== null && odometroFin !== '' ? parseFloat(odometroFin) : null;
       let ultimoTurnoId: string | undefined = undefined;
 
       for (const t of turnosActivos) {
@@ -3191,25 +3451,72 @@ export const choferController = {
           where: { id: t.id },
           data: {
             activo: false,
-            fechaFin: new Date(),
+            fechaFin: ahoraCierre,
             odometroFin: odoVal !== null && !isNaN(odoVal) ? odoVal : null,
             observaciones: observaciones || t.observaciones,
           },
         });
       }
 
-      // Desconectar al chofer y quitarlo de parada virtual
+      // Desconectar al chofer, quitarlo de parada virtual y resetear rechazos consecutivos
       await prisma.chofer.update({
         where: { id: choferId },
         data: {
           isOnline: false,
           enParadaVirtual: false,
           paradaVirtualIngreso: null,
+          rechazosConsecutivos: 0,
         },
       });
 
+      choferHeartbeatMap.delete(choferId);
+      try {
+        const { invalidarChoferCache } = await import('../lib/socket');
+        invalidarChoferCache(choferId);
+      } catch {}
+
       // Calcular Arqueo de Cierre del Turno finalizado
       const resumenCierre = await choferController.calcularArqueoInterno(choferId, ultimoTurnoId);
+
+      // Si el chofer NO es propietario, enviar email automático al dueño del vehículo con el detalle del turno
+      if (resumenCierre && choferInfo && !choferInfo.esPropietario) {
+        const vehiculoTurno = resumenCierre.vehiculo || choferInfo.vehiculo;
+        const emailPropietario = (vehiculoTurno as any)?.propietarioEmail;
+        if (emailPropietario) {
+          import('../lib/mailer')
+            .then(({ sendCierreTurnoPropietarioEmail }) =>
+              sendCierreTurnoPropietarioEmail(emailPropietario, {
+                propietarioNombre: (vehiculoTurno as any)?.propietario || 'Propietario',
+                choferNombre: `${choferInfo.nombre} ${choferInfo.apellido}`.trim(),
+                numeroChofer: choferInfo.numeroChofer,
+                vehiculoPatente: vehiculoTurno?.patente || 'Sin patente',
+                vehiculoModelo: `${vehiculoTurno?.marca || ''} ${vehiculoTurno?.modelo || ''}`.trim() || 'Vehículo',
+                fechaInicio: resumenCierre.turno.fechaInicio,
+                fechaFin: resumenCierre.turno.fechaFin || ahoraCierre,
+                totalViajes: resumenCierre.viajes.total,
+                kmTotalConectado: resumenCierre.turno.kmTotalConectado,
+                kmConPasajero: resumenCierre.turno.kmConPasajero,
+                bruto: resumenCierre.viajes.totalBruto,
+                comisionChofer30: resumenCierre.liquidacion.comisionChofer,
+                comisionAgencia20: resumenCierre.liquidacion.comisionAgencia20,
+                comisionAgencia15: resumenCierre.liquidacion.comisionAgencia15,
+                combustible: resumenCierre.gastos.totalCombustible,
+                otrosGastos: resumenCierre.gastos.totalOtrosGastos,
+                netoAuto: resumenCierre.liquidacion.netoAuto,
+                totalEfectivo: resumenCierre.viajes.totalEfectivo,
+                totalTransferenciaAgencia: resumenCierre.viajes.totalTransferenciaAgencia,
+                totalTransferenciaPropia: resumenCierre.viajes.totalTransferenciaPropia,
+                totalCuentaCorriente: resumenCierre.viajes.totalCuentaCorriente,
+                gastosDetalle: resumenCierre.gastos.items,
+              })
+            )
+            .catch((mailErr) => console.warn('Aviso envío email cierre turno propietario:', mailErr));
+        } else {
+          console.info(
+            `[CierreTurno] Chofer no propietario ${choferInfo.nombre} cerró turno con ${vehiculoTurno?.patente || 'sin vehículo'}; el vehículo aún no tiene propietarioEmail configurado.`
+          );
+        }
+      }
 
       res.json({
         success: true,
@@ -4282,20 +4589,49 @@ export const choferController = {
 
     let totalEfectivo = 0;
     let totalTransferencia = 0;
+    let totalTransferenciaAgencia = 0;
+    let totalTransferenciaPropia = 0;
+    let totalCuentaCorriente = 0;
     let totalOtros = 0;
+
+    let totalCortaDistancia = 0;
+    let totalLargaDistancia = 0;
+    let comisionAgencia20 = 0;
+    let comisionAgencia15 = 0;
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
 
     for (const v of viajes) {
       const monto = Number(v.precio || 0);
+      const km = Number(v.distanciaKmConPasajero || 0);
+      if (km >= 20) {
+        totalLargaDistancia += monto;
+        comisionAgencia15 += (monto * 15) / 100;
+      } else {
+        totalCortaDistancia += monto;
+        comisionAgencia20 += (monto * 20) / 100;
+      }
+
       if (v.metodoPago === 'EFECTIVO') {
         totalEfectivo += monto;
       } else if (v.metodoPago === 'TRANSFERENCIA') {
         totalTransferencia += monto;
+        if (v.destinoTransferencia === 'CUENTA_PROPIA') {
+          totalTransferenciaPropia += monto;
+        } else {
+          totalTransferenciaAgencia += monto;
+        }
+      } else if (v.metodoPago === 'CUENTA_CORRIENTE') {
+        totalCuentaCorriente += monto;
       } else {
         totalOtros += monto;
       }
     }
 
-    const totalBruto = totalEfectivo + totalTransferencia + totalOtros;
+    const totalBruto = round2(totalEfectivo + totalTransferencia + totalCuentaCorriente + totalOtros);
+    comisionAgencia20 = round2(comisionAgencia20);
+    comisionAgencia15 = round2(comisionAgencia15);
+    const comisionRemiseria = round2(comisionAgencia20 + comisionAgencia15);
 
     const gastos = await prisma.gastoChofer.findMany({
       where: {
@@ -4305,14 +4641,49 @@ export const choferController = {
       orderBy: { fecha: 'desc' },
     });
 
-    const totalGastos = gastos.reduce((sum, g) => sum + Number(g.monto || 0), 0);
-    const comisionPorcentaje = Number(chofer.comisionPorcentaje || chofer.remiseria?.comisionPorcentaje || 20);
-    const comisionRemiseria = (totalBruto * comisionPorcentaje) / 100;
-    const gananciaNetaChofer = totalBruto - comisionRemiseria - totalGastos;
-    const saldoEfectivoEnMano = totalEfectivo - totalGastos;
+    const totalCombustible = round2(
+      gastos.filter((g) => g.tipo === 'COMBUSTIBLE').reduce((sum, g) => sum + Number(g.monto || 0), 0)
+    );
+    const totalOtrosGastos = round2(
+      gastos.filter((g) => g.tipo !== 'COMBUSTIBLE').reduce((sum, g) => sum + Number(g.monto || 0), 0)
+    );
+    const totalGastos = round2(totalCombustible + totalOtrosGastos);
+
+    const comisionChoferPct = chofer.esPropietario ? 0 : 30;
+    const comisionChofer = chofer.esPropietario
+      ? round2(totalBruto - comisionRemiseria)
+      : round2((totalBruto * 30) / 100);
+
+    const netoAuto = chofer.esPropietario
+      ? round2(totalBruto - comisionRemiseria - totalCombustible - totalOtrosGastos)
+      : round2(totalBruto - comisionChofer - comisionAgencia20 - comisionAgencia15 - totalCombustible - totalOtrosGastos);
+
+    const gananciaNetaChofer = chofer.esPropietario
+      ? netoAuto
+      : comisionChofer;
+    const saldoEfectivoEnMano = round2(totalEfectivo + totalTransferenciaPropia - totalGastos);
     const aRendirCentral = comisionRemiseria;
+    const vehiculoRef = turno?.vehiculo || chofer.vehiculo || null;
 
     return {
+      chofer: {
+        id: chofer.id,
+        nombre: chofer.nombre,
+        apellido: chofer.apellido,
+        numeroChofer: chofer.numeroChofer,
+        esPropietario: chofer.esPropietario,
+        esFranquero: chofer.esFranquero,
+      },
+      vehiculo: vehiculoRef
+        ? {
+            id: vehiculoRef.id,
+            patente: vehiculoRef.patente,
+            marca: vehiculoRef.marca,
+            modelo: vehiculoRef.modelo,
+            propietario: vehiculoRef.propietario,
+            propietarioEmail: vehiculoRef.propietarioEmail,
+          }
+        : null,
       turno: {
         id: turno?.id || 'sin-turno',
         activo: turno?.activo ?? false,
@@ -4326,9 +4697,14 @@ export const choferController = {
       },
       viajes: {
         total: viajes.length,
-        totalEfectivo,
-        totalTransferencia,
-        totalOtros,
+        totalEfectivo: round2(totalEfectivo),
+        totalTransferencia: round2(totalTransferencia),
+        totalTransferenciaAgencia: round2(totalTransferenciaAgencia),
+        totalTransferenciaPropia: round2(totalTransferenciaPropia),
+        totalCuentaCorriente: round2(totalCuentaCorriente),
+        totalOtros: round2(totalOtros),
+        totalCortaDistancia: round2(totalCortaDistancia),
+        totalLargaDistancia: round2(totalLargaDistancia),
         totalBruto,
         lista: viajes.map((v) => ({
           id: v.id,
@@ -4336,23 +4712,33 @@ export const choferController = {
           destino: v.destino,
           precio: Number(v.precio),
           metodoPago: v.metodoPago,
+          destinoTransferencia: v.destinoTransferencia,
+          distanciaKmConPasajero: v.distanciaKmConPasajero,
           fecha: v.fecha,
           esViajeCalle: v.esViajeCalle,
         })),
       },
       gastos: {
         total: totalGastos,
+        totalCombustible,
+        totalOtrosGastos,
         items: gastos.map((g) => ({
           id: g.id,
           tipo: g.tipo,
+          subtipoCombustible: g.subtipoCombustible,
           monto: Number(g.monto),
           descripcion: g.descripcion,
           fecha: g.fecha,
         })),
       },
       liquidacion: {
-        comisionPorcentaje,
+        esPropietario: chofer.esPropietario,
+        comisionPorcentaje: comisionChoferPct,
+        comisionChofer,
+        comisionAgencia20,
+        comisionAgencia15,
         comisionRemiseria,
+        netoAuto,
         gananciaNetaChofer,
         saldoEfectivoEnMano,
         aRendirCentral,

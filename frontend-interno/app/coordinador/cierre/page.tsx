@@ -133,6 +133,8 @@ export default function CierreCajaPage() {
         totalRecaudado: 0,
         totalEfectivo: 0,
         totalTransferencia: 0,
+        totalTransferenciaAgencia: 0,
+        totalTransferenciaPropia: 0,
         totalCuentaCorriente: 0,
         totalCortaDistancia: 0,
         totalLargaDistancia: 0,
@@ -151,6 +153,8 @@ export default function CierreCajaPage() {
     const totalRecaudado = resumen.totalRecaudado || 0;
     const totalEfectivo = resumen.totalEfectivo ?? 0;
     const totalTransferencia = resumen.totalTransferencia ?? 0;
+    const totalTransferenciaAgencia = resumen.totalTransferenciaAgencia ?? totalTransferencia;
+    const totalTransferenciaPropia = resumen.totalTransferenciaPropia ?? 0;
     const totalCuentaCorriente = resumen.totalCuentaCorriente ?? 0;
     const comisionChofer = resumen.comisionChofer || 0;
     const comisionAgencia = resumen.comisionAgencia || 0;
@@ -160,7 +164,7 @@ export default function CierreCajaPage() {
       ? 0
       : Math.max(0, (resumen.gananciaPropietario || 0) - combustibleVal);
 
-    const saldoNeto = Math.round((totalEfectivo - comisionChofer - combustibleVal) * 100) / 100;
+    const saldoNeto = Math.round((totalEfectivo + totalTransferenciaPropia - comisionChofer - combustibleVal) * 100) / 100;
     const montoARendirChofer = saldoNeto > 0 ? saldoNeto : 0;
     const saldoAFavorChofer = saldoNeto < 0 ? Math.round(Math.abs(saldoNeto) * 100) / 100 : 0;
 
@@ -168,6 +172,8 @@ export default function CierreCajaPage() {
       totalRecaudado,
       totalEfectivo,
       totalTransferencia,
+      totalTransferenciaAgencia,
+      totalTransferenciaPropia,
       totalCuentaCorriente,
       totalCortaDistancia: resumen.totalCortaDistancia ?? 0,
       totalLargaDistancia: resumen.totalLargaDistancia ?? 0,
@@ -768,8 +774,11 @@ export default function CierreCajaPage() {
                             : 'Balance en Cero'}
                         </span>
                         <p className="text-xs opacity-75 mt-0.5">
-                          Efectivo cobrado (${calculos.totalEfectivo.toLocaleString('es-AR')}) − Parte chofer ($
-                          {calculos.comisionChofer.toLocaleString('es-AR')})
+                          Efectivo (${calculos.totalEfectivo.toLocaleString('es-AR')})
+                          {calculos.totalTransferenciaPropia > 0
+                            ? ` + Transf. Propia ($${calculos.totalTransferenciaPropia.toLocaleString('es-AR')})`
+                            : ''}
+                          {' '}− Parte chofer (${calculos.comisionChofer.toLocaleString('es-AR')})
                           {!pendingData.chofer.esPropietario && (parseFloat(combustible) || 0) > 0
                             ? ` − Combustible ($${(parseFloat(combustible) || 0).toLocaleString('es-AR')})`
                             : ''}
@@ -793,7 +802,8 @@ export default function CierreCajaPage() {
                       </span>
                       <div className="text-[10px] text-slate-500 mt-1.5 space-y-0.5 font-semibold">
                         <div className="text-emerald-700">Efec: ${calculos.totalEfectivo.toLocaleString('es-AR')}</div>
-                        <div className="text-blue-700">Transf: ${calculos.totalTransferencia.toLocaleString('es-AR')}</div>
+                        <div className="text-blue-700">Transf. Agencia: ${calculos.totalTransferenciaAgencia.toLocaleString('es-AR')}</div>
+                        <div className="text-indigo-700">Transf. Propia: ${calculos.totalTransferenciaPropia.toLocaleString('es-AR')}</div>
                         <div className="text-purple-700">Cta Cte: ${calculos.totalCuentaCorriente.toLocaleString('es-AR')}</div>
                       </div>
                     </div>

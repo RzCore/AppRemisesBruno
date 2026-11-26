@@ -188,6 +188,27 @@ export const duenioClientesController = {
         data: dataToUpdate
       });
 
+      // Notificar en tiempo real a la app del cliente para que aparezca/actualice Cuenta Corriente sin reloguear
+      try {
+        const { getIO } = await import('../lib/socket');
+        const io = getIO();
+        const remId = actualizado.remiseriaId || (await getDuenioRemiseriaId(req.user?.id));
+        if (io && remId) {
+          io.to(remId).emit('cliente_cuenta_corriente_actualizada', {
+            clienteId: actualizado.id,
+            cuentaCorrienteHabilitada: actualizado.cuentaCorrienteHabilitada,
+            limiteCuentaCorriente: actualizado.limiteCuentaCorriente,
+            saldoCuentaCorriente: actualizado.saldoCuentaCorriente,
+            tipoTarifa: actualizado.tipoTarifa,
+            tarifaValorKm: actualizado.tarifaValorKm,
+            tarifaPrecioTramo: actualizado.tarifaPrecioTramo,
+            tarifaValorHoraEspera: actualizado.tarifaValorHoraEspera
+          });
+        }
+      } catch (wsErr) {
+        console.warn('Aviso socket toggleCuentaCorriente:', wsErr);
+      }
+
       return res.json({
         success: true,
         data: actualizado,

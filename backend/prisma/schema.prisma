@@ -254,6 +254,7 @@ model Chofer {
   // Parada Virtual de Base
   enParadaVirtual       Boolean   @default(false)
   paradaVirtualIngreso  DateTime?
+  rechazosConsecutivos  Int       @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -311,6 +312,7 @@ model Vehiculo {
   capacidad       Int
   estado          VehiculoEstado @default(ACTIVO)
   propietario     String
+  propietarioEmail String?
   vtoVtv          DateTime?
   vtoMatafuego    DateTime?
   vtoSeguro       DateTime?
@@ -364,6 +366,7 @@ model Viaje {
   distanciaKmConPasajero Float? @default(0.0)
   distanciaKmSinPasajero Float? @default(0.0)
   metodoPago  MetodoPago? @default(EFECTIVO)
+  destinoTransferencia String? // 'CUENTA_PROPIA' | 'CUENTA_AGENCIA'
   pagaCon     Decimal? @db.Decimal(10, 2)
   vueltoEstimado Decimal? @db.Decimal(10, 2)
 
@@ -677,6 +680,8 @@ model Liquidacion {
   // Desglose de viajes por medio de pago
   totalEfectivoViajes        Float     @default(0.0)
   totalTransferenciaViajes   Float     @default(0.0)
+  totalTransferenciaAgencia  Float     @default(0.0)
+  totalTransferenciaPropia   Float     @default(0.0)
   totalCuentaCorrienteViajes Float     @default(0.0)
 
   // Saldo neto de rendición y saldo a favor del chofer
