@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { artEmpresaController } from '../controllers/artEmpresaController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 import { body } from 'express-validator';
 
 const router = Router();
 
-// Todas las rutas requieren token
+// Todas las rutas requieren token y rol interno (Dueño, Coordinador o Admin)
 router.use(authenticateToken);
+router.use(requireRoles('DUENIO', 'COORDINADOR', 'ADMIN'));
 
 // Validaciones
 const createArtValidation = [

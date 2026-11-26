@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { reportesController } from '../controllers/reportesController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 const router = Router();
 
-// Aplicar middleware de autenticación a todas las rutas de reportes
+// Aplicar middleware de autenticación y rol a todas las rutas de reportes
 router.use(authenticateToken);
+router.use(requireRoles('DUENIO', 'COORDINADOR', 'ADMIN'));
 
 // Rutas de reportes para el Rol de DUEÑO
 router.get('/mis-remiserias', reportesController.getMisRemiserias);

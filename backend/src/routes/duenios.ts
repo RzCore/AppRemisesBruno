@@ -7,7 +7,7 @@ import {
   toggleDuenioStatus 
 } from '../controllers/duenioController';
 import { duenioClientesController } from '../controllers/duenioClientesController';
-import { authenticateToken, requireAdmin } from '../middleware/auth';
+import { authenticateToken, requireAdmin, requireRoles } from '../middleware/auth';
 import { body } from 'express-validator';
 
 const router = Router();
@@ -25,12 +25,12 @@ const updateDuenioValidation = [
   body('telefono').optional().notEmpty().withMessage('El teléfono no puede estar vacío')
 ];
 
-// Rutas para gestión de Clientes y Cuenta Corriente (Dueño)
-router.get('/clientes/listado', authenticateToken, duenioClientesController.getClientes);
-router.post('/clientes/empresa', authenticateToken, duenioClientesController.crearClienteEmpresa);
-router.patch('/clientes/:id/cuenta-corriente', authenticateToken, duenioClientesController.toggleCuentaCorriente);
-router.get('/clientes/:id/viajes', authenticateToken, duenioClientesController.getViajesCliente);
-router.post('/clientes/:id/pago', authenticateToken, duenioClientesController.registrarPago);
+// Rutas para gestión de Clientes y Cuenta Corriente (Dueño / Admin)
+router.get('/clientes/listado', authenticateToken, requireRoles('DUENIO', 'ADMIN'), duenioClientesController.getClientes);
+router.post('/clientes/empresa', authenticateToken, requireRoles('DUENIO', 'ADMIN'), duenioClientesController.crearClienteEmpresa);
+router.patch('/clientes/:id/cuenta-corriente', authenticateToken, requireRoles('DUENIO', 'ADMIN'), duenioClientesController.toggleCuentaCorriente);
+router.get('/clientes/:id/viajes', authenticateToken, requireRoles('DUENIO', 'ADMIN'), duenioClientesController.getViajesCliente);
+router.post('/clientes/:id/pago', authenticateToken, requireRoles('DUENIO', 'ADMIN'), duenioClientesController.registrarPago);
 
 // Rutas públicas (requieren autenticación)
 router.get('/', authenticateToken, getAllDuenios);

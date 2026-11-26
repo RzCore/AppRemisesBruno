@@ -316,65 +316,99 @@ export const duenioClientesController = {
         return res.status(400).json({ success: false, message: 'El importe del pago debe ser mayor a 0' });
       }
 
-      const cliente = await prisma.cliente.findUnique({
-        where: { id },
-        include: {
-          viajes: {
-            where: {
-              estado: 'COMPLETADO',
-              metodoPago: 'CUENTA_CORRIENTE'
+      // Transacción atómica + protección contra doble clic (mismo monto en los últimos 10 s)
+      const resultadoTx = await prisma.$transaction(async (tx) => {
+        const cliente = await tx.cliente.findUnique({
+          where: { id },
+          include: {
+            viajes: {
+              where: {
+                estado: 'COMPLETADO',
+                metodoPago: 'CUENTA_CORRIENTE'
+              },
+              select: { precio: true }
             },
-            select: { precio: true }
-          },
-          pagosCuentaCorriente: {
-            take: 1
+            pagosCuentaCorriente: {
+              take: 1,
+              orderBy: { fecha: 'desc' }
+            }
+          }
+        });
+
+        if (!cliente) {
+          return { errorStatus: 404, errorMessage: 'Cliente no encontrado' } as const;
+        }
+
+        const ultimoPago = cliente.pagosCuentaCorriente[0];
+        if (
+          ultimoPago &&
+          Math.abs(Number(ultimoPago.monto) - pagoMonto) < 0.01 &&
+          Date.now() - new Date(ultimoPago.fecha).getTime() < 10_000
+        ) {
+          return {
+            errorStatus: 409,
+            errorMessage: 'Ya se registró este mismo pago hace unos segundos (posible doble clic).'
+          } as const;
+        }
+
+        let saldoAnterior = Math.max(0, Number(cliente.saldoCuentaCorriente || 0));
+        // Auto-recuperación si nunca se inicializó saldoCuentaCorriente pero tiene viajes
+        if (saldoAnterior === 0 && cliente.pagosCuentaCorriente.length === 0) {
+          const totalCC = cliente.viajes.reduce((sum, v) => sum + Number(v.precio || 0), 0);
+          if (totalCC > 0) {
+            saldoAnterior = totalCC;
           }
         }
-      });
 
-      if (!cliente) {
-        return res.status(404).json({ success: false, message: 'Cliente no encontrado' });
-      }
-
-      let saldoAnterior = Math.max(0, Number(cliente.saldoCuentaCorriente || 0));
-      // Auto-recuperación si nunca se inicializó saldoCuentaCorriente pero tiene viajes
-      if (saldoAnterior === 0 && cliente.pagosCuentaCorriente.length === 0) {
-        const totalCC = cliente.viajes.reduce((sum, v) => sum + Number(v.precio || 0), 0);
-        if (totalCC > 0) {
-          saldoAnterior = totalCC;
+        if (saldoAnterior <= 0) {
+          return {
+            errorStatus: 400,
+            errorMessage: 'El cliente no tiene saldo adeudado en cuenta corriente'
+          } as const;
         }
-      }
 
-      if (saldoAnterior <= 0) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'El cliente no tiene saldo adeudado en cuenta corriente' 
-        });
-      }
+        const nuevoSaldo = Math.max(0, saldoAnterior - pagoMonto);
+        const esPagoTotal = nuevoSaldo === 0;
+        const esPagoParcial = !esPagoTotal;
 
-      // Descontar abono (permite pagar una parte o el total)
-      const nuevoSaldo = Math.max(0, saldoAnterior - pagoMonto);
-      const esPagoTotal = nuevoSaldo === 0;
-      const esPagoParcial = !esPagoTotal;
-
-      const [pagoRegistrado, clienteActualizado] = await prisma.$transaction([
-        prisma.pagoCuentaCorriente.create({
+        const pagoRegistrado = await tx.pagoCuentaCorriente.create({
           data: {
             clienteId: id,
             monto: pagoMonto,
             saldoAnterior,
             saldoRestante: nuevoSaldo,
             metodoPago: (metodoPago || 'EFECTIVO').toUpperCase(),
-            observaciones: observaciones?.trim() || (esPagoTotal ? 'Cancelación total de cuenta corriente' : 'Abono parcial de cuenta corriente')
+            observaciones:
+              observaciones?.trim() ||
+              (esPagoTotal ? 'Cancelación total de cuenta corriente' : 'Abono parcial de cuenta corriente')
           }
-        }),
-        prisma.cliente.update({
+        });
+
+        const clienteActualizado = await tx.cliente.update({
           where: { id },
           data: {
             saldoCuentaCorriente: nuevoSaldo
           }
-        })
-      ]);
+        });
+
+        return {
+          errorStatus: null,
+          pagoRegistrado,
+          clienteActualizado,
+          nuevoSaldo,
+          esPagoTotal,
+          esPagoParcial
+        } as const;
+      });
+
+      if (resultadoTx.errorStatus) {
+        return res.status(resultadoTx.errorStatus).json({
+          success: false,
+          message: resultadoTx.errorMessage
+        });
+      }
+
+      const { pagoRegistrado, clienteActualizado, nuevoSaldo, esPagoTotal, esPagoParcial } = resultadoTx;
 
       const mensaje = esPagoTotal
         ? `Pago total de $${pagoMonto.toLocaleString('es-AR')} registrado con éxito. La cuenta corriente quedó saldada.`

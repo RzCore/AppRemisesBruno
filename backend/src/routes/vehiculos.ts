@@ -1,6 +1,6 @@
 import express from 'express';
 import { vehiculoController } from '../controllers/vehiculoController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -17,15 +17,15 @@ router.get('/remiseria/:remiseriaId', vehiculoController.getByRemiseria);
 router.get('/:id', vehiculoController.getById);
 
 // Crear vehículo
-router.post('/', vehiculoController.create);
+router.post('/', requireRoles('DUENIO', 'COORDINADOR', 'ADMIN'), vehiculoController.create);
 
 // Actualizar vehículo
-router.put('/:id', vehiculoController.update);
+router.put('/:id', requireRoles('DUENIO', 'COORDINADOR', 'ADMIN'), vehiculoController.update);
 
 // Baja lógica del vehículo
-router.delete('/:id', vehiculoController.delete);
+router.delete('/:id', requireRoles('DUENIO', 'COORDINADOR', 'ADMIN'), vehiculoController.delete);
 
 // Cambiar estado del vehículo
-router.patch('/:id/status', vehiculoController.updateStatus);
+router.patch('/:id/status', requireRoles('DUENIO', 'COORDINADOR', 'ADMIN'), vehiculoController.updateStatus);
 
 export default router; 
