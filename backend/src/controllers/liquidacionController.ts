@@ -190,6 +190,7 @@ export const liquidacionController = {
             apellido: chofer.apellido,
             numeroChofer: chofer.numeroChofer,
             esPropietario: chofer.esPropietario,
+            esFranquero: chofer.esFranquero,
             comisionPorcentaje: chofer.comisionPorcentaje,
             comisionDuenioAuto: chofer.remiseria.comisionDuenioAuto
           },
@@ -485,7 +486,8 @@ export const liquidacionController = {
               nombre: true,
               apellido: true,
               numeroChofer: true,
-              esPropietario: true
+              esPropietario: true,
+              esFranquero: true
             }
           }
         },
@@ -575,6 +577,7 @@ export const liquidacionController = {
               apellido: true,
               numeroChofer: true,
               esPropietario: true,
+              esFranquero: true,
               vehiculo: {
                 select: {
                   id: true,

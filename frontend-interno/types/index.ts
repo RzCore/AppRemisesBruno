@@ -171,6 +171,7 @@ export interface Chofer {
   motivoRechazo?: string;
   observaciones?: string;
   esPropietario?: boolean;
+  esFranquero?: boolean;
   comisionPorcentaje?: number;
   fotoUrl?: string;
   createdAt: string;
@@ -197,6 +198,7 @@ export interface CreateChoferData {
   fotoUrl?: string;
   vehiculoId?: string;
   esPropietario?: boolean;
+  esFranquero?: boolean;
   comisionPorcentaje?: number;
 }
 
@@ -215,6 +217,7 @@ export interface UpdateChoferData {
   observaciones?: string;
   vehiculoId?: string;
   esPropietario?: boolean;
+  esFranquero?: boolean;
   comisionPorcentaje?: number;
   fotoUrl?: string;
 }

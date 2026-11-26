@@ -118,7 +118,7 @@ export const initSocket = (server: HttpServer): Server => {
                 });
 
                 cached = {
-                  nombre: `${choferActual.nombre} ${choferActual.apellido}`.trim(),
+                  nombre: `${choferActual.nombre} ${choferActual.apellido}${choferActual.esFranquero ? ' (Franquero)' : ''}`.trim(),
                   vId: choferActual.vehiculoId || undefined,
                   patente: choferActual.vehiculo?.patente || 'Auto Propio',
                   enParadaVirtual: Boolean(choferActual.enParadaVirtual),

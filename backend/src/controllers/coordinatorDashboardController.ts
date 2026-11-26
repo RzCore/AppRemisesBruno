@@ -1682,10 +1682,12 @@ export const coordinatorDashboardController = {
             where: { estado: 'ACTIVO' },
             select: {
               id: true,
+              numeroChofer: true,
               nombre: true,
               apellido: true,
               telefono: true,
-              isOnline: true
+              isOnline: true,
+              esFranquero: true
             }
           }
         }
@@ -1712,12 +1714,26 @@ export const coordinatorDashboardController = {
       const vehiculosEnViajeSet = new Set(viajesActivosFlota.map(v => v.vehiculoId).filter(Boolean));
 
       const vehiculosConEstado = vehiculos.map(v => {
-        const choferAsig = v.choferes && v.choferes[0];
-        const estaEnViaje = vehiculosEnViajeSet.has(v.id) || (choferAsig && choferesEnViajeSet.has(choferAsig.id));
+        // Priorizar el chofer que actualmente está operando este vehículo compartido:
+        // 1) En viaje activo, 2) Online ahora, 3) Titular (no franquero), 4) Primero disponible
+        const choferesOrdenados = [...(v.choferes || [])].sort((a, b) => {
+          const score = (c: typeof a) =>
+            (choferesEnViajeSet.has(c.id) ? 4 : 0) +
+            (c.isOnline ? 2 : 0) +
+            (!c.esFranquero ? 1 : 0);
+          return score(b) - score(a);
+        });
+        const choferAsig = choferesOrdenados[0];
+        const estaEnViaje =
+          vehiculosEnViajeSet.has(v.id) ||
+          choferesOrdenados.some(c => choferesEnViajeSet.has(c.id));
+        const algunChoferOnline = choferesOrdenados.some(c => c.isOnline);
         return {
           ...v,
+          choferes: choferesOrdenados,
+          choferActivo: choferAsig || null,
           enViaje: Boolean(estaEnViaje),
-          estadoOperativo: estaEnViaje ? 'en_viaje' : (choferAsig?.isOnline ? 'disponible' : 'fuera_servicio')
+          estadoOperativo: estaEnViaje ? 'en_viaje' : (algunChoferOnline ? 'disponible' : 'fuera_servicio')
         };
       });
 

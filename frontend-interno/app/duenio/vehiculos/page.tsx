@@ -253,7 +253,9 @@ export default function VehiculosPage() {
       vtoSeguro: vehiculo.vtoSeguro ? vehiculo.vtoSeguro.split('T')[0] : '',
       observaciones: vehiculo.observaciones || '',
       remiseriaId: vehiculo.remiseriaId,
-      choferId: vehiculo.choferes && vehiculo.choferes[0]?.id ? vehiculo.choferes[0].id : undefined
+      choferId:
+        vehiculo.choferes?.find((c) => !c.esFranquero)?.id ||
+        (vehiculo.choferes && vehiculo.choferes[0]?.id ? vehiculo.choferes[0].id : undefined)
     });
     setEditStep(1);
     setShowEditModal(true);
@@ -958,7 +960,7 @@ export default function VehiculosPage() {
                             <option value="">-- Seleccionar Chofer Registrado --</option>
                             {choferes.map((c) => (
                               <option key={c.id} value={c.id}>
-                                Móvil #{c.numeroChofer} - {c.nombre} {c.apellido} (Licencia hasta: {new Date(c.vtoLicencia).toLocaleDateString()})
+                                Móvil #{c.numeroChofer}{c.esFranquero ? ' (Franquero)' : ''} - {c.nombre} {c.apellido} (Licencia hasta: {new Date(c.vtoLicencia).toLocaleDateString()})
                               </option>
                             ))}
                           </select>
@@ -989,10 +991,32 @@ export default function VehiculosPage() {
                           <option value="">-- Sin chofer asignado por ahora --</option>
                           {choferes.map((c) => (
                             <option key={c.id} value={c.id}>
-                              Móvil #{c.numeroChofer} - {c.nombre} {c.apellido}
+                              Móvil #{c.numeroChofer}{c.esFranquero ? ' (Franquero)' : ''} - {c.nombre} {c.apellido}
                             </option>
                           ))}
                         </select>
+                        {isEdit && editingVehiculo?.choferes && editingVehiculo.choferes.length > 0 && (
+                          <div className="pt-1.5 border-t border-slate-200/70">
+                            <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Choferes vinculados actualmente a esta unidad ({editingVehiculo.choferes.length}):
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {editingVehiculo.choferes.map((ch) => (
+                                <span
+                                  key={ch.id}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                                    ch.esFranquero
+                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                      : 'bg-blue-50 text-blue-800 border-blue-200'
+                                  }`}
+                                >
+                                  #{ch.numeroChofer} {ch.nombre} {ch.apellido}
+                                  {ch.esFranquero ? ' (Franquero)' : ' (Titular)'}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 

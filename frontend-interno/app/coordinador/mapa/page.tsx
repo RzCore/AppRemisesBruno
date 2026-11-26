@@ -195,8 +195,11 @@ export default function MapaTiempoReal() {
 
       if (response.success && response.data && response.data.length > 0) {
         const mapped: Vehiculo[] = response.data.map(v => {
-          const chofer = v.choferes && v.choferes[0];
-          const isOnline = chofer?.isOnline;
+          const chofer =
+            (v as any).choferActivo ||
+            v.choferes?.find((c: any) => c.isOnline) ||
+            (v.choferes && v.choferes[0]);
+          const isOnline = v.choferes?.some((c: any) => c.isOnline) ?? chofer?.isOnline;
           const estadoOperativo = (v as any).estadoOperativo;
           const estado = estadoOperativo
             ? estadoOperativo
@@ -208,7 +211,9 @@ export default function MapaTiempoReal() {
           return {
             id: v.id,
             patente: v.patente || 'Móvil',
-            chofer: chofer ? `${chofer.nombre} ${chofer.apellido}` : (v.propietario || 'Sin Chofer'),
+            chofer: chofer
+              ? `${chofer.nombre} ${chofer.apellido}${chofer.esFranquero ? ' (Franquero)' : ''}`
+              : (v.propietario || 'Sin Chofer'),
             estado: estado as any,
             ubicacion: {
               lat: v.latitud || baseLat,
@@ -258,6 +263,7 @@ export default function MapaTiempoReal() {
           const updated = [...soloReales];
           updated[index] = {
             ...updated[index],
+            chofer: data.chofer || updated[index].chofer,
             ubicacion: data.ubicacion,
             direccionActual: data.direccionActual,
             ultimaActualizacion: data.ultimaActualizacion,

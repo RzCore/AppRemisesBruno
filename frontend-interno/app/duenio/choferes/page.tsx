@@ -78,6 +78,7 @@ export default function ChoferesPage() {
     remiseriaId: '',
     vehiculoId: '',
     esPropietario: false,
+    esFranquero: false,
     comisionPorcentaje: 30
   });
 
@@ -240,7 +241,8 @@ export default function ChoferesPage() {
           vtoLicencia: '',
           remiseriaId: '',
           vehiculoId: '',
-          esPropietario: false
+          esPropietario: false,
+          esFranquero: false
         });
         loadChoferes();
         loadVehiculos();
@@ -311,6 +313,7 @@ export default function ChoferesPage() {
         vtoLicencia: formData.vtoLicencia,
         vehiculoId: vehiculoIdFinal,
         esPropietario: formData.esPropietario,
+        esFranquero: Boolean(formData.esFranquero),
         comisionPorcentaje: formData.comisionPorcentaje
       };
 
@@ -336,7 +339,8 @@ export default function ChoferesPage() {
           vtoLicencia: '',
           remiseriaId: '',
           vehiculoId: '',
-          esPropietario: false
+          esPropietario: false,
+          esFranquero: false
         });
         loadChoferes();
         loadVehiculos();
@@ -479,6 +483,7 @@ export default function ChoferesPage() {
       remiseriaId: chofer.remiseriaId,
       vehiculoId: chofer.vehiculoId || '',
       esPropietario: chofer.esPropietario || false,
+      esFranquero: chofer.esFranquero || false,
       comisionPorcentaje: chofer.comisionPorcentaje !== undefined ? chofer.comisionPorcentaje : 30
     });
     resetNuevoVehiculo(chofer.esPropietario || false);
@@ -501,6 +506,7 @@ export default function ChoferesPage() {
       remiseriaId: remiserias[0]?.id || '',
       vehiculoId: '',
       esPropietario: false,
+      esFranquero: false,
       comisionPorcentaje: 30
     });
     resetNuevoVehiculo(false);
@@ -725,8 +731,13 @@ export default function ChoferesPage() {
                             {chofer.nombre.charAt(0).toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <h4 className="font-bold text-slate-900 text-base leading-tight truncate">
-                              {chofer.nombre} {chofer.apellido}
+                            <h4 className="font-bold text-slate-900 text-base leading-tight truncate flex items-center gap-1.5">
+                              <span className="truncate">{chofer.nombre} {chofer.apellido}</span>
+                              {chofer.esFranquero && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                                  Franquero
+                                </span>
+                              )}
                             </h4>
                             <p className="text-xs text-slate-500 mt-0.5">
                               #{chofer.numeroChofer} • DNI: {chofer.dni}
@@ -858,8 +869,13 @@ export default function ChoferesPage() {
                             {chofer.nombre.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <div className="text-sm font-semibold text-slate-900">
-                              {chofer.nombre} {chofer.apellido}
+                            <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                              <span>{chofer.nombre} {chofer.apellido}</span>
+                              {chofer.esFranquero && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                  Franquero
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-slate-500">
                               #{chofer.numeroChofer} • DNI: {chofer.dni}
@@ -1120,6 +1136,23 @@ export default function ChoferesPage() {
                         />
                       </div>
                     </div>
+
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl border border-amber-200 bg-amber-50/70 cursor-pointer hover:bg-amber-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(formData.esFranquero)}
+                        onChange={(e) => setFormData({ ...formData, esFranquero: e.target.checked })}
+                        className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-bold text-amber-950 block">
+                          Es chofer franquero / relevo
+                        </span>
+                        <span className="text-[11px] text-amber-800 block mt-0.5">
+                          Puede compartir el mismo N° de móvil y vehículo con otro chofer. Al conectarse, si el otro chofer quedó online sin viaje activo se desconecta automáticamente.
+                        </span>
+                      </div>
+                    </label>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
@@ -1577,9 +1610,17 @@ export default function ChoferesPage() {
                         <div className="text-slate-700">
                           Usuario (Email):{' '}
                           <strong className="font-mono text-slate-900">
-                            {formData.email?.trim()
-                              ? formData.email.trim().toLowerCase()
-                              : `${(formData.numeroChofer || '').toLowerCase()}@brunoremises.com.ar`}
+                            {(() => {
+                              if (formData.email?.trim()) return formData.email.trim().toLowerCase();
+                              const numSlug = (formData.numeroChofer || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                              const dniSlug = (formData.dni || '').replace(/\D/g, '');
+                              const numCompartido = choferes.some(
+                                (c) => c.numeroChofer.trim().toLowerCase() === (formData.numeroChofer || '').trim().toLowerCase()
+                              );
+                              return numCompartido && dniSlug
+                                ? `${numSlug}.${dniSlug}@brunoremises.com.ar`
+                                : `${numSlug}@brunoremises.com.ar`;
+                            })()}
                           </strong>
                         </div>
                         <div className="text-slate-700">

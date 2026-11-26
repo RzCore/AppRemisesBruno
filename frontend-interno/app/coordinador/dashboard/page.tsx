@@ -2010,7 +2010,7 @@ export default function CoordinadorDashboard() {
       })
       .map((c: any) => {
         if (c.vehiculo?.id) usedVehIds.add(c.vehiculo.id);
-        const numLabel = c.numeroChofer ? `Móvil #${c.numeroChofer} - ` : '';
+        const numLabel = c.numeroChofer ? `Móvil #${c.numeroChofer}${c.esFranquero ? ' (Franquero)' : ''} - ` : '';
         const vehLabel = c.vehiculo?.patente ? ` (${c.vehiculo.patente})` : '';
         return {
           value: `chofer:${c.id}`,

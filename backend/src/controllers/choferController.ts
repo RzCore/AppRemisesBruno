@@ -340,6 +340,7 @@ export const choferController = {
         remiseriaId, 
         vehiculoId,
         esPropietario,
+        esFranquero,
         comisionPorcentaje,
         fotoUrl
       } = req.body;
@@ -352,19 +353,7 @@ export const choferController = {
         });
       }
 
-      // Verificar si el número de chofer ya existe
-      const existingNumeroChofer = await prisma.chofer.findFirst({
-        where: {
-          numeroChofer,
-        },
-      });
-
-      if (existingNumeroChofer) {
-        return res.status(400).json({
-          success: false,
-          message: 'El número de chofer ya está registrado',
-        });
-      }
+      // Nota: numeroChofer puede compartirse entre chofer titular y franquero/relevo del mismo móvil.
 
       // Verificar si el DNI ya existe
       const existingChofer = await prisma.chofer.findFirst({
@@ -428,19 +417,33 @@ export const choferController = {
         }
       }
 
-      // El email del chofer será el provisto, o si no se provee, generaremos uno con el dominio oficial
-      const choferEmail = (email && email.trim()) ? email.trim().toLowerCase() : `${numeroChofer.toLowerCase()}@brunoremises.com.ar`;
-      
+      // El email del chofer será el provisto, o si no se provee, generaremos uno único con el dominio oficial
+      const emailProvisto = email && email.trim() ? email.trim().toLowerCase() : null;
+      const numSlug = String(numeroChofer).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'chofer';
+      const dniSlug = String(dni).replace(/\D/g, '') || Date.now().toString().slice(-6);
+      let choferEmail = emailProvisto || `${numSlug}@brunoremises.com.ar`;
+
       // Verificar si el email ya está en uso por otro usuario
       const existingUser = await prisma.user.findUnique({
         where: { email: choferEmail },
       });
 
       if (existingUser) {
-        return res.status(400).json({
-          success: false,
-          message: 'El email proporcionado ya está en uso por otro usuario. Si no proporcionó uno, el email autogenerado ya existe.',
+        if (emailProvisto) {
+          return res.status(400).json({
+            success: false,
+            message: 'El email proporcionado ya está en uso por otro usuario.',
+          });
+        }
+        // Si el email autogenerado ya existe (ej: otro chofer/titular comparte el mismo número de móvil),
+        // generar automáticamente uno único combinando móvil + DNI
+        choferEmail = `${numSlug}.${dniSlug}@brunoremises.com.ar`;
+        const existingAlt = await prisma.user.findUnique({
+          where: { email: choferEmail },
         });
+        if (existingAlt) {
+          choferEmail = `${numSlug}.${dniSlug}.${Date.now().toString().slice(-4)}@brunoremises.com.ar`;
+        }
       }
 
       // La contraseña por defecto será su DNI
@@ -470,6 +473,7 @@ export const choferController = {
             vtoLicencia: new Date(vtoLicencia),
             observaciones: observaciones || null,
             esPropietario: esPropietario || false,
+            esFranquero: Boolean(esFranquero),
             comisionPorcentaje: comisionPorcentaje !== undefined ? parseFloat(comisionPorcentaje) : 30.0,
             remiseriaId,
             vehiculoId: vehiculoId || null,
@@ -551,6 +555,7 @@ export const choferController = {
         estado, 
         vehiculoId,
         esPropietario,
+        esFranquero,
         comisionPorcentaje,
         fotoUrl
       } = req.body;
@@ -591,22 +596,7 @@ export const choferController = {
         }
       }
 
-      // Si se está cambiando el número de chofer, verificar que no exista
-      if (numeroChofer && numeroChofer !== existingChofer.numeroChofer) {
-        const numeroChoferExists = await prisma.chofer.findFirst({
-          where: {
-            numeroChofer,
-            id: { not: id },
-          },
-        });
-
-        if (numeroChoferExists) {
-          return res.status(400).json({
-            success: false,
-            message: 'El número de chofer ya está registrado',
-          });
-        }
-      }
+      // Nota: numeroChofer puede compartirse entre chofer titular y franquero/relevo del mismo móvil.
 
       // Si se está cambiando el DNI, verificar que no exista
       if (dni && dni !== existingChofer.dni) {
@@ -652,8 +642,9 @@ export const choferController = {
       if (vtoLicencia) updateData.vtoLicencia = new Date(vtoLicencia);
       if (observaciones !== undefined) updateData.observaciones = observaciones;
       if (estado !== undefined) updateData.estado = estado;
-      if (vehiculoId !== undefined) updateData.vehiculoId = vehiculoId;
+      if (vehiculoId !== undefined) updateData.vehiculoId = vehiculoId || null;
       if (esPropietario !== undefined) updateData.esPropietario = esPropietario;
+      if (esFranquero !== undefined) updateData.esFranquero = Boolean(esFranquero);
       if (comisionPorcentaje !== undefined) updateData.comisionPorcentaje = parseFloat(comisionPorcentaje);
       if (fotoUrl !== undefined) updateData.fotoUrl = fotoUrl;
 
@@ -931,6 +922,11 @@ export const choferController = {
 
       const choferActual = await prisma.chofer.findUnique({
         where: { id: choferId },
+        include: {
+          vehiculo: {
+            select: { id: true, patente: true },
+          },
+        },
       });
 
       if (!choferActual) {
@@ -952,6 +948,103 @@ export const choferController = {
           message: msg,
           estado: choferActual.estado,
         });
+      }
+
+      // Control de relevo / vehículo compartido (titular y franquero):
+      // Si este chofer se conecta con un vehículo asignado y otro chofer con el mismo vehículo
+      // sigue conectado, desconectarlo automáticamente (salvo que tenga un viaje activo en curso).
+      let choferesDesconectadosRelevo: Array<{ id: string; nombre: string; apellido: string }> = [];
+      if (isOnline && choferActual.vehiculoId) {
+        const otrosOnlineMismoAuto = await prisma.chofer.findMany({
+          where: {
+            vehiculoId: choferActual.vehiculoId,
+            id: { not: choferId },
+            isOnline: true,
+          },
+          select: {
+            id: true,
+            nombre: true,
+            apellido: true,
+          },
+        });
+
+        if (otrosOnlineMismoAuto.length > 0) {
+          const otrosIds = otrosOnlineMismoAuto.map((c) => c.id);
+          const viajeActivoOtro = await prisma.viaje.findFirst({
+            where: {
+              choferId: { in: otrosIds },
+              OR: [
+                { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+                { estado: 'ACEPTADO', artEmpresaId: null },
+              ],
+            },
+            include: {
+              chofer: { select: { nombre: true, apellido: true } },
+            },
+          });
+
+          if (viajeActivoOtro) {
+            const nombreOtro = viajeActivoOtro.chofer
+              ? `${viajeActivoOtro.chofer.nombre} ${viajeActivoOtro.chofer.apellido}`.trim()
+              : 'otro chofer';
+            return res.status(409).json({
+              success: false,
+              message: `El vehículo ${choferActual.vehiculo?.patente || ''} está actualmente en un viaje en curso con ${nombreOtro}. Esperá a que finalice para conectarte.`,
+            });
+          }
+
+          // Desconectar automáticamente a los otros choferes del mismo vehículo y cerrar sus turnos abiertos
+          await prisma.chofer.updateMany({
+            where: { id: { in: otrosIds } },
+            data: {
+              isOnline: false,
+              enParadaVirtual: false,
+              paradaVirtualIngreso: null,
+            },
+          });
+
+          await prisma.turnoChofer.updateMany({
+            where: {
+              choferId: { in: otrosIds },
+              activo: true,
+            },
+            data: {
+              activo: false,
+              fechaFin: new Date(),
+            },
+          });
+
+          for (const otro of otrosOnlineMismoAuto) {
+            choferHeartbeatMap.delete(otro.id);
+          }
+          choferesDesconectadosRelevo = otrosOnlineMismoAuto;
+
+          try {
+            const { getIO, invalidarChoferCache } = await import('../lib/socket');
+            for (const otro of otrosOnlineMismoAuto) {
+              invalidarChoferCache(otro.id);
+            }
+            const io = getIO();
+            if (io && choferActual.remiseriaId) {
+              io.to(choferActual.remiseriaId).emit('chofer_relevo_vehiculo', {
+                vehiculoId: choferActual.vehiculoId,
+                patente: choferActual.vehiculo?.patente || null,
+                nuevoChoferId: choferId,
+                nuevoChoferNombre: `${choferActual.nombre} ${choferActual.apellido}`.trim(),
+                choferesDesconectadosIds: otrosIds,
+              });
+            }
+          } catch {
+            // Socket puede no estar inicializado en tests/scripts
+          }
+        }
+      }
+
+      try {
+        const { invalidarChoferCache } = await import('../lib/socket');
+        invalidarChoferCache(choferId);
+      } catch {
+        // ignore
       }
 
       const updatedChofer = await prisma.chofer.update({
@@ -1002,13 +1095,21 @@ export const choferController = {
         }
       }
 
+      const relevoMsg =
+        choferesDesconectadosRelevo.length > 0
+          ? ` (Se desconectó automáticamente a ${choferesDesconectadosRelevo.map((c) => `${c.nombre} ${c.apellido}`.trim()).join(', ')} que tenía el mismo vehículo activo)`
+          : '';
+
       res.json({
         success: true,
         data: {
           ...updatedChofer,
           turnoActivo,
+          choferesDesconectadosRelevo,
         },
-        message: isOnline ? 'Chofer conectado exitosamente' : 'Chofer desconectado exitosamente',
+        message: isOnline
+          ? `Chofer conectado exitosamente${relevoMsg}`
+          : 'Chofer desconectado exitosamente',
       });
     } catch (error) {
       console.error('Error updating online status:', error);
@@ -1049,6 +1150,7 @@ export const choferController = {
           motivoRechazo: true,
           observaciones: true,
           esPropietario: true,
+          esFranquero: true,
           comisionPorcentaje: true,
           isOnline: true,
           enParadaVirtual: true,
@@ -3485,10 +3587,10 @@ export const choferController = {
         });
       }
 
-      // Generar número de chofer único
+      // Generar número de chofer sugerido
       const count = await prisma.chofer.count({ where: { remiseriaId } });
       let numeroChofer = `CH-${String(count + 1).padStart(3, '0')}`;
-      let existeNum = await prisma.chofer.findUnique({ where: { numeroChofer } });
+      let existeNum = await prisma.chofer.findFirst({ where: { remiseriaId, numeroChofer } });
       if (existeNum) {
         numeroChofer = `CH-${Date.now().toString().slice(-4)}`;
       }
@@ -3586,7 +3688,7 @@ export const choferController = {
   async aprobarChofer(req: AuthenticatedRequest, res: Response) {
     try {
       const { id } = req.params;
-      const { comisionPorcentaje, vehiculoId, numeroChofer } = req.body;
+      const { comisionPorcentaje, vehiculoId, numeroChofer, esFranquero } = req.body;
       const { rol, id: userId } = req.user!;
 
       const chofer = await prisma.chofer.findUnique({
@@ -3639,6 +3741,9 @@ export const choferController = {
       }
       if (numeroChofer && numeroChofer.trim()) {
         updateData.numeroChofer = numeroChofer.trim();
+      }
+      if (esFranquero !== undefined) {
+        updateData.esFranquero = Boolean(esFranquero);
       }
 
       const updatedChofer = await prisma.chofer.update({

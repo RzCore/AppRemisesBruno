@@ -371,7 +371,7 @@ export default function CierreCajaPage() {
                       <option value="">-- Elegir un chofer --</option>
                       {choferes.map((chofer) => (
                         <option key={chofer.id} value={chofer.id}>
-                          {chofer.nombre} {chofer.apellido} (#{chofer.numeroChofer}) {chofer.esPropietario ? '[Dueño]' : ''}
+                          {chofer.nombre} {chofer.apellido} (#{chofer.numeroChofer}) {chofer.esFranquero ? '[Franquero] ' : ''}{chofer.esPropietario ? '[Dueño]' : ''}
                         </option>
                       ))}
                     </select>
@@ -691,7 +691,7 @@ export default function CierreCajaPage() {
                               <td className="px-3 py-2.5 whitespace-nowrap font-bold text-slate-800">
                                 {liq.chofer?.nombre} {liq.chofer?.apellido}
                                 <div className="text-[10px] text-slate-400 font-normal">
-                                  #{liq.chofer?.numeroChofer} • {liq.chofer?.esPropietario ? 'Dueño Auto' : 'Comisionista'}
+                                  #{liq.chofer?.numeroChofer}{liq.chofer?.esFranquero ? ' (Franquero)' : ''} • {liq.chofer?.esPropietario ? 'Dueño Auto' : 'Comisionista'}
                                 </div>
                               </td>
                               <td className="px-3 py-2.5 whitespace-nowrap text-right font-bold text-slate-800">

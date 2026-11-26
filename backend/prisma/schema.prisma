@@ -228,7 +228,7 @@ model PagoCuentaCorriente {
 // Modelo para Choferes
 model Chofer {
   id               String   @id @default(cuid())
-  numeroChofer     String   @unique
+  numeroChofer     String
   nombre           String
   apellido         String
   dni              String   @unique
@@ -241,6 +241,7 @@ model Chofer {
   motivoRechazo    String?
   observaciones    String?
   esPropietario    Boolean  @default(false)
+  esFranquero      Boolean  @default(false)
   comisionPorcentaje Float  @default(30.0)
   isOnline         Boolean  @default(false)
   fotoUrl          String?
@@ -284,6 +285,7 @@ model Chofer {
   pushSubscriptions PushSubscription[]
 
   @@index([remiseriaId, estado, isOnline])
+  @@index([remiseriaId, numeroChofer])
   @@map("choferes")
 }
 
