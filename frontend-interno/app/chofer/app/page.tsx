@@ -2339,40 +2339,45 @@ export default function ChoferApp() {
   const clienteTelefonoActual =
     viajeActual?.clienteTelefono || viajeActual?.cliente?.telefono || null;
 
-  // Detección inteligente de viaje de larga distancia (fuera del ejido urbano local)
+  // Detección inteligente de viaje de larga distancia (solo >= 20 km, peajes previos o destino explícito fuera de Chivilcoy)
   const esViajeLargaDistancia = useMemo(() => {
     if (!viajeActual) return false;
-
-    const distGps = tripDistanceRef.current?.con || 0;
-    const distEstimada = Number(viajeActual.distanciaKm || viajeActual.distancia || 0);
-    const distConPasajero = Number(viajeActual.distanciaKmConPasajero || 0);
-    const maxDist = Math.max(distGps, distEstimada, distConPasajero);
-
-    // Mayor o igual a 18 km se considera fuera de la ciudad (interurbano/ruta con peajes)
-    if (maxDist >= 18) {
-      return true;
-    }
-
-    // Análisis semántico de origen, destino u observaciones buscando ciudades o rutas
-    const texto = `${viajeActual.origen || ''} ${viajeActual.destino || ''} ${viajeActual.observaciones || ''}`.toLowerCase();
-    const keywords = [
-      'capital', 'caba', 'buenos aires', 'la plata', 'chivilcoy', 'alberti', 'junin', 'junín',
-      '9 de julio', 'nueve de julio', 'lujan', 'luján', 'mercedes', 'ezeiza', 'aeroparque',
-      'retiro', 'san martin', 'san martín', 'moron', 'morón', 'haedo', 'ramos mejia',
-      'autopista', 'ruta', 'peaje', 'peajes', 'larga distancia', 'interurbano', 'provincia',
-      'olivera', 'suipacha', '25 de mayo', 'saladillo', 'lobos', 'rosario'
-    ];
-
-    if (keywords.some((kw) => texto.includes(kw))) {
-      return true;
-    }
 
     // Si ya trae peajes registrados previamente
     if (Number(viajeActual.montoPeajes || 0) > 0) {
       return true;
     }
 
-    return false;
+    const distGps = tripDistanceRef.current?.con || 0;
+    const distEstimada = Number(viajeActual.distanciaKm || viajeActual.distancia || 0);
+    const distConPasajero = Number(viajeActual.distanciaKmConPasajero || 0);
+    const maxDist = Math.max(distGps, distEstimada, distConPasajero);
+
+    // Mayor o igual a 20 km se considera larga distancia (interurbano/ruta con peajes)
+    if (maxDist >= 20) {
+      return true;
+    }
+
+    // Si tenemos distancia real/estimada claramente urbana (< 15 km), es viaje local
+    if (maxDist > 0 && maxDist < 15) {
+      return false;
+    }
+
+    // Solo si no hay distancia conocida (0 km), evaluar destinos explícitos fuera de Chivilcoy
+    // (sin incluir 'chivilcoy', 'buenos aires', 'provincia', 'san martin' ni 'lujan' por UNLu)
+    const texto = `${viajeActual.origen || ''} ${viajeActual.destino || ''} ${viajeActual.observaciones || ''}`
+      .toLowerCase()
+      .replace(/universidad nacional de luj[aá]n/g, '');
+    const keywords = [
+      'capital federal', 'caba', 'la plata', 'alberti', 'junin', 'junín',
+      '9 de julio', 'nueve de julio', 'mercedes', 'ezeiza', 'aeroparque',
+      'retiro', 'moron', 'morón', 'haedo', 'ramos mejia', 'ramos mejía',
+      'autopista', 'peaje', 'peajes', 'larga distancia', 'interurbano',
+      'olivera', 'suipacha', '25 de mayo', 'saladillo', 'lobos', 'rosario',
+      'bragado', 'chacabuco', 'moreno', 'ituzaingo', 'ituzaingó'
+    ];
+
+    return keywords.some((kw) => texto.includes(kw));
   }, [viajeActual, tripDistanceRef.current?.con]);
 
   const debeMostrarPeajes = esViajeLargaDistancia || mostrarPeajesManual || (parseFloat(peajesInputChofer) > 0);
@@ -3814,8 +3819,8 @@ export default function ChoferApp() {
               )}
             </div>
 
-            {/* Registro inteligente de Peajes: visible en larga distancia o desplegable en caso local */}
-            {debeMostrarPeajes ? (
+            {/* Registro inteligente de Peajes: solo visible en viajes de larga distancia o con peajes */}
+            {debeMostrarPeajes && (
               <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-2 animate-in fade-in">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
@@ -3873,19 +3878,6 @@ export default function ChoferApp() {
                     ✓ Se sumarán ${(parseFloat(peajesInputChofer) || 0).toLocaleString('es-AR')} a tu reintegro para este viaje.
                   </p>
                 )}
-              </div>
-            ) : (
-              <div className="flex items-center justify-between px-1 py-1 text-xs bg-slate-50/60 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
-                <span className="text-[11px] text-gray-400 dark:text-slate-500 flex items-center gap-1.5 pl-1">
-                  <span>📍</span> Viaje local (sin peajes)
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setMostrarPeajesManual(true)}
-                  className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:underline flex items-center gap-1 transition-colors pr-1"
-                >
-                  <span>+</span> Ingresar peajes si corresponde
-                </button>
               </div>
             )}
 
