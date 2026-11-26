@@ -115,6 +115,12 @@ export default function CierreCajaPage() {
       const response = await coordinadorDashboardService.getLiquidacionesPendientes(choferId);
       if (response.success && response.data) {
         setPendingData(response.data);
+        const combAuto = Number(
+          response.data.resumen?.combustible ?? response.data.gastos?.totalCombustible ?? 0
+        );
+        if (!response.data.chofer.esPropietario && combAuto > 0) {
+          setCombustible(String(combAuto));
+        }
       } else {
         toast.error(response.message || 'Error al obtener viajes pendientes');
       }
@@ -160,9 +166,12 @@ export default function CierreCajaPage() {
     const comisionAgencia = resumen.comisionAgencia || 0;
     const combustibleVal = chofer.esPropietario ? 0 : Math.max(0, parseFloat(combustible) || 0);
 
+    const gananciaPropietarioBruta =
+      resumen.gananciaPropietarioBruta ??
+      ((resumen.gananciaPropietario || 0) + (resumen.combustible || 0));
     const gananciaPropietario = chofer.esPropietario
       ? 0
-      : Math.max(0, (resumen.gananciaPropietario || 0) - combustibleVal);
+      : Math.max(0, gananciaPropietarioBruta - combustibleVal);
 
     const saldoNeto = Math.round((totalEfectivo + totalTransferenciaPropia - comisionChofer - combustibleVal) * 100) / 100;
     const montoARendirChofer = saldoNeto > 0 ? saldoNeto : 0;
@@ -439,6 +448,27 @@ export default function CierreCajaPage() {
                       />
                     </div>
                     <p className="text-xs text-slate-500 mt-1">Se descuenta del saldo del dueño del vehículo y del efectivo a rendir.</p>
+                    {pendingData.gastos && pendingData.gastos.items.length > 0 && (
+                      <div className="mt-3 p-3 rounded-xl bg-orange-50/70 border border-orange-200 space-y-1.5">
+                        <p className="text-[11px] font-bold text-orange-800 uppercase tracking-wide flex items-center justify-between">
+                          <span>Gastos cargados por el chofer</span>
+                          <span>${pendingData.gastos.total.toLocaleString('es-AR')}</span>
+                        </p>
+                        <div className="space-y-1 max-h-28 overflow-y-auto">
+                          {pendingData.gastos.items.map((g) => (
+                            <div key={g.id} className="flex items-center justify-between text-[11px] text-orange-900">
+                              <span className="truncate pr-2">
+                                {g.tipo === 'COMBUSTIBLE'
+                                  ? `⛽ ${g.subtipoCombustible === 'GNC' ? 'GNC' : 'Nafta/Gasoil'}`
+                                  : `🧾 ${g.tipo}`}
+                                {g.descripcion ? ` · ${g.descripcion}` : ''}
+                              </span>
+                              <span className="font-bold shrink-0">${Number(g.monto).toLocaleString('es-AR')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 flex items-start gap-2.5">

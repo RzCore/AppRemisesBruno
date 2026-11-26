@@ -191,36 +191,89 @@ export const liquidacionController = {
         });
       }
 
-      // Obtener viajes completados del chofer que no estén liquidados
-      const viajes = await prisma.viaje.findMany({
-        where: {
-          choferId: chofer.id,
-          estado: 'COMPLETADO',
-          liquidacionId: null
-        },
-        include: {
-          cliente: {
-            select: {
-              id: true,
-              nombre: true,
-              apellido: true,
-              telefono: true
+      // Obtener viajes completados del chofer que no estén liquidados, última liquidación y último turno
+      const [viajes, ultimaLiquidacion, ultimoTurno] = await Promise.all([
+        prisma.viaje.findMany({
+          where: {
+            choferId: chofer.id,
+            estado: 'COMPLETADO',
+            liquidacionId: null
+          },
+          include: {
+            cliente: {
+              select: {
+                id: true,
+                nombre: true,
+                apellido: true,
+                telefono: true
+              }
+            },
+            artEmpresa: {
+              select: {
+                id: true,
+                nombre: true
+              }
             }
           },
-          artEmpresa: {
-            select: {
-              id: true,
-              nombre: true
-            }
+          orderBy: {
+            fecha: 'desc'
           }
-        },
-        orderBy: {
-          fecha: 'desc'
+        }),
+        prisma.liquidacion.findFirst({
+          where: { choferId: chofer.id },
+          orderBy: { fecha: 'desc' },
+          select: { fecha: true }
+        }),
+        prisma.turnoChofer.findFirst({
+          where: { choferId: chofer.id },
+          orderBy: { fechaInicio: 'desc' }
+        })
+      ]);
+
+      // Determinar la ventana de gastos pendientes de liquidar (los cargados por el chofer en el turno / cierre)
+      const inicioHoy = new Date();
+      inicioHoy.setHours(0, 0, 0, 0);
+
+      let filtroFechaGastos: { gt?: Date; gte?: Date };
+      if (ultimaLiquidacion?.fecha) {
+        filtroFechaGastos = { gt: ultimaLiquidacion.fecha };
+      } else {
+        const candidatosInicio: Date[] = [];
+        if (ultimoTurno?.fechaInicio) candidatosInicio.push(new Date(ultimoTurno.fechaInicio));
+        if (viajes.length > 0) {
+          const primerViaje = viajes[viajes.length - 1];
+          if (primerViaje?.fecha) candidatosInicio.push(new Date(primerViaje.fecha));
         }
+        const desde =
+          candidatosInicio.length > 0
+            ? new Date(Math.min(...candidatosInicio.map((d) => d.getTime())))
+            : inicioHoy;
+        filtroFechaGastos = { gte: desde };
+      }
+
+      const gastosTurno = await prisma.gastoChofer.findMany({
+        where: {
+          choferId: chofer.id,
+          fecha: filtroFechaGastos
+        },
+        orderBy: { fecha: 'desc' }
       });
 
+      const totalCombustibleCargado = round2(
+        gastosTurno
+          .filter((g) => g.tipo === 'COMBUSTIBLE')
+          .reduce((sum, g) => sum + Number(g.monto || 0), 0)
+      );
+      const totalOtrosGastosCargados = round2(
+        gastosTurno
+          .filter((g) => g.tipo !== 'COMBUSTIBLE')
+          .reduce((sum, g) => sum + Number(g.monto || 0), 0)
+      );
+
       // Calcular totales y comisiones viaje por viaje (< 20 km: 20% agencia | >= 20 km: 15% agencia)
-      const calc = calcularLiquidacionViajes(viajes, chofer.esPropietario, 0);
+      // incluyendo automáticamente el combustible registrado por el chofer en el turno/cierre
+      const calcSinCombustible = calcularLiquidacionViajes(viajes, chofer.esPropietario, 0);
+      const calc = calcularLiquidacionViajes(viajes, chofer.esPropietario, totalCombustibleCargado);
 
       res.json({
         success: true,
@@ -236,6 +289,32 @@ export const liquidacionController = {
             comisionDuenioAuto: chofer.remiseria.comisionDuenioAuto
           },
           viajes,
+          gastos: {
+            total: round2(totalCombustibleCargado + totalOtrosGastosCargados),
+            totalCombustible: totalCombustibleCargado,
+            totalOtrosGastos: totalOtrosGastosCargados,
+            items: gastosTurno.map((g) => ({
+              id: g.id,
+              tipo: g.tipo,
+              subtipoCombustible: g.subtipoCombustible,
+              monto: Number(g.monto || 0),
+              descripcion: g.descripcion,
+              fecha: g.fecha
+            }))
+          },
+          ultimoTurno: ultimoTurno
+            ? {
+                id: ultimoTurno.id,
+                activo: ultimoTurno.activo,
+                fechaInicio: ultimoTurno.fechaInicio,
+                fechaFin: ultimoTurno.fechaFin,
+                kmTotalConectado: Number((ultimoTurno.kmTotalConectado || 0).toFixed(1)),
+                kmConPasajero: Number((ultimoTurno.kmConPasajero || 0).toFixed(1)),
+                kmSinPasajero: Number((ultimoTurno.kmSinPasajero || 0).toFixed(1)),
+                odometroInicio: ultimoTurno.odometroInicio,
+                odometroFin: ultimoTurno.odometroFin
+              }
+            : null,
           resumen: {
             totalRecaudado: calc.totalRecaudado,
             totalEfectivo: calc.totalEfectivoViajes,
@@ -251,7 +330,10 @@ export const liquidacionController = {
             comisionAgencia15: calc.comisionAgencia15,
             comisionChofer: calc.comisionChofer,
             comisionAgencia: calc.comisionAgencia,
-            combustible: 0,
+            combustible: chofer.esPropietario ? 0 : totalCombustibleCargado,
+            totalCombustibleCargado,
+            totalOtrosGastos: totalOtrosGastosCargados,
+            gananciaPropietarioBruta: calcSinCombustible.gananciaPropietario,
             gananciaPropietario: calc.gananciaPropietario,
             saldoNeto: calc.saldoNeto,
             saldoAFavorChofer: calc.saldoAFavorChofer,

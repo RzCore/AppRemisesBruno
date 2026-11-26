@@ -257,6 +257,61 @@ export async function procesarReservasProgramadas() {
       // 5. Notificar en tiempo real a la central y a los choferes conectados
       if (io) {
         io.to(reserva.remiseriaId).emit('nuevo_viaje_recibido', nuevoViaje);
+
+        // 6. Si no tiene chofer preasignado, verificar si hay móviles libres ahora mismo.
+        // Si no hay ningún vehículo disponible, emitir alerta prioritaria al coordinador.
+        if (!reserva.choferId) {
+          const [choferesOnline, viajesActivos] = await Promise.all([
+            prisma.chofer.findMany({
+              where: {
+                remiseriaId: reserva.remiseriaId,
+                estado: 'ACTIVO',
+                isOnline: true,
+              },
+              select: { id: true, observaciones: true },
+            }),
+            prisma.viaje.findMany({
+              where: {
+                remiseriaId: reserva.remiseriaId,
+                choferId: { not: null },
+                OR: [
+                  { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+                  { estado: 'ACEPTADO', artEmpresaId: null },
+                ],
+              },
+              select: { choferId: true },
+            }),
+          ]);
+
+          const ocupadosSet = new Set(viajesActivos.map((v) => v.choferId).filter(Boolean));
+          const libres = choferesOnline.filter((c) => {
+            if (ocupadosSet.has(c.id)) return false;
+            if (c.observaciones && c.observaciones.startsWith('{')) {
+              try {
+                if (JSON.parse(c.observaciones).enPausa === true) return false;
+              } catch {}
+            }
+            return true;
+          });
+
+          if (libres.length === 0) {
+            console.log(
+              `⚠️ [Reserva Automática] Sin móviles libres para viaje #${nuevoViaje.id} (${reserva.clienteNombre}, ${reserva.horaInicio} hs)`
+            );
+            io.to(reserva.remiseriaId).emit('reserva_sin_moviles_disponibles', {
+              viajeId: nuevoViaje.id,
+              reservaId: reserva.id,
+              horaInicio: reserva.horaInicio,
+              clienteNombre: reserva.clienteNombre,
+              clienteTelefono: reserva.clienteTelefono,
+              origen: reserva.origen,
+              destino: reserva.destino,
+              choferesOnline: choferesOnline.length,
+              choferesEnViaje: ocupadosSet.size,
+              mensaje: `Reserva de ${reserva.clienteNombre} (${reserva.horaInicio} hs) sin móviles disponibles en este momento.`,
+            });
+          }
+        }
       }
     }
   }

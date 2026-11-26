@@ -709,6 +709,44 @@ export default function CoordinadorDashboard() {
       fetchData();
     });
 
+    // Alerta prioritaria al coordinador si se dispara una reserva programada y no hay móviles libres
+    socket.on('reserva_sin_moviles_disponibles', (data: any) => {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const ctx = new AudioContextClass();
+          const now = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(784, now);
+          osc.frequency.setValueAtTime(587.33, now + 0.16);
+          osc.frequency.setValueAtTime(784, now + 0.32);
+          osc.frequency.setValueAtTime(987.77, now + 0.48);
+          gain.gain.setValueAtTime(0.45, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.7);
+        }
+      } catch {}
+
+      toast(
+        `⚠️ RESERVA SIN MÓVILES LIBRES (${data?.horaInicio || ''} hs)\nPasajero: ${data?.clienteNombre || 'Cliente'}\n📍 ${data?.origen || ''} → ${data?.destino || ''}\nQuedó con prioridad ALTA en "Sin Asignar".`,
+        {
+          duration: 15000,
+          style: {
+            background: '#9a3412',
+            color: '#fff',
+            fontWeight: 'bold',
+            border: '2px solid #fb923c',
+          },
+        }
+      );
+      fetchData();
+    });
+
     socket.on('viaje_estado_actualizado', (data: any) => {
       if (data?.estado && data.estado !== 'PENDIENTE') {
         setAlertaNuevoViajeBanner((prev: any) =>

@@ -745,6 +745,30 @@ export interface LiquidacionPendienteResumen {
     comisionDuenioAuto: number;
   };
   viajes: Viaje[];
+  gastos?: {
+    total: number;
+    totalCombustible: number;
+    totalOtrosGastos: number;
+    items: Array<{
+      id: string;
+      tipo: string;
+      subtipoCombustible?: string | null;
+      monto: number;
+      descripcion?: string | null;
+      fecha: string;
+    }>;
+  };
+  ultimoTurno?: {
+    id: string;
+    activo: boolean;
+    fechaInicio: string;
+    fechaFin?: string | null;
+    kmTotalConectado: number;
+    kmConPasajero: number;
+    kmSinPasajero: number;
+    odometroInicio?: number | null;
+    odometroFin?: number | null;
+  } | null;
   resumen: {
     totalRecaudado: number;
     totalEfectivo?: number;
@@ -761,6 +785,9 @@ export interface LiquidacionPendienteResumen {
     comisionChofer: number;
     comisionAgencia: number;
     combustible: number;
+    totalCombustibleCargado?: number;
+    totalOtrosGastos?: number;
+    gananciaPropietarioBruta?: number;
     gananciaPropietario: number;
     saldoNeto?: number;
     saldoAFavorChofer?: number;
