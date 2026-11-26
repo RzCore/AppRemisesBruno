@@ -15,7 +15,8 @@ import {
   CheckCircle,
   AlertCircle,
   X,
-  ArrowRightLeft
+  ArrowRightLeft,
+  PowerOff
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
@@ -34,6 +35,29 @@ export default function GestionarChoferes() {
   const [choferParaAuto, setChoferParaAuto] = useState<Chofer | null>(null);
   const [selectedVehiculoId, setSelectedVehiculoId] = useState<string>('');
   const [savingAuto, setSavingAuto] = useState(false);
+  const [desconectandoId, setDesconectandoId] = useState<string | null>(null);
+
+  const handleDesconectarChofer = async (chofer: Chofer) => {
+    const motivo = window.prompt(
+      `¿Desconectar a ${chofer.nombre} ${chofer.apellido} (#${chofer.numeroChofer})?\nPodés escribir un motivo (opcional):`,
+      'Fuera de turno'
+    );
+    if (motivo === null) return;
+    try {
+      setDesconectandoId(chofer.id);
+      const res = await choferService.desconectarChofer(chofer.id, motivo);
+      if (res.success) {
+        toast.success(res.message || 'Chofer desconectado exitosamente');
+        await loadData();
+      } else {
+        toast.error(res.message || 'No se pudo desconectar al chofer');
+      }
+    } catch {
+      toast.error('Error al desconectar al chofer');
+    } finally {
+      setDesconectandoId(null);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -278,6 +302,18 @@ export default function GestionarChoferes() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    {chofer.isOnline && (
+                      <button
+                        type="button"
+                        onClick={() => handleDesconectarChofer(chofer)}
+                        disabled={desconectandoId === chofer.id}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs shadow-xs active:scale-95 transition-all"
+                        title="Desconectar chofer del turno"
+                      >
+                        <PowerOff className="w-3.5 h-3.5" />
+                        {desconectandoId === chofer.id ? 'Desconectando...' : 'Desconectar'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => openAsignarAutoModal(chofer)}

@@ -839,6 +839,175 @@ export const choferController = {
     }
   },
 
+  // Desconectar a un chofer desde la central (Coordinador, Dueño o Admin — ej. control de turno día/noche)
+  async desconectarPorCentral(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const { motivo } = req.body || {};
+      const { rol, id: userId } = req.user!;
+
+      if (rol !== 'COORDINADOR' && rol !== 'DUENIO' && rol !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'No tenés permisos para desconectar choferes',
+        });
+      }
+
+      const chofer = await prisma.chofer.findUnique({
+        where: { id },
+        include: {
+          vehiculo: { select: { id: true, patente: true, latitud: true, longitud: true } },
+        },
+      });
+
+      if (!chofer) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chofer no encontrado',
+        });
+      }
+
+      if (rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId },
+          include: { remiserias: { select: { remiseriaId: true } } },
+        });
+        const remiseriaIds = duenio?.remiserias.map((r) => r.remiseriaId) || [];
+        if (!remiseriaIds.includes(chofer.remiseriaId)) {
+          return res.status(403).json({
+            success: false,
+            message: 'No tenés permisos para desconectar choferes de esta remisería',
+          });
+        }
+      } else if (rol === 'COORDINADOR') {
+        const coordinador = await prisma.coordinador.findFirst({ where: { userId } });
+        if (!coordinador || coordinador.remiseriaId !== chofer.remiseriaId) {
+          return res.status(403).json({
+            success: false,
+            message: 'No tenés permisos para desconectar choferes de otra remisería',
+          });
+        }
+      }
+
+      // Evitar desconectar si está en medio de un viaje activo
+      const viajeActivo = await prisma.viaje.findFirst({
+        where: {
+          choferId: chofer.id,
+          OR: [
+            { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+            { estado: 'ACEPTADO', artEmpresaId: null },
+          ],
+        },
+        select: { id: true, estado: true },
+      });
+
+      if (viajeActivo) {
+        return res.status(409).json({
+          success: false,
+          message: `${chofer.nombre} ${chofer.apellido} tiene un viaje activo en curso. Esperá a que finalice para desconectarlo.`,
+        });
+      }
+
+      const ahora = new Date();
+      const motivoTexto = motivo && String(motivo).trim() ? String(motivo).trim() : 'Desconectado por la central (fuera de turno)';
+
+      // Desconectar chofer, quitar de la Tabla y resetear rechazos
+      const updated = await prisma.chofer.update({
+        where: { id: chofer.id },
+        data: {
+          isOnline: false,
+          enParadaVirtual: false,
+          paradaVirtualIngreso: null,
+          rechazosConsecutivos: 0,
+        },
+      });
+
+      // Cerrar cualquier turno abierto
+      await prisma.turnoChofer.updateMany({
+        where: { choferId: chofer.id, activo: true },
+        data: {
+          activo: false,
+          fechaFin: ahora,
+          observaciones: motivoTexto,
+        },
+      });
+
+      // Limpiar heartbeat y ofertas activas apuntando a este chofer para que pasen de inmediato al siguiente
+      choferHeartbeatMap.delete(chofer.id);
+      for (const st of ofertasViajesMap.values()) {
+        if (st.choferOfertadoId === chofer.id) {
+          st.choferOfertadoId = '';
+          st.expiraEn = 0;
+        }
+      }
+
+      // Emitir notificaciones WebSocket inmediatas a la app del chofer y a la central
+      try {
+        const { getIO, invalidarChoferCache } = await import('../lib/socket');
+        invalidarChoferCache(chofer.id);
+        const io = getIO();
+        if (io && chofer.remiseriaId) {
+          io.to(chofer.remiseriaId).emit('chofer_desconectado_por_central', {
+            choferId: chofer.id,
+            choferNombre: `${chofer.nombre} ${chofer.apellido}`.trim(),
+            motivo: motivoTexto,
+            rolOperador: rol,
+          });
+          io.to(chofer.remiseriaId).emit('parada_virtual_actualizada', {
+            choferId: chofer.id,
+            accion: 'DESCONEXION_CENTRAL',
+          });
+          if (chofer.vehiculo) {
+            io.to(chofer.remiseriaId).emit('vehiculo_movido', {
+              id: chofer.vehiculo.id,
+              choferId: chofer.id,
+              patente: chofer.vehiculo.patente,
+              chofer: `${chofer.nombre} ${chofer.apellido}`.trim(),
+              estado: 'fuera_servicio',
+              ubicacion: {
+                lat: Number(chofer.vehiculo.latitud ?? -34.901138),
+                lng: Number(chofer.vehiculo.longitud ?? -60.013778),
+              },
+              ultimaActualizacion: ahora.toISOString(),
+            });
+          }
+        }
+      } catch (wsErr) {
+        console.warn('Aviso socket desconectarPorCentral:', wsErr);
+      }
+
+      if (req.user) {
+        await prisma.appUsage.create({
+          data: {
+            userId: req.user.id,
+            userEmail: req.user.email,
+            action: 'FORCE_OFFLINE_CHOFER',
+            details: JSON.stringify({
+              choferId: chofer.id,
+              nombre: `${chofer.nombre} ${chofer.apellido}`,
+              motivo: motivoTexto,
+              rolOperador: rol,
+            }),
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent') || null,
+          },
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: updated,
+        message: `${chofer.nombre} ${chofer.apellido} fue desconectado exitosamente.`,
+      });
+    } catch (error) {
+      console.error('Error desconectando chofer desde la central:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error interno del servidor',
+      });
+    }
+  },
+
   // Baja lógica del chofer
   async delete(req: AuthenticatedRequest, res: Response) {
     try {

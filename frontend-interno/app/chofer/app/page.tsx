@@ -938,6 +938,28 @@ export default function ChoferApp() {
       }
     });
 
+    // Escuchar desconexión forzada por la central (control de turno día/noche)
+    socket.on('chofer_desconectado_por_central', (data: any) => {
+      const myChoferId = user?.chofer?.id || choferIdRef.current;
+      if (myChoferId && data?.choferId === myChoferId) {
+        setIsActive(false);
+        setAlertaViaje(null);
+        setRechazosConsecutivos(0);
+        setParadaVirtualEstado((prev) => ({
+          ...prev,
+          enParadaVirtual: false,
+          puesto: null,
+        }));
+        try {
+          localStorage.setItem('chofer_isActive', JSON.stringify(false));
+        } catch {}
+        toast.error(
+          `⛔ ${data?.motivo || 'Fuiste desconectado por la central (fuera de tu turno).'}` ,
+          { duration: 8000 }
+        );
+      }
+    });
+
     // Notificación en tiempo real de Viaje ART asignado por el Dueño
     socket.on('viaje_programado_art_asignado', (data: any) => {
       const myChoferId = user?.chofer?.id || choferIdRef.current;

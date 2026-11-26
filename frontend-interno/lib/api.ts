@@ -942,6 +942,23 @@ export const choferService = {
     }
   },
 
+  desconectarChofer: async (
+    choferId: string,
+    motivo?: string
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.patch(`/choferes/${choferId}/desconectar`, {
+        motivo: motivo?.trim() || undefined,
+      });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al desconectar al chofer',
+      };
+    }
+  },
+
   finalizarTurno: async (data: {
     odometroFin?: number;
     observaciones?: string;

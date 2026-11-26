@@ -3227,15 +3227,39 @@ export default function CoordinadorDashboard() {
                             </div>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => openAssignModalForChofer(chofer)}
-                          disabled={viajesSinAsignar.length === 0 || chofer.estado === 'en_viaje'}
-                          className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>{chofer.estado === 'en_viaje' ? 'Móvil Ocupado en Viaje' : 'Asignar Viaje Pendiente'}</span>
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openAssignModalForChofer(chofer)}
+                            disabled={viajesSinAsignar.length === 0 || chofer.estado === 'en_viaje'}
+                            className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>{chofer.estado === 'en_viaje' ? 'Ocupado en Viaje' : 'Asignar Viaje'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={chofer.estado === 'en_viaje'}
+                            onClick={async () => {
+                              const motivo = window.prompt(
+                                `¿Desconectar a ${chofer.nombre} ${chofer.apellido}?\nMotivo (opcional):`,
+                                'Fuera de turno'
+                              );
+                              if (motivo === null) return;
+                              const res = await choferService.desconectarChofer(chofer.id, motivo);
+                              if (res.success) {
+                                toast.success(res.message || 'Chofer desconectado');
+                                fetchData();
+                              } else {
+                                toast.error(res.message || 'No se pudo desconectar al chofer');
+                              }
+                            }}
+                            title={chofer.estado === 'en_viaje' ? 'No se puede desconectar durante un viaje activo' : 'Desconectar chofer'}
+                            className="px-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-xs font-bold py-2 rounded-lg transition-colors shrink-0"
+                          >
+                            Desconectar
+                          </button>
+                        </div>
                       </div>
                     ))}
                     </div>
