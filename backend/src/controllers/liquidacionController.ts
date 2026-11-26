@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
+import { redondearPrecioMultiplo100 } from '../lib/pricingUtils';
 
 const UMBRAL_LARGA_DISTANCIA_KM = 20;
 const COMISION_AGENCIA_CORTA_PCT = 20;
@@ -32,12 +33,47 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function calcularLiquidacionViajes(
+export function calcularBaseLiquidacionViaje(v: {
+  precio: any;
+  distanciaKmConPasajero?: number | null;
+  tiempoEsperaSegundos?: number | null;
+  cliente?: {
+    pagaChoferTipo?: string | null;
+    choferPrecioTramo?: number | null;
+    choferValorKm?: number | null;
+    choferValorHoraEspera?: number | null;
+  } | null;
+}): number {
+  const precioViaje = Number(v.precio) || 0;
+  const cl = v.cliente;
+  if (cl && cl.pagaChoferTipo === 'PERSONALIZADO') {
+    const tramo = Number(cl.choferPrecioTramo) || 0;
+    const vKm = Number(cl.choferValorKm) || 0;
+    if (tramo > 0 || vKm > 0) {
+      const km = Math.max(0, Number(v.distanciaKmConPasajero) || 0);
+      const esperaHora = Math.max(0, Number(cl.choferValorHoraEspera) || 0);
+      const segsEspera = Math.max(0, Number(v.tiempoEsperaSegundos) || 0);
+      const costoEspera = esperaHora > 0 && segsEspera > 0 ? (segsEspera / 3600) * esperaHora : 0;
+      const base = (km <= 1 ? tramo : tramo + (km - 1) * vKm) + costoEspera;
+      return redondearPrecioMultiplo100(base);
+    }
+  }
+  return precioViaje;
+}
+
+export function calcularLiquidacionViajes(
   viajes: Array<{
     precio: any;
     metodoPago?: string | null;
     destinoTransferencia?: string | null;
     distanciaKmConPasajero?: number | null;
+    tiempoEsperaSegundos?: number | null;
+    cliente?: {
+      pagaChoferTipo?: string | null;
+      choferPrecioTramo?: number | null;
+      choferValorKm?: number | null;
+      choferValorHoraEspera?: number | null;
+    } | null;
   }>,
   esPropietario: boolean,
   combustible = 0
@@ -60,7 +96,7 @@ function calcularLiquidacionViajes(
   let gananciaPropietarioBruta = 0;
 
   for (const v of viajes) {
-    const precio = Number(v.precio) || 0;
+    const precio = calcularBaseLiquidacionViaje(v);
     const km = Number(v.distanciaKmConPasajero) || 0;
     const esLargaDistancia = km >= UMBRAL_LARGA_DISTANCIA_KM;
     const agenciaPct = esLargaDistancia ? COMISION_AGENCIA_LARGA_PCT : COMISION_AGENCIA_CORTA_PCT;
@@ -205,7 +241,11 @@ export const liquidacionController = {
                 id: true,
                 nombre: true,
                 apellido: true,
-                telefono: true
+                telefono: true,
+                pagaChoferTipo: true,
+                choferPrecioTramo: true,
+                choferValorKm: true,
+                choferValorHoraEspera: true
               }
             },
             artEmpresa: {
@@ -416,12 +456,22 @@ export const liquidacionController = {
         });
       }
 
-      // Obtener los viajes pendientes
+      // Obtener los viajes pendientes (incluyendo configuración de pago a chofer si el cliente es empresa)
       const viajes = await prisma.viaje.findMany({
         where: {
           choferId: chofer.id,
           estado: 'COMPLETADO',
           liquidacionId: null
+        },
+        include: {
+          cliente: {
+            select: {
+              pagaChoferTipo: true,
+              choferPrecioTramo: true,
+              choferValorKm: true,
+              choferValorHoraEspera: true
+            }
+          }
         }
       });
 

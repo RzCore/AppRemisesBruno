@@ -899,16 +899,31 @@ export default function ChoferApp() {
     const socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 10000,
+      timeout: 15000,
     });
     socketRef.current = socket;
 
     socket.on('connect', () => {
       console.log('⚡ Chofer conectado a Sockets. Sala:', remiseriaId);
       socket.emit('join_room', { remiseriaId });
-      if (isActiveRef.current && !viajeActualRef.current) {
-        sincronizarEstadoRef.current?.(true);
+      if (isActiveRef.current || viajeActualRef.current) {
+        sincronizarEstadoRef.current?.(isActiveRef.current);
       }
     });
+
+    const handleNetworkOnline = () => {
+      if (!socket.connected) {
+        socket.connect();
+      }
+      if (isActiveRef.current || viajeActualRef.current) {
+        sincronizarEstadoRef.current?.(isActiveRef.current);
+      }
+    };
+    window.addEventListener('online', handleNetworkOnline);
 
     // Sincronización inmediata al entrar un nuevo pedido a la remisería
     socket.on('nuevo_viaje_recibido', () => {
@@ -1151,6 +1166,7 @@ export default function ChoferApp() {
     });
 
     return () => {
+      window.removeEventListener('online', handleNetworkOnline);
       socket.disconnect();
       socketRef.current = null;
     };

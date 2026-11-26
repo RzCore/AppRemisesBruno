@@ -66,7 +66,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000, // 10 segundos de timeout
+  timeout: 15000, // 15 segundos de timeout (resiliente en 4G)
 });
 
 // Interceptor para agregar token de autorización y auto-detectar host dinámico (PC o Celular en red local)
@@ -83,11 +83,24 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Interceptor para manejar errores de token expirado (401 o 403 por token vencido)
+// Interceptor para manejar errores de red en GET (1 reintento) y token expirado
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    // Reintento automático silencioso (1 vez) solo para GET cuando se corta 4G o da timeout
+    const isNetworkOrTimeout = !error.response || error.code === 'ECONNABORTED';
+    if (
+      isNetworkOrTimeout &&
+      originalRequest &&
+      String(originalRequest.method || '').toLowerCase() === 'get' &&
+      !originalRequest._networkRetry
+    ) {
+      originalRequest._networkRetry = true;
+      await new Promise((r) => setTimeout(r, 800));
+      return api(originalRequest);
+    }
 
     if (
       (error.response?.status === 401 || error.response?.status === 403) &&

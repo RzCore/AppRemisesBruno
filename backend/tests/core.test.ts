@@ -6,6 +6,10 @@ import {
   calcularDistanciaHaversineKm,
 } from '../src/lib/pricingUtils';
 import { requireRoles } from '../src/middleware/auth';
+import {
+  calcularLiquidacionViajes,
+  calcularBaseLiquidacionViaje,
+} from '../src/controllers/liquidacionController';
 
 test('redondearPrecioMultiplo100 redondea viajes normales al múltiplo de 100 más cercano', () => {
   assert.equal(redondearPrecioMultiplo100(10450), 10500);
@@ -92,4 +96,64 @@ test('requireRoles bloquea solicitudes sin usuario (401) y roles no autorizados 
   });
   assert.equal(nextCalled, true);
   assert.equal(resOk.getStatus(), 200);
+});
+
+test('calcularLiquidacionViajes calcula correctamente propietario (corta 20% / larga 15%)', () => {
+  const res = calcularLiquidacionViajes(
+    [
+      { precio: 10000, metodoPago: 'EFECTIVO', distanciaKmConPasajero: 5 }, // corta: agencia 2000, chofer 8000
+      { precio: 20000, metodoPago: 'EFECTIVO', distanciaKmConPasajero: 25 }, // larga: agencia 3000, chofer 17000
+    ],
+    true,
+    5000 // combustible se ignora para propietario
+  );
+  assert.equal(res.totalRecaudado, 30000);
+  assert.equal(res.comisionAgencia20, 2000);
+  assert.equal(res.comisionAgencia15, 3000);
+  assert.equal(res.comisionAgencia, 5000);
+  assert.equal(res.comisionChofer, 25000);
+  assert.equal(res.montoARendirChofer, 5000);
+  assert.equal(res.saldoAFavorChofer, 0);
+});
+
+test('calcularLiquidacionViajes calcula comisionista con efectivo, transferencia, cta cte y combustible', () => {
+  const res = calcularLiquidacionViajes(
+    [
+      { precio: 10000, metodoPago: 'EFECTIVO', distanciaKmConPasajero: 4 },
+      { precio: 10000, metodoPago: 'CUENTA_CORRIENTE', distanciaKmConPasajero: 6 },
+      { precio: 10000, metodoPago: 'TRANSFERENCIA', destinoTransferencia: 'CUENTA_AGENCIA', distanciaKmConPasajero: 5 },
+    ],
+    false,
+    3000
+  );
+  // Total 30000 -> chofer 30% = 9000, agencia 20% = 6000, dueño bruto = 15000 - 3000 comb = 12000
+  // Efectivo cobrado por chofer = 10000 -> saldoNeto = 10000 - 9000 - 3000 = -2000 (a favor chofer)
+  assert.equal(res.totalRecaudado, 30000);
+  assert.equal(res.comisionChofer, 9000);
+  assert.equal(res.comisionAgencia, 6000);
+  assert.equal(res.gananciaPropietario, 12000);
+  assert.equal(res.saldoAFavorChofer, 2000);
+  assert.equal(res.montoARendirChofer, 0);
+});
+
+test('calcularBaseLiquidacionViaje aplica tarifa personalizada de pago a chofer en empresas (ej. Amcor)', () => {
+  const viajeAmcor = {
+    precio: 12000, // Lo que se cobra a Amcor
+    metodoPago: 'CUENTA_CORRIENTE',
+    distanciaKmConPasajero: 5, // 1 km base + 4 km adicionales
+    cliente: {
+      pagaChoferTipo: 'PERSONALIZADO',
+      choferPrecioTramo: 3500,
+      choferValorKm: 1000,
+      choferValorHoraEspera: 0,
+    },
+  };
+  // Base para chofer = 3500 + 4 * 1000 = 7500 (no 12000)
+  assert.equal(calcularBaseLiquidacionViaje(viajeAmcor), 7500);
+
+  const liq = calcularLiquidacionViajes([viajeAmcor], true, 0);
+  assert.equal(liq.totalRecaudado, 7500);
+  assert.equal(liq.comisionAgencia, 1500); // 20% de 7500
+  assert.equal(liq.comisionChofer, 6000); // 80% de 7500
+  assert.equal(liq.saldoAFavorChofer, 6000);
 });

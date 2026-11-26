@@ -8,6 +8,7 @@ import { validationResult } from 'express-validator';
 import http from 'http';
 import zlib from 'zlib';
 import { initSocket } from './lib/socket';
+import { prisma } from './lib/prisma';
 import { iniciarServicioRecordatorioART } from './services/artReminderService';
 import { iniciarServicioReservasAutomaticas } from './services/reservaSchedulerService';
 import { iniciarServicioSyncFeleval } from './services/felevalSyncService';
@@ -146,13 +147,34 @@ app.use('/api/webhook/whatsapp', whatsappRoutes);
 app.use('/api/whatsapp/webhook', whatsappRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 
-// Ruta de salud
-app.get('/api/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Servidor funcionando correctamente',
-    timestamp: new Date().toISOString()
-  });
+// Ruta de salud con chequeo real de PostgreSQL y métricas básicas de proceso
+app.get('/api/health', async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    const dbLatencyMs = Date.now() - startedAt;
+    const mem = process.memoryUsage();
+    return res.json({
+      success: true,
+      message: 'Servidor funcionando correctamente',
+      db: 'ok',
+      dbLatencyMs,
+      uptimeSeconds: Math.round(process.uptime()),
+      memoryMb: {
+        rss: Math.round(mem.rss / 1024 / 1024),
+        heapUsed: Math.round(mem.heapUsed / 1024 / 1024)
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('❌ Healthcheck DB error:', err?.message || err);
+    return res.status(503).json({
+      success: false,
+      message: 'Base de datos no disponible',
+      db: 'error',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Middleware para manejar rutas no encontradas
@@ -173,6 +195,15 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
     message: 'Tuvimos un inconveniente técnico momentáneo. Para no perder tu viaje, comunicate a nuestros teléfonos fijos: 2346-427637 o 2346-433000.',
     error: 'Tuvimos un inconveniente técnico momentáneo. Comunicate a los teléfonos fijos 2346-427637 o 2346-433000.'
   });
+});
+
+// Blindaje del proceso contra promesas rechazadas o excepciones no capturadas en servicios externos
+process.on('unhandledRejection', (reason) => {
+  console.error(`[${new Date().toISOString()}] ⚠️ Unhandled Rejection:`, reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error(`[${new Date().toISOString()}] 🔥 Uncaught Exception:`, err);
 });
 
 // Iniciar servidor en 0.0.0.0 para acceso en red local (móvil) y localhost
