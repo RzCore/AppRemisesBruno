@@ -216,6 +216,97 @@ export default function HistorialLiquidacionesPage() {
     return { agencia: Number(liq?.totalTransferenciaViajes || 0), propia: 0 };
   };
 
+  const calcularResumenPorCoordinador = (lista: any[]) => {
+    const map = new Map<
+      string,
+      {
+        nombre: string;
+        esDuenio: boolean;
+        cierres: number;
+        cobradoEfectivo: number;
+        cobradoTransferencia: number;
+        pagadoChoferesEfectivo: number;
+        netoEfectivoTotal: number;
+        pendienteEntregarEfectivo: number;
+        yaEntregadoEfectivo: number;
+      }
+    >();
+
+    for (const liq of lista) {
+      const esDuenio = Boolean(liq.coordinador?.duenio?.nombre && !liq.coordinador?.coordinador?.nombre);
+      const nombre =
+        liq.coordinador?.coordinador?.nombre ||
+        (liq.coordinador?.duenio?.nombre ? `${liq.coordinador.duenio.nombre} (Dueño)` : null) ||
+        liq.coordinador?.email ||
+        'Sin identificar';
+
+      const key = liq.coordinadorId || nombre;
+      if (!map.has(key)) {
+        map.set(key, {
+          nombre,
+          esDuenio,
+          cierres: 0,
+          cobradoEfectivo: 0,
+          cobradoTransferencia: 0,
+          pagadoChoferesEfectivo: 0,
+          netoEfectivoTotal: 0,
+          pendienteEntregarEfectivo: 0,
+          yaEntregadoEfectivo: 0,
+        });
+      }
+
+      const acc = map.get(key)!;
+      acc.cierres += 1;
+
+      const saldoNeto = Number(liq.saldoNeto || 0);
+      const saldoAFavor = Number(liq.saldoAFavorChofer || 0);
+      const recibido = Boolean(liq.dineroRecibido);
+
+      let efecCobrado = 0;
+      let transfCobrada = 0;
+      let efecPagadoAChofer = 0;
+
+      if (saldoNeto > 0) {
+        if (liq.metodoPagoChofer === 'TRANSFERENCIA') {
+          transfCobrada = Number(liq.montoTransferencia || saldoNeto);
+        } else if (liq.metodoPagoChofer === 'AMBOS') {
+          efecCobrado = Number(liq.montoEfectivo || 0);
+          transfCobrada = Number(liq.montoTransferencia || 0);
+        } else {
+          // EFECTIVO o cierres históricos sin metodoPagoChofer
+          efecCobrado = Number(liq.montoEfectivo || saldoNeto);
+        }
+      } else if (saldoAFavor > 0 && liq.quienPagaSaldoAFavor === 'COORDINADOR') {
+        if (liq.metodoPagoChofer === 'TRANSFERENCIA') {
+          efecPagadoAChofer = 0;
+        } else if (liq.metodoPagoChofer === 'AMBOS') {
+          efecPagadoAChofer = Number(liq.montoEfectivo || 0);
+        } else {
+          efecPagadoAChofer = Number(liq.montoEfectivo || saldoAFavor);
+        }
+      }
+
+      const netoFila = efecCobrado - efecPagadoAChofer;
+      acc.cobradoEfectivo += efecCobrado;
+      acc.cobradoTransferencia += transfCobrada;
+      acc.pagadoChoferesEfectivo += efecPagadoAChofer;
+      acc.netoEfectivoTotal += netoFila;
+
+      if (recibido || esDuenio) {
+        acc.yaEntregadoEfectivo += netoFila;
+      } else {
+        acc.pendienteEntregarEfectivo += netoFila;
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.pendienteEntregarEfectivo - a.pendienteEntregarEfectivo);
+  };
+
+  const resumenPorCoordinador = useMemo(
+    () => calcularResumenPorCoordinador(filteredLiquidaciones),
+    [filteredLiquidaciones]
+  );
+
   const totalGananciaPropietarioChoferes = filteredLiquidaciones.reduce(
     (sum, l) => sum + (l.gananciaPropietario || 0),
     0
@@ -628,6 +719,96 @@ export default function HistorialLiquidacionesPage() {
           }
         }
       });
+
+      // Tabla destacada: Rendición por Coordinador (cuánto efectivo debe entregar cada coordinador al dueño)
+      const resumenCoords = calcularResumenPorCoordinador(lista);
+      if (resumenCoords.length > 0) {
+        const afterExecY = (doc as any).lastAutoTable?.finalY || 44;
+        doc.setFontSize(10.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text('RENDICIÓN POR COORDINADOR — PLATA A ENTREGAR AL DUEÑO', 14, afterExecY + 8);
+
+        const totCoordCierres = resumenCoords.reduce((s, c) => s + c.cierres, 0);
+        const totCoordEfecCob = resumenCoords.reduce((s, c) => s + c.cobradoEfectivo, 0);
+        const totCoordPagChofer = resumenCoords.reduce((s, c) => s + c.pagadoChoferesEfectivo, 0);
+        const totCoordTrCob = resumenCoords.reduce((s, c) => s + c.cobradoTransferencia, 0);
+        const totCoordNeto = resumenCoords.reduce((s, c) => s + c.netoEfectivoTotal, 0);
+        const totCoordEntregado = resumenCoords.reduce((s, c) => s + c.yaEntregadoEfectivo, 0);
+        const totCoordPendiente = resumenCoords.reduce((s, c) => s + c.pendienteEntregarEfectivo, 0);
+
+        const coordRows = [
+          ...resumenCoords.map((c) => [
+            c.nombre,
+            String(c.cierres),
+            fmt(c.cobradoEfectivo),
+            c.pagadoChoferesEfectivo > 0 ? `- ${fmt(c.pagadoChoferesEfectivo)}` : fmt(0),
+            fmt(c.cobradoTransferencia),
+            fmt(c.netoEfectivoTotal),
+            fmt(c.yaEntregadoEfectivo),
+            c.esDuenio ? 'Directo Dueño' : fmt(c.pendienteEntregarEfectivo)
+          ]),
+          [
+            'TOTAL GENERAL',
+            String(totCoordCierres),
+            fmt(totCoordEfecCob),
+            totCoordPagChofer > 0 ? `- ${fmt(totCoordPagChofer)}` : fmt(0),
+            fmt(totCoordTrCob),
+            fmt(totCoordNeto),
+            fmt(totCoordEntregado),
+            fmt(totCoordPendiente)
+          ]
+        ];
+
+        autoTable(doc, {
+          startY: afterExecY + 11,
+          head: [[
+            'Coordinador / Operador',
+            'Cierres',
+            'Cobrado Efec.',
+            'Pagó a Choferes',
+            'Transf. Cierres',
+            'Neto Efec. Total',
+            'Ya Entregado',
+            'DEBE ENTREGAR AL DUEÑO'
+          ]],
+          body: coordRows,
+          theme: 'grid',
+          headStyles: { fillColor: [15, 118, 110], fontSize: 7.5, halign: 'center' },
+          bodyStyles: { fontSize: 8 },
+          columnStyles: {
+            1: { halign: 'center' },
+            2: { halign: 'right' },
+            3: { halign: 'right' },
+            4: { halign: 'right' },
+            5: { halign: 'right', fontStyle: 'bold' },
+            6: { halign: 'right' },
+            7: { halign: 'right', fontStyle: 'bold' }
+          },
+          didParseCell: (hookData: any) => {
+            if (hookData.section === 'body') {
+              const isTotalRow = hookData.row.index === resumenCoords.length;
+              if (isTotalRow) {
+                hookData.cell.styles.fillColor = [241, 245, 249];
+                hookData.cell.styles.fontStyle = 'bold';
+                if (hookData.column.index === 7) {
+                  hookData.cell.styles.fillColor = totCoordPendiente > 0 ? [254, 243, 199] : [209, 250, 229];
+                  hookData.cell.styles.textColor = totCoordPendiente > 0 ? [180, 83, 9] : [4, 120, 87];
+                }
+              } else if (hookData.column.index === 7) {
+                const c = resumenCoords[hookData.row.index];
+                if (!c.esDuenio && c.pendienteEntregarEfectivo > 0) {
+                  hookData.cell.styles.fillColor = [254, 243, 199];
+                  hookData.cell.styles.textColor = [180, 83, 9];
+                } else {
+                  hookData.cell.styles.fillColor = [209, 250, 229];
+                  hookData.cell.styles.textColor = [4, 120, 87];
+                }
+              }
+            }
+          }
+        });
+      }
 
       const formatPagoPdf = (liq: any) => {
         if ((liq.saldoAFavorChofer || 0) > 0) {
@@ -1127,6 +1308,72 @@ export default function HistorialLiquidacionesPage() {
               <span className="text-[10px] text-purple-600 mt-1 block">Remanente propietarios</span>
             </div>
           </div>
+
+          {/* Resumen por Coordinador: cuánta plata debe entregar cada uno */}
+          {resumenPorCoordinador.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-teal-200 overflow-hidden">
+              <div className="px-4 py-3 bg-teal-50/70 border-b border-teal-100 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-extrabold text-teal-900 uppercase tracking-wider">
+                    Rendición por Coordinador — Plata a Entregar al Dueño
+                  </h3>
+                  <p className="text-[11px] text-teal-700">
+                    Desglose del efectivo cobrado por cada coordinador menos lo pagado en caja a choferes.
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-xs">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Coordinador</th>
+                      <th className="px-3 py-2.5 text-center font-semibold text-slate-600">Cierres</th>
+                      <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Cobrado Efec.</th>
+                      <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Pagó a Choferes</th>
+                      <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Neto Efec. Total</th>
+                      <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Ya Entregado</th>
+                      <th className="px-4 py-2.5 text-right font-extrabold text-amber-800 bg-amber-50/70">
+                        Debe Entregar al Dueño
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {resumenPorCoordinador.map((c) => (
+                      <tr key={c.nombre} className="hover:bg-slate-50/60">
+                        <td className="px-4 py-2.5 font-bold text-slate-900">{c.nombre}</td>
+                        <td className="px-3 py-2.5 text-center text-slate-600">{c.cierres}</td>
+                        <td className="px-3 py-2.5 text-right text-slate-800">
+                          ${c.cobradoEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-rose-600">
+                          {c.pagadoChoferesEfectivo > 0
+                            ? `- $${c.pagadoChoferesEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+                            : '$0,00'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-bold text-slate-900">
+                          ${c.netoEfectivoTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-emerald-700 font-semibold">
+                          ${c.yaEntregadoEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td
+                          className={`px-4 py-2.5 text-right font-black ${
+                            !c.esDuenio && c.pendienteEntregarEfectivo > 0
+                              ? 'bg-amber-50 text-amber-800'
+                              : 'bg-emerald-50/50 text-emerald-700'
+                          }`}
+                        >
+                          {c.esDuenio
+                            ? 'Directo Dueño'
+                            : `$${c.pendienteEntregarEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Buscador, Filtros y Botón PDF */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
