@@ -786,6 +786,79 @@ export default function ChoferApp() {
   const viajeActualRef = useRef<any>(null);
   const isActiveRef = useRef<boolean>(false);
 
+  // Detección de movimiento con espera activa (alerta sonora + auto-pausa)
+  const esperaAnchorCoordsRef = useRef<[number, number] | null>(null);
+  const esperaLastAlertAtRef = useRef<number>(0);
+  const esperaMovingStartAtRef = useRef<number | null>(null);
+  const esperaAutoPausingRef = useRef<boolean>(false);
+  const [alertaEsperaMovimiento, setAlertaEsperaMovimiento] = useState<{
+    distanciaMetros: number;
+    velocidadKmh: number | null;
+  } | null>(null);
+
+  const reproducirAlertaEsperaMovimiento = useCallback((autoPausada = false) => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        const ctx = new AudioContextClass();
+        const now = ctx.currentTime;
+        const tonos = autoPausada ? [880, 520] : [980, 740, 980];
+        tonos.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = autoPausada ? 'sine' : 'triangle';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.2);
+          gain.gain.setValueAtTime(0.32, now + idx * 0.2);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.2 + 0.17);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.2);
+          osc.stop(now + idx * 0.2 + 0.18);
+        });
+      }
+    } catch {}
+
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(autoPausada ? [400, 150, 400] : [250, 100, 250, 100, 350]);
+      } catch {}
+    }
+
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted' &&
+      document.hidden
+    ) {
+      try {
+        new Notification(
+          autoPausada ? '⏸️ Espera pausada automáticamente' : '⚠️ Espera activa en movimiento',
+          {
+            body: autoPausada
+              ? 'Se pausó el reloj de espera porque el vehículo está circulando.'
+              : 'Tenés la espera activada y el auto está avanzando. Apagala para no cobrar de más.',
+            tag: autoPausada ? 'espera-auto-pausa' : 'espera-en-movimiento',
+          }
+        );
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viajeActual?.enEspera) {
+      if (!esperaAnchorCoordsRef.current && lastCoordsRef.current) {
+        esperaAnchorCoordsRef.current = [...lastCoordsRef.current];
+      }
+      esperaAutoPausingRef.current = false;
+    } else {
+      esperaAnchorCoordsRef.current = null;
+      esperaLastAlertAtRef.current = 0;
+      esperaMovingStartAtRef.current = null;
+      esperaAutoPausingRef.current = false;
+      setAlertaEsperaMovimiento(null);
+    }
+  }, [viajeActual?.id, viajeActual?.enEspera]);
+
   useEffect(() => {
     if (user?.chofer?.id) {
       choferIdRef.current = user.chofer.id;
@@ -1372,6 +1445,85 @@ export default function ChoferApp() {
 
         lastCoordsRef.current = [lat, lon];
 
+        // Control inteligente de ESPERA en movimiento: alerta sonora + auto-pausa si el auto circula
+        const viajeEnEspera = viajeActualRef.current;
+        const gpsConfiable = !pos.coords.accuracy || pos.coords.accuracy <= 100;
+        if (viajeEnEspera && viajeEnEspera.enEspera && gpsConfiable) {
+          if (!esperaAnchorCoordsRef.current) {
+            esperaAnchorCoordsRef.current = [lat, lon];
+          } else {
+            const [anchorLat, anchorLon] = esperaAnchorCoordsRef.current;
+            const distDesdeEsperaM = Math.round(calcularDistanciaKm(anchorLat, anchorLon, lat, lon) * 1000);
+            const speedMs =
+              typeof pos.coords.speed === 'number' && !Number.isNaN(pos.coords.speed) && pos.coords.speed >= 0
+                ? pos.coords.speed
+                : null;
+            const speedKmh = speedMs !== null ? Math.round(speedMs * 3.6) : null;
+            const ahoraMs = Date.now();
+
+            // Descartar saltos anómalos de antena (> 5 km de golpe)
+            if (distDesdeEsperaM < 5000) {
+              if (speedKmh !== null && speedKmh >= 12 && distDesdeEsperaM >= 30) {
+                if (!esperaMovingStartAtRef.current) esperaMovingStartAtRef.current = ahoraMs;
+              } else {
+                esperaMovingStartAtRef.current = null;
+              }
+              const velocidadSostenida =
+                esperaMovingStartAtRef.current !== null && ahoraMs - esperaMovingStartAtRef.current >= 5000;
+
+              // 1) Auto-pausa automática al superar 200 metros desde donde activó la espera
+              if (distDesdeEsperaM >= 200 && !esperaAutoPausingRef.current) {
+                esperaAutoPausingRef.current = true;
+                reproducirAlertaEsperaMovimiento(true);
+                choferService
+                  .controlarEspera(viajeEnEspera.id, 'PAUSAR')
+                  .then((res) => {
+                    if (res.success && res.data) {
+                      setViajeActual((prev: any) =>
+                        prev && prev.id === viajeEnEspera.id
+                          ? {
+                              ...prev,
+                              enEspera: res.data.enEspera,
+                              inicioEsperaActual: res.data.inicioEsperaActual,
+                              tiempoEsperaSegundos: res.data.tiempoEsperaSegundos,
+                              costoEspera: res.data.costoEspera,
+                              precio: res.data.precioTotal || prev?.precio,
+                            }
+                          : prev
+                      );
+                      setAlertaEsperaMovimiento(null);
+                      esperaAnchorCoordsRef.current = null;
+                      toast(
+                        `Espera pausada automáticamente: el auto avanzó ${distDesdeEsperaM} m.`,
+                        { icon: '⏸️', duration: 8000, id: 'espera-auto-pausa' }
+                      );
+                    } else {
+                      esperaAutoPausingRef.current = false;
+                    }
+                  })
+                  .catch(() => {
+                    esperaAutoPausingRef.current = false;
+                  });
+              }
+              // 2) Alerta sonora + vibración + banner a partir de 80 metros o velocidad sostenida > 12 km/h
+              else if (distDesdeEsperaM >= 80 || velocidadSostenida) {
+                setAlertaEsperaMovimiento({
+                  distanciaMetros: distDesdeEsperaM,
+                  velocidadKmh: speedKmh,
+                });
+                if (ahoraMs - esperaLastAlertAtRef.current >= 15000) {
+                  esperaLastAlertAtRef.current = ahoraMs;
+                  reproducirAlertaEsperaMovimiento(false);
+                  toast(
+                    `¡Tenés la ESPERA activa y el auto está circulando (${distDesdeEsperaM} m)!`,
+                    { icon: '⚠️', duration: 6000, id: 'espera-en-movimiento' }
+                  );
+                }
+              }
+            }
+          }
+        }
+
         // Sistema de Tablas: asegurar que todo chofer libre esté anotado en la cola FIFO
         // (sin sacarlo si está circulando lejos de la base tras terminar un viaje)
         if (
@@ -1405,7 +1557,7 @@ export default function ChoferApp() {
           toast.error('Por favor habilitá el permiso de ubicación en tu navegador para reportar tu posición en el mapa.', { id: 'gps-perm-error' });
         }
       },
-      { enableHighAccuracy: false, maximumAge: 10000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
     );
 
     return () => {
@@ -3103,6 +3255,33 @@ export default function ChoferApp() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Alerta urgente si el auto está circulando con la espera activa */}
+            {viajeActual.enEspera && alertaEsperaMovimiento && (
+              <div className="p-3 bg-red-600 text-white rounded-xl shadow-md border-2 border-red-300 animate-pulse space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-extrabold uppercase tracking-wide">
+                      ⚠️ ¡Espera activa en movimiento!
+                    </p>
+                    <p className="text-[11px] text-red-100 leading-snug">
+                      El auto avanzó ~{alertaEsperaMovimiento.distanciaMetros} m
+                      {alertaEsperaMovimiento.velocidadKmh ? ` (${alertaEsperaMovimiento.velocidadKmh} km/h)` : ''}.
+                      Apagá la espera para no cobrar de más (se pausará sola a los 200 m).
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleEspera}
+                  disabled={actionLoading}
+                  className="w-full py-2 px-3 bg-white hover:bg-red-50 text-red-700 font-extrabold text-xs rounded-lg shadow-xs active:scale-95 transition-all cursor-pointer"
+                >
+                  ⏸️ PAUSAR ESPERA AHORA
+                </button>
               </div>
             )}
 
