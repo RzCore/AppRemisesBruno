@@ -86,6 +86,12 @@ export function decryptPortalPassword(encoded: string): string {
   return decrypted.toString('utf8');
 }
 
+function tieneRetornoPositivo(retorno?: string): boolean {
+  const r = String(retorno || '').trim().toLowerCase();
+  if (!r || /^no\b|sin retorno/.test(r)) return false;
+  return /^s[ií]\b|con retorno|ida y vuelta|\biv\b|true/.test(r);
+}
+
 function stripHtml(html: string): string {
   return String(html || '')
     .replace(/<[^>]+>/g, ' ')
@@ -777,15 +783,17 @@ export async function sincronizarArtFeleval(
           }
 
           const esLocal = logistica.esLocal;
+          const conRetorno = tieneRetornoPositivo(retorno);
+          const multiplicadorTramo = esLocal && conRetorno ? 2 : 1;
           const precioArt = esLocal
-            ? Number(art.precioTramo || 0)
+            ? Number(art.precioTramo || 0) * multiplicadorTramo
             : logistica.distanciaKm > 0
             ? Math.round(logistica.distanciaKm * Number(art.valorKm || 0))
             : 0;
           const precioChofer =
             art.pagaChoferTipo === 'PERSONALIZADO'
               ? esLocal
-                ? Number(art.choferPrecioTramo || precioArt)
+                ? Number(art.choferPrecioTramo || art.precioTramo || 0) * multiplicadorTramo
                 : logistica.distanciaKm > 0
                 ? Math.round(logistica.distanciaKm * Number(art.choferValorKm || 0))
                 : 0
@@ -793,7 +801,13 @@ export async function sincronizarArtFeleval(
 
           const metaObs = [
             `[FELEVAL #${felevalEventId}]`,
-            esLocal ? '[LOCAL]' : logistica.cobrarDesdeBase ? '[POR KM - DESDE BASE]' : '[POR KM]',
+            esLocal
+              ? conRetorno
+                ? '[LOCAL - IDA Y VUELTA (2 TRAMOS)]'
+                : '[LOCAL]'
+              : logistica.cobrarDesdeBase
+              ? '[POR KM - DESDE BASE]'
+              : '[POR KM]',
             subArt ? `ART: ${subArt}` : '',
             modalidad ? `Modalidad: ${modalidad}` : '',
             retorno ? `Retorno: ${retorno}` : '',
