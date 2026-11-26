@@ -27,7 +27,80 @@ const geocodeSearchCache = new Map<string, { data: any[]; expiresAt: number }>()
 const geocodeInFlightMap = new Map<string, Promise<any[]>>();
 const osrmDistanceCache = new Map<string, { distanceKm: number; expiresAt: number }>();
 
-function formatSuggestionDisplayName(addr: any, fallbackDisplay: string, houseNumberOverride?: string): string {
+interface KnownPlaceEntry {
+  display_name: string;
+  lat: string;
+  lon: string;
+  keywords: string[];
+  address: Record<string, string>;
+}
+
+const CHIVILCOY_KNOWN_PLACES: KnownPlaceEntry[] = [
+  {
+    display_name: 'Universidad Nacional de Luján (UNLu) - Centro Regional Chivilcoy, El Grito de Alcorta 110, Chivilcoy',
+    lat: '-34.9189524',
+    lon: '-59.9946500',
+    keywords: [
+      'universidad nacional de lujan',
+      'universidad de lujan',
+      'unlu',
+      'centro regional chivilcoy',
+      'el grito de alcorta 110',
+      'grito de alcorta 110',
+      'universidad chivilcoy',
+    ],
+    address: {
+      amenity: 'Universidad Nacional de Luján',
+      road: 'El Grito de Alcorta',
+      house_number: '110',
+      city: 'Chivilcoy',
+      state: 'Buenos Aires',
+    },
+  },
+];
+
+function normalizarTextoBusqueda(str: string): string {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[,.;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buscarLugaresConocidos(rawQuery: string): any[] {
+  const norm = normalizarTextoBusqueda(rawQuery);
+  if (norm.length < 3) return [];
+  const sinChivilcoy = norm.replace(/\bchivilcoy\b/g, '').replace(/\s+/g, ' ').trim();
+  const matches: any[] = [];
+
+  for (const place of CHIVILCOY_KNOWN_PLACES) {
+    const matched = place.keywords.some((kw) => {
+      if (norm.includes(kw) || kw.includes(norm)) return true;
+      if (sinChivilcoy.length >= 3 && (sinChivilcoy.includes(kw) || kw.includes(sinChivilcoy))) {
+        return true;
+      }
+      return false;
+    });
+    if (matched) {
+      matches.push({
+        lat: place.lat,
+        lon: place.lon,
+        display_name: place.display_name,
+        address: place.address,
+      });
+    }
+  }
+  return matches;
+}
+
+function formatSuggestionDisplayName(
+  addr: any,
+  fallbackDisplay: string,
+  houseNumberOverride?: string,
+  poiName?: string
+): string {
   const road = addr?.road || addr?.pedestrian || addr?.street || addr?.residential || '';
   const houseNumber = addr?.house_number || houseNumberOverride || '';
   const city =
@@ -38,10 +111,17 @@ function formatSuggestionDisplayName(addr: any, fallbackDisplay: string, houseNu
     addr?.suburb ||
     'Chivilcoy';
 
+  const cleanPoi = (poiName || addr?.amenity || '').trim();
+  const poiDifferentFromRoad =
+    cleanPoi &&
+    road &&
+    normalizarTextoBusqueda(cleanPoi) !== normalizarTextoBusqueda(road);
+
   if (road) {
     const roadHasNumber = houseNumber ? new RegExp(`\\b${houseNumber}\\b`).test(road) : false;
     const streetPart = houseNumber && !roadHasNumber ? `${road} ${houseNumber}` : road;
-    return city ? `${streetPart}, ${city}` : streetPart;
+    const base = city ? `${streetPart}, ${city}` : streetPart;
+    return poiDifferentFromRoad ? `${cleanPoi}, ${base}` : base;
   }
   return fallbackDisplay;
 }
@@ -125,6 +205,9 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
 
   const fetchPromise = (async () => {
     try {
+      // 1) Coincidencias directas con puntos de interés conocidos de Chivilcoy (ej. UNLu Chivilcoy)
+      const knownMatches = buscarLugaresConocidos(queryString);
+
       const hasCityConstraint =
         /,/g.test(queryString) ||
         /chivilcoy|bragado|alberti|suipacha|moquehu[aá]|gorostiaga|chacabuco|25\s+de\s+mayo|buenos\s+aires|caba|federal|ezeiza|retiro|lujan|mercedes/i.test(
@@ -139,6 +222,13 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
 
       const primaryQuery = hasCityConstraint ? queryString : `${queryString}, Chivilcoy`;
       let data = await fetchNominatimList(primaryQuery, limit, viewboxParam);
+
+      // Si el usuario incluyó coma en un lugar/institución (ej: "universidad nacional de lujan, chivilcoy"),
+      // reintentar sin comas porque Nominatim suele resolver POIs mejor sin coma
+      if (data.length === 0 && primaryQuery.includes(',')) {
+        const sinComas = primaryQuery.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+        data = await fetchNominatimList(sinComas, limit, viewboxParam);
+      }
 
       // Si buscó calle + altura y OSM solo tiene la calle sin numeración catastral, buscar por nombre de calle
       if (data.length === 0 && streetOnly.length >= 3) {
@@ -161,7 +251,7 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
           );
         }
       } else {
-        // Enriquecer display_name limpio preservando la altura ingresada por el usuario
+        // Enriquecer display_name limpio preservando la altura ingresada por el usuario y el nombre de POI
         data = data.map((item: any) => {
           const addr = { ...(item.address || {}) };
           if (typedHouseNumber && !addr.house_number && (addr.road || addr.pedestrian || addr.street)) {
@@ -170,12 +260,24 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
           return {
             ...item,
             address: addr,
-            display_name: formatSuggestionDisplayName(addr, item.display_name || '', typedHouseNumber),
+            display_name: formatSuggestionDisplayName(
+              addr,
+              item.display_name || '',
+              typedHouseNumber,
+              item.name
+            ),
           };
         });
       }
 
-      const finalData = Array.isArray(data) ? data : [];
+      const merged = [
+        ...knownMatches,
+        ...(Array.isArray(data) ? data : []).filter(
+          (d: any) => !knownMatches.some((k) => k.lat === String(d.lat) && k.lon === String(d.lon))
+        ),
+      ].slice(0, limit);
+
+      const finalData = merged;
       if (finalData.length > 0) {
         if (geocodeSearchCache.size >= 1500) {
           const oldestKey = geocodeSearchCache.keys().next().value;
