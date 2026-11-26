@@ -4,6 +4,26 @@ export const DEFAULT_BASE_LAT = -34.8957; // Chivilcoy centro
 export const DEFAULT_BASE_LON = -60.0189;
 export const RADIO_URBANO_BASE_KM = 12; // Radio urbano de la base (coincide con isEnChivilcoy)
 
+/**
+ * Redondea el importe de un viaje normal al múltiplo de 100 más cercano (ej: 10450 -> 10500).
+ */
+export function redondearPrecioMultiplo100(precio: number): number {
+  if (!isFinite(precio) || precio <= 0) return 0;
+  return Math.round(precio / 100) * 100;
+}
+
+/**
+ * Redondea kilómetros de viajes ART:
+ * - Fracción > 0.5 redondea hacia arriba (ej: 183.7 -> 184)
+ * - Fracción <= 0.5 redondea hacia abajo (ej: 183.5 -> 183)
+ */
+export function redondearKmArt(km: number): number {
+  if (!isFinite(km) || km <= 0) return 0;
+  const entero = Math.floor(km);
+  const decimal = Math.round((km - entero) * 1000) / 1000;
+  return decimal > 0.5 ? entero + 1 : entero;
+}
+
 interface RemoteRouteCacheEntry {
   distanciaKm: number;
   timestamp: number;

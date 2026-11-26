@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
-import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, DEFAULT_BASE_LAT, DEFAULT_BASE_LON } from '../lib/pricingUtils';
+import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -1406,6 +1406,10 @@ export const coordinatorDashboardController = {
         distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
       }
 
+      if (artObj && !esLocalArt) {
+        distanciaFacturable = redondearKmArt(distanciaFacturable);
+      }
+
       let precioEstimado = bajadaBandera;
       if (artObj && esViajeLocal !== undefined) {
         if (esLocalArt) {
@@ -1416,7 +1420,7 @@ export const coordinatorDashboardController = {
             precioEstimado = bajadaBandera;
           }
         } else {
-          // Viaje NO Local ART: se cobra por km recorrido (sin sumar tramo local)
+          // Viaje NO Local ART: se cobra por km recorrido redondeado (>0.5 arriba, <=0.5 abajo)
           if (artObj.pagaChoferTipo === 'PERSONALIZADO' && artObj.choferValorKm && artObj.choferValorKm > 0) {
             precioEstimado = Math.round(distanciaFacturable * artObj.choferValorKm);
           } else {
@@ -1424,11 +1428,11 @@ export const coordinatorDashboardController = {
           }
         }
       } else {
-        // Fórmula estándar de remisería: bajada de bandera (0-1 km) + km adicionales
+        // Fórmula estándar de remisería: bajada de bandera (0-1 km) + km adicionales, redondeado a múltiplos de 100
         if (distanciaFacturable > 1) {
           precioEstimado += (distanciaFacturable - 1) * valorKm;
         }
-        precioEstimado = Math.round(precioEstimado / 50) * 50;
+        precioEstimado = redondearPrecioMultiplo100(precioEstimado);
       }
 
       // Precio confidencial ART (solo se devuelve al DUENIO)

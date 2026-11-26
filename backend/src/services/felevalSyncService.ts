@@ -6,7 +6,8 @@ import {
   calcularDistanciaHaversineKm,
   DEFAULT_BASE_LAT,
   DEFAULT_BASE_LON,
-  RADIO_URBANO_BASE_KM
+  RADIO_URBANO_BASE_KM,
+  redondearKmArt
 } from '../lib/pricingUtils';
 
 const FELEVAL_BASE_URL = 'https://app.feleval.com.ar';
@@ -242,7 +243,7 @@ async function calcularLogisticaFeleval(params: {
     if (origenFueraDeBase) {
       // Móvil sale de la base a buscar al pasajero a otra localidad y lo lleva al destino
       const tramoBaseOrigen = await calcularTramoOsrm(baseLat, baseLon, geoO.lat, geoO.lon);
-      const kmTotales = Math.round((tramoBaseOrigen.km + tramoViaje.km) * 10) / 10;
+      const kmTotales = redondearKmArt(tramoBaseOrigen.km + tramoViaje.km);
       const minutosAntes = Math.max(30, tramoBaseOrigen.minutos + tramoViaje.minutos + 20);
       return {
         esLocal: false,
@@ -259,7 +260,7 @@ async function calcularLogisticaFeleval(params: {
       return {
         esLocal: false,
         cobrarDesdeBase: false,
-        distanciaKm: tramoViaje.km,
+        distanciaKm: redondearKmArt(tramoViaje.km),
         horaSalida: restarMinutosHora(horaTurno, minutosAntes),
         minutosTotales: minutosAntes
       };
@@ -270,7 +271,7 @@ async function calcularLogisticaFeleval(params: {
     return {
       esLocal: true,
       cobrarDesdeBase: false,
-      distanciaKm: tramoViaje.km,
+      distanciaKm: redondearKmArt(tramoViaje.km),
       horaSalida: restarMinutosHora(horaTurno, minutosAntes),
       minutosTotales: minutosAntes
     };

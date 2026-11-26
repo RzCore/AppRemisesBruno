@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
+import { redondearKmArt } from '../lib/pricingUtils';
 import { encryptPortalPassword, sincronizarPortalArt } from '../services/felevalSyncService';
 
 async function resolveRemiseriaId(req: AuthenticatedRequest): Promise<string | null> {
@@ -92,7 +93,7 @@ export const artEmpresaController = {
         const totalFacturado = art.viajes.reduce((sum, v) => {
           if (v.precioArt && Number(v.precioArt) > 0) return sum + Number(v.precioArt);
           // Fallback si no tiene precioArt explícito
-          const km = v.distanciaKmConPasajero || 0;
+          const km = redondearKmArt(v.distanciaKmConPasajero || 0);
           const p = km > 0 && art.valorKm > 0 ? Math.round(km * art.valorKm) : (art.precioTramo || 0);
           return sum + p;
         }, 0);
@@ -853,7 +854,7 @@ export const artEmpresaController = {
 
       const parsedPrecio = parseFloat(precio) || 0;
       const parsedPrecioArt = parseFloat(precioArt) || 0;
-      const parsedDistancia = parseFloat(distanciaKm) || 0;
+      const parsedDistancia = redondearKmArt(parseFloat(distanciaKm) || 0);
 
       const nuevoViaje = await prisma.viaje.create({
         data: {
@@ -1578,7 +1579,7 @@ export const artEmpresaController = {
 
         let pArt = v.precioArt ? Number(v.precioArt) : 0;
         if (!pArt && v.artEmpresa) {
-          const km = v.distanciaKmConPasajero || 0;
+          const km = redondearKmArt(v.distanciaKmConPasajero || 0);
           let p = km > 0 && v.artEmpresa.valorKm > 0 ? Math.round(km * v.artEmpresa.valorKm) : (v.artEmpresa.precioTramo || 0);
           if (v.costoEspera) p += v.costoEspera;
           pArt = Math.round(p);
