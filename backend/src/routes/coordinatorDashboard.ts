@@ -69,6 +69,9 @@ router.post('/despacho-optimo/aplicar', coordinatorDashboardController.aplicarDe
 // Búsqueda predictiva de clientes por teléfono o nombre
 router.get('/clientes/predictivo', coordinatorDashboardController.searchClientesPredictivo);
 
+// Listado rápido de Empresas / Clientes con Cuenta Corriente para Nuevo Viaje (1 clic)
+router.get('/clientes/cuentas-corrientes', coordinatorDashboardController.getClientesCuentaCorriente);
+
 // Carga ultrarrápida express de viaje telefónico (< 5s)
 router.post('/viajes/express', coordinatorDashboardController.crearViajeExpress);
 

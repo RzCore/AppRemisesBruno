@@ -1001,7 +1001,8 @@ export const coordinatorDashboardController = {
         choferId,
         vehiculoId,
         artEmpresaId,
-        numeroSiniestro
+        numeroSiniestro,
+        metodoPago
       } = req.body;
 
       if (!coordinadorId) {
@@ -1023,6 +1024,19 @@ export const coordinatorDashboardController = {
         });
       }
 
+      let metodoPagoFinal: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE' = 'EFECTIVO';
+      if (metodoPago === 'CUENTA_CORRIENTE' || metodoPago === 'TRANSFERENCIA' || metodoPago === 'EFECTIVO') {
+        metodoPagoFinal = metodoPago;
+      } else if (clienteId) {
+        const cl = await prisma.cliente.findUnique({
+          where: { id: clienteId },
+          select: { cuentaCorrienteHabilitada: true }
+        });
+        if (cl?.cuentaCorrienteHabilitada) {
+          metodoPagoFinal = 'CUENTA_CORRIENTE';
+        }
+      }
+
       const viaje = await prisma.viaje.create({
         data: {
           origen,
@@ -1034,6 +1048,7 @@ export const coordinatorDashboardController = {
           clienteEmail,
           clienteId: clienteId || null,
           prioridad: prioridad || 'NORMAL',
+          metodoPago: metodoPagoFinal,
           origenDetallado,
           destinoDetallado,
           observaciones,
@@ -1051,6 +1066,15 @@ export const coordinatorDashboardController = {
           vehiculo: true
         }
       });
+
+      // Emitir socket en tiempo real para que los choferes reciban la oferta al instante
+      try {
+        const { getIO } = await import('../lib/socket');
+        const io = getIO();
+        if (io && !artEmpresaId && viaje.estado === 'PENDIENTE') {
+          io.to(coordinador.remiseriaId).emit('nuevo_viaje_recibido', viaje);
+        }
+      } catch {}
 
       // Track the action
       await prisma.appUsage.create({
@@ -3219,6 +3243,73 @@ export const coordinatorDashboardController = {
       });
     } catch (error) {
       console.error('Error obteniendo reportes y métricas del coordinador:', error);
+      return res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  },
+
+  // Listado de Empresas / Clientes con Cuenta Corriente habilitada (acceso 1 clic en Nuevo Viaje)
+  async getClientesCuentaCorriente(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      const coordinador = await prisma.coordinador.findFirst({ where: { userId } });
+      const remiseriaId = coordinador?.remiseriaId || null;
+
+      const clientes = await prisma.cliente.findMany({
+        where: {
+          activo: true,
+          cuentaCorrienteHabilitada: true,
+          ...(remiseriaId ? { OR: [{ remiseriaId }, { remiseriaId: null }] } : {})
+        },
+        select: {
+          id: true,
+          nombre: true,
+          apellido: true,
+          dni: true,
+          telefono: true,
+          email: true,
+          direccion: true,
+          cuentaCorrienteHabilitada: true,
+          direccionesFrecuentes: true
+        },
+        orderBy: { nombre: 'asc' },
+        take: 40
+      });
+
+      const data = clientes.map((c) => {
+        let lugaresFrecuentes: Array<{ alias: string; direccion: string; lat?: number; lon?: number }> = [];
+        if (c.direccionesFrecuentes) {
+          try {
+            const parsed =
+              typeof c.direccionesFrecuentes === 'string'
+                ? JSON.parse(c.direccionesFrecuentes)
+                : c.direccionesFrecuentes;
+            if (Array.isArray(parsed)) {
+              lugaresFrecuentes = parsed
+                .filter((d: any) => d && typeof d.direccion === 'string' && d.direccion.trim())
+                .map((d: any) => ({
+                  alias: String(d.alias || 'Favorito').trim(),
+                  direccion: String(d.direccion).trim(),
+                  lat: d.lat !== undefined && !isNaN(Number(d.lat)) ? Number(d.lat) : undefined,
+                  lon: d.lon !== undefined && !isNaN(Number(d.lon)) ? Number(d.lon) : undefined,
+                }));
+            }
+          } catch {}
+        }
+        return {
+          ...c,
+          nombreMostrar:
+            c.apellido === '(Empresa)' ? c.nombre : `${c.nombre} ${c.apellido}`.trim(),
+          lugaresFrecuentes
+        };
+      });
+
+      return res.json({ success: true, data });
+    } catch (error) {
+      console.error('Error listando cuentas corrientes para coordinador:', error);
       return res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
   }

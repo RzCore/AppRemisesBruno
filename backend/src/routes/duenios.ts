@@ -27,6 +27,7 @@ const updateDuenioValidation = [
 
 // Rutas para gestión de Clientes y Cuenta Corriente (Dueño)
 router.get('/clientes/listado', authenticateToken, duenioClientesController.getClientes);
+router.post('/clientes/empresa', authenticateToken, duenioClientesController.crearClienteEmpresa);
 router.patch('/clientes/:id/cuenta-corriente', authenticateToken, duenioClientesController.toggleCuentaCorriente);
 router.get('/clientes/:id/viajes', authenticateToken, duenioClientesController.getViajesCliente);
 router.post('/clientes/:id/pago', authenticateToken, duenioClientesController.registrarPago);

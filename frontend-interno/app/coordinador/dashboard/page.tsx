@@ -305,6 +305,8 @@ export default function CoordinadorDashboard() {
   const [clientFrequentPlaces, setClientFrequentPlaces] = useState<
     Array<{ alias: string; direccion: string; lat?: number; lon?: number }>
   >([]);
+  const [cuentasCorrientesList, setCuentasCorrientesList] = useState<any[]>([]);
+  const [pasajeroAutorizado, setPasajeroAutorizado] = useState('');
 
   const openStepModal = (mode: 'viaje' | 'reserva') => {
     setEditingReservaId(null);
@@ -312,7 +314,13 @@ export default function CoordinadorDashboard() {
     setModalStep(1);
     setClientFrequentPlaces([]);
     setFrequentAddresses({ origenes: [], destinos: [] });
+    setPasajeroAutorizado('');
     setIsModalOpen(true);
+    coordinadorDashboardService.getClientesCuentaCorriente().then((res) => {
+      if (res.success && Array.isArray(res.data)) {
+        setCuentasCorrientesList(res.data);
+      }
+    }).catch(() => {});
   };
   
   const [clientData, setClientData] = useState({
@@ -321,7 +329,8 @@ export default function CoordinadorDashboard() {
     apellido: '',
     telefono: '',
     email: '',
-    direccion: ''
+    direccion: '',
+    cuentaCorrienteHabilitada: false
   });
 
   const [tripData, setTripData] = useState({
@@ -1120,14 +1129,14 @@ export default function CoordinadorDashboard() {
   };
 
   const handleBuscarDni = async () => {
-    const cleanDni = soloNumeros(dniSearch);
-    if (!cleanDni || cleanDni.length < 7 || cleanDni.length > 8) {
-      toast.error('Ingrese un DNI numérico válido (7 u 8 dígitos)');
+    const cleanCodigo = dniSearch.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!cleanCodigo || cleanCodigo.length < 3 || cleanCodigo.length > 20) {
+      toast.error('Ingresá un DNI (7 u 8 dígitos) o un código único de empresa (ej: AMCOR, HOGAR)');
       return;
     }
     setBuscandoDni(true);
     try {
-      const res = await clienteAuthService.buscarClientePorDni(cleanDni);
+      const res = await clienteAuthService.buscarClientePorDni(cleanCodigo);
       if (res.success && res.data) {
         const c = res.data;
         setClientData({
@@ -1136,8 +1145,10 @@ export default function CoordinadorDashboard() {
           apellido: c.apellido,
           telefono: c.telefono,
           email: c.email || '',
-          direccion: c.direccion || ''
+          direccion: c.direccion || '',
+          cuentaCorrienteHabilitada: Boolean(c.cuentaCorrienteHabilitada)
         });
+        setPasajeroAutorizado('');
 
         const lugares: Array<{ alias: string; direccion: string; lat?: number; lon?: number }> = Array.isArray(c.lugaresFrecuentes)
           ? c.lugaresFrecuentes
@@ -1172,7 +1183,8 @@ export default function CoordinadorDashboard() {
           apellido: '',
           telefono: '',
           email: '',
-          direccion: ''
+          direccion: '',
+          cuentaCorrienteHabilitada: false
         });
         setModalStep(2);
       }
@@ -1233,6 +1245,14 @@ export default function CoordinadorDashboard() {
     }
     setCreandoViaje(true);
     try {
+      const baseClienteNombre =
+        clientData.apellido === '(Empresa)'
+          ? clientData.nombre
+          : `${clientData.nombre} ${clientData.apellido}`.trim();
+      const clienteNombreFinal = pasajeroAutorizado.trim()
+        ? `${baseClienteNombre} · ${pasajeroAutorizado.trim()}`
+        : baseClienteNombre;
+
       const payload = {
         origen: tripData.origen,
         destino: tripData.destino,
@@ -1240,10 +1260,11 @@ export default function CoordinadorDashboard() {
         fecha: tripData.tipoViaje === 'inmediato' 
           ? new Date().toISOString() 
           : new Date(`${tripData.fecha}T${tripData.hora}:00`).toISOString(),
-        clienteNombre: `${clientData.nombre} ${clientData.apellido}`,
+        clienteNombre: clienteNombreFinal,
         clienteTelefono: clientData.telefono,
         clienteEmail: clientData.email || '',
         clienteId: clientData.id || null,
+        metodoPago: clientData.cuentaCorrienteHabilitada ? 'CUENTA_CORRIENTE' : undefined,
         prioridad: 'NORMAL',
         observaciones: tripData.observaciones
       };
@@ -1254,7 +1275,8 @@ export default function CoordinadorDashboard() {
         setIsModalOpen(false);
         setModalStep(1);
         setDniSearch('');
-        setClientData({ id: '', nombre: '', apellido: '', telefono: '', email: '', direccion: '' });
+        setPasajeroAutorizado('');
+        setClientData({ id: '', nombre: '', apellido: '', telefono: '', email: '', direccion: '', cuentaCorrienteHabilitada: false });
         setTripData({
           origen: '',
           destino: '',
@@ -1299,8 +1321,17 @@ export default function CoordinadorDashboard() {
           ? new Date(`${reservaData.fechaFin}T${reservaData.horaFin || '23:59'}:00`).toISOString()
           : undefined;
 
+      const nombreBaseReserva =
+        clientData.apellido === '(Empresa)' || clientData.apellido === '(Institución)'
+          ? clientData.nombre.trim()
+          : `${clientData.nombre} ${clientData.apellido}`.trim();
+      const clienteNombreReserva =
+        clientData.cuentaCorrienteHabilitada && pasajeroAutorizado.trim()
+          ? `${nombreBaseReserva} · ${pasajeroAutorizado.trim()}`
+          : nombreBaseReserva;
+
       const payloadReserva = {
-        clienteNombre: `${clientData.nombre} ${clientData.apellido}`.trim(),
+        clienteNombre: clienteNombreReserva,
         clienteTelefono: clientData.telefono,
         clienteEmail: clientData.email || undefined,
         origen: tripData.origen,
@@ -1324,7 +1355,8 @@ export default function CoordinadorDashboard() {
         setEditingReservaId(null);
         setModalStep(1);
         setDniSearch('');
-        setClientData({ id: '', nombre: '', apellido: '', telefono: '', email: '', direccion: '' });
+        setPasajeroAutorizado('');
+        setClientData({ id: '', nombre: '', apellido: '', telefono: '', email: '', direccion: '', cuentaCorrienteHabilitada: false });
         setTripData({
           origen: '',
           destino: '',
@@ -1387,6 +1419,7 @@ export default function CoordinadorDashboard() {
 
     setEditingReservaId(reserva.id);
     setModalMode('reserva');
+    setPasajeroAutorizado('');
     setClientData({
       id: '',
       nombre,
@@ -1394,6 +1427,7 @@ export default function CoordinadorDashboard() {
       telefono: reserva.telefono || '',
       email: '',
       direccion: '',
+      cuentaCorrienteHabilitada: false,
     });
     setTripData((prev) => ({
       ...prev,
@@ -4103,17 +4137,15 @@ export default function CoordinadorDashboard() {
               {modalStep === 1 && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">DNI del Cliente</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">DNI del Cliente o Código de Empresa</label>
                     <div className="flex space-x-2">
                       <input 
-                        type="tel"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={8}
+                        type="text"
+                        maxLength={20}
                         value={dniSearch}
-                        onChange={(e) => setDniSearch(soloNumeros(e.target.value).slice(0, 8))}
-                        placeholder="Ej: 38450123"
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
+                        onChange={(e) => setDniSearch(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase().slice(0, 20))}
+                        placeholder="Ej: 38450123 o AMCOR / HOGAR"
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm font-mono uppercase"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
@@ -4130,10 +4162,52 @@ export default function CoordinadorDashboard() {
                         {buscandoDni ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buscar'}
                       </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">
-                      Ingresa el DNI del cliente para autocompletar sus datos y lugares frecuentes.
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      Ingresá el DNI del pasajero o el código único de una empresa/institución.
                     </p>
                   </div>
+
+                  {/* Acceso rápido 1 clic: Empresas / Cuentas Corrientes */}
+                  {cuentasCorrientesList.length > 0 && (
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                        🏢 Empresas / Cuentas Corrientes (1 clic)
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                        {cuentasCorrientesList.map((cc) => (
+                          <button
+                            key={cc.id}
+                            type="button"
+                            onClick={() => {
+                              setClientData({
+                                id: cc.id,
+                                nombre: cc.nombre,
+                                apellido: cc.apellido || '',
+                                telefono: cc.telefono || '',
+                                email: cc.email || '',
+                                direccion: cc.direccion || '',
+                                cuentaCorrienteHabilitada: true,
+                              });
+                              setClientFrequentPlaces(Array.isArray(cc.lugaresFrecuentes) ? cc.lugaresFrecuentes : []);
+                              setFrequentAddresses({
+                                origenes: cc.direccion ? [cc.direccion] : [],
+                                destinos: [],
+                              });
+                              setPasajeroAutorizado('');
+                              setModalStep(3);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold transition-colors"
+                          >
+                            <span>🏢 {cc.nombreMostrar || cc.nombre}</span>
+                            <span className="text-[10px] font-mono bg-amber-200/70 px-1.5 py-0.5 rounded text-amber-950">
+                              {cc.dni}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="pt-2 border-t border-gray-100">
                     <button
                       type="button"
@@ -4145,9 +4219,11 @@ export default function CoordinadorDashboard() {
                           telefono: '',
                           email: '',
                           direccion: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                          cuentaCorrienteHabilitada: false,
                         });
                         setClientFrequentPlaces([]);
                         setFrequentAddresses({ origenes: [], destinos: [] });
+                        setPasajeroAutorizado('');
                         setTripData((prev) => ({
                           ...prev,
                           origen: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
@@ -4270,7 +4346,14 @@ export default function CoordinadorDashboard() {
                 <div className="space-y-3">
                   <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200 flex justify-between items-center text-xs">
                     <div>
-                      <span className="font-semibold text-gray-800">{clientData.nombre} {clientData.apellido}</span>
+                      <span className="font-semibold text-gray-800">
+                        {clientData.apellido === '(Empresa)' ? clientData.nombre : `${clientData.nombre} ${clientData.apellido}`.trim()}
+                      </span>
+                      {clientData.cuentaCorrienteHabilitada && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold text-[10px]">
+                          🏛️ Cta. Cte.
+                        </span>
+                      )}
                       {clientData.telefono && <span className="text-gray-500 ml-2">({clientData.telefono})</span>}
                     </div>
                     <button 
@@ -4281,6 +4364,22 @@ export default function CoordinadorDashboard() {
                       Cambiar
                     </button>
                   </div>
+
+                  {clientData.cuentaCorrienteHabilitada && (
+                    <div>
+                      <label className="block text-xs font-medium text-amber-900 mb-0.5">
+                        👤 ¿Quién viaja? (Opcional — empleado / autorizado)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={80}
+                        value={pasajeroAutorizado}
+                        onChange={(e) => setPasajeroAutorizado(e.target.value)}
+                        placeholder="Ej: María López / Turno noche (queda registrado en el resumen de Cta. Cte.)"
+                        className="w-full px-3 py-1.5 border border-amber-300 bg-amber-50/40 rounded-lg text-xs font-medium focus:ring-2 focus:ring-amber-400 focus:outline-none"
+                      />
+                    </div>
+                  )}
 
                   <div className="relative">
                     <label className="block text-xs font-medium text-gray-700 mb-0.5">Punto de Origen *</label>

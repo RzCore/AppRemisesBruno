@@ -40,6 +40,49 @@ export default function DuenioClientesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filtroCC, setFiltroCC] = useState<'todas' | 'habilitadas' | 'con_deuda'>('todas');
 
+  // Modal Alta Rápida de Empresa / Institución (con código único y Cuenta Corriente)
+  const [modalNuevaEmpresaOpen, setModalNuevaEmpresaOpen] = useState(false);
+  const [creandoEmpresa, setCreandoEmpresa] = useState(false);
+  const [nuevaEmpresaForm, setNuevaEmpresaForm] = useState({
+    nombre: '',
+    codigoUnico: '',
+    telefono: '',
+    direccion: '',
+    pin: '',
+    observaciones: '',
+  });
+
+  const handleCrearEmpresa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevaEmpresaForm.nombre.trim() || !nuevaEmpresaForm.codigoUnico.trim()) {
+      toast.error('Completá el nombre de la empresa y el código único');
+      return;
+    }
+    setCreandoEmpresa(true);
+    try {
+      const res = await duenioClienteService.crearEmpresa({
+        nombre: nuevaEmpresaForm.nombre.trim(),
+        codigoUnico: nuevaEmpresaForm.codigoUnico.trim().toUpperCase(),
+        telefono: nuevaEmpresaForm.telefono.trim() || undefined,
+        direccion: nuevaEmpresaForm.direccion.trim() || undefined,
+        pin: nuevaEmpresaForm.pin.trim() || undefined,
+        observaciones: nuevaEmpresaForm.observaciones.trim() || undefined,
+      });
+      if (res.success) {
+        toast.success(res.message || 'Empresa creada con Cuenta Corriente activa');
+        setModalNuevaEmpresaOpen(false);
+        setNuevaEmpresaForm({ nombre: '', codigoUnico: '', telefono: '', direccion: '', pin: '', observaciones: '' });
+        cargarClientes();
+      } else {
+        toast.error(res.message || 'No se pudo crear la empresa');
+      }
+    } catch {
+      toast.error('Error al crear la empresa');
+    } finally {
+      setCreandoEmpresa(false);
+    }
+  };
+
   // Modal Historial de Viajes y Conciliación de Cuenta Corriente
   const [modalViajesOpen, setModalViajesOpen] = useState(false);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
@@ -316,13 +359,22 @@ export default function DuenioClientesPage() {
           </div>
         </div>
 
-        <button
-          onClick={cargarClientes}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-sm transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Actualizar Lista
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setModalNuevaEmpresaOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-sm transition-colors"
+          >
+            <span>🏢 + Nueva Empresa / Institución</span>
+          </button>
+          <button
+            onClick={cargarClientes}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-sm transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Actualizar Lista
+          </button>
+        </div>
       </div>
 
       {/* Tarjetas KPI */}
@@ -1356,6 +1408,111 @@ export default function DuenioClientesPage() {
                   className="px-5 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold shadow-xs disabled:opacity-50"
                 >
                   {guardandoConfigCC ? 'Guardando...' : 'Guardar Configuración'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVA EMPRESA / INSTITUCIÓN (CÓDIGO ÚNICO + CTA CTE) */}
+      {modalNuevaEmpresaOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-indigo-600 text-white px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base">🏢 Nueva Empresa / Institución</h3>
+                <p className="text-xs text-indigo-100">Se crea con Cuenta Corriente activa y código único</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalNuevaEmpresaOpen(false)}
+                className="text-white/80 hover:text-white text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleCrearEmpresa} className="p-6 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre de Empresa / Institución *</label>
+                <input
+                  type="text"
+                  required
+                  value={nuevaEmpresaForm.nombre}
+                  onChange={(e) => setNuevaEmpresaForm({ ...nuevaEmpresaForm, nombre: e.target.value })}
+                  placeholder="Ej: Amcor / Hogar de Abrigo"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Código Único *</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={20}
+                  value={nuevaEmpresaForm.codigoUnico}
+                  onChange={(e) =>
+                    setNuevaEmpresaForm({
+                      ...nuevaEmpresaForm,
+                      codigoUnico: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ''),
+                    })
+                  }
+                  placeholder="Ej: AMCOR, HOGAR"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono uppercase"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  El coordinador podrá elegirla con 1 clic o buscando este código. También sirve para entrar en la App Cliente.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono (opcional)</label>
+                  <input
+                    type="tel"
+                    value={nuevaEmpresaForm.telefono}
+                    onChange={(e) => setNuevaEmpresaForm({ ...nuevaEmpresaForm, telefono: e.target.value })}
+                    placeholder="Ej: 2346..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">PIN App (opcional)</label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={nuevaEmpresaForm.pin}
+                    onChange={(e) =>
+                      setNuevaEmpresaForm({ ...nuevaEmpresaForm, pin: e.target.value.replace(/\D/g, '') })
+                    }
+                    placeholder="Default: 123456"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Dirección de Sede / Planta</label>
+                <input
+                  type="text"
+                  value={nuevaEmpresaForm.direccion}
+                  onChange={(e) => setNuevaEmpresaForm({ ...nuevaEmpresaForm, direccion: e.target.value })}
+                  placeholder="Ej: Parque Industrial Chivilcoy"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setModalNuevaEmpresaOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={creandoEmpresa}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50"
+                >
+                  {creandoEmpresa ? 'Creando...' : 'Crear Empresa (Cta. Cte.)'}
                 </button>
               </div>
             </form>

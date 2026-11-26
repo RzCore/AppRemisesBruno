@@ -1829,6 +1829,18 @@ export const coordinadorDashboardService = {
     }
   },
 
+  getClientesCuentaCorriente: async (): Promise<ApiResponse<any[]>> => {
+    try {
+      const response = await api.get('/coordinator-dashboard/clientes/cuentas-corrientes');
+      return handleApiResponse<any[]>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al obtener empresas/cuentas corrientes',
+      };
+    }
+  },
+
   aplicarDespachoOptimo: async (matches: Array<{ viajeId: string; choferId: string; vehiculoId?: string | null }>): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/coordinator-dashboard/despacho-optimo/aplicar', { matches });
@@ -2620,6 +2632,25 @@ export const artEmpresaService = {
 
 // Servicio exclusivo del Dueño para Clientes y Cuenta Corriente
 export const duenioClienteService = {
+  crearEmpresa: async (data: {
+    nombre: string;
+    codigoUnico: string;
+    telefono?: string;
+    direccion?: string;
+    observaciones?: string;
+    pin?: string;
+  }): Promise<ApiResponse<Cliente>> => {
+    try {
+      const response = await api.post('/duenios/clientes/empresa', data);
+      return handleApiResponse<Cliente>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'Error al crear empresa',
+      };
+    }
+  },
+
   getClientes: async (params?: { q?: string; filtroCC?: string }): Promise<ApiResponse<Cliente[]>> => {
     try {
       const response = await api.get('/duenios/clientes/listado', { params });

@@ -396,5 +396,100 @@ export const duenioClientesController = {
       console.error('Error al registrar pago de cuenta corriente:', error);
       return res.status(500).json({ success: false, message: 'Error interno al registrar pago' });
     }
+  },
+
+  /**
+   * POST /api/duenios/clientes/empresa
+   * Crea una cuenta institucional / empresa con código único (ej: AMCOR, HOGAR) y Cuenta Corriente habilitada.
+   */
+  async crearClienteEmpresa(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const rol = req.user?.rol;
+
+      if (!userId || (rol !== 'DUENIO' && rol !== 'ADMIN')) {
+        return res.status(403).json({ success: false, message: 'Acceso denegado. Solo Dueños.' });
+      }
+
+      const remiseriaId = await getDuenioRemiseriaId(userId);
+      if (!remiseriaId) {
+        return res.status(404).json({ success: false, message: 'Remisería no encontrada' });
+      }
+
+      const { nombre, codigoUnico, telefono, direccion, observaciones, pin } = req.body;
+      const cleanNombre = String(nombre || '').trim();
+      const cleanCodigo = String(codigoUnico || '')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, '');
+
+      if (!cleanNombre || cleanNombre.length < 2) {
+        return res.status(400).json({ success: false, message: 'Ingresá el nombre de la empresa o institución' });
+      }
+      if (!cleanCodigo || cleanCodigo.length < 3 || cleanCodigo.length > 20) {
+        return res.status(400).json({
+          success: false,
+          message: 'El código único debe tener entre 3 y 20 letras/números (ej: AMCOR, HOGAR)'
+        });
+      }
+
+      const existente = await prisma.cliente.findFirst({
+        where: { dni: { equals: cleanCodigo, mode: 'insensitive' } }
+      });
+      if (existente) {
+        return res.status(400).json({
+          success: false,
+          message: `Ya existe una cuenta registrada con el código "${cleanCodigo}"`
+        });
+      }
+
+      const bcrypt = await import('bcryptjs');
+      const pinFinal = String(pin || '123456').replace(/\D/g, '') || '123456';
+      const passwordHash = await bcrypt.hash(pinFinal, 10);
+      const emailGenerado = `${cleanCodigo.toLowerCase()}@empresa.brunoremises.com.ar`;
+      const cleanTel = String(telefono || '').replace(/\D/g, '') || '00000000';
+      const cleanDir = String(direccion || '').trim() || 'Chivilcoy, Buenos Aires';
+
+      const direccionesFrecuentes =
+        cleanDir && cleanDir.toLowerCase() !== 'chivilcoy, buenos aires'
+          ? JSON.stringify([{ id: `sede-${Date.now()}`, alias: 'Sede', direccion: cleanDir, icono: 'trabajo' }])
+          : null;
+
+      const userCreado = await prisma.user.create({
+        data: {
+          email: emailGenerado,
+          passwordHash,
+          rol: 'CLIENTE',
+          activo: true
+        }
+      });
+
+      const clienteEmpresa = await prisma.cliente.create({
+        data: {
+          nombre: cleanNombre,
+          apellido: '(Empresa)',
+          dni: cleanCodigo,
+          telefono: cleanTel,
+          email: emailGenerado,
+          direccion: cleanDir,
+          fechaNacimiento: new Date('1990-01-01T12:00:00.000Z'),
+          direccionesFrecuentes,
+          observaciones: observaciones ? String(observaciones).trim() : `Cuenta Empresa / Institución (Código: ${cleanCodigo})`,
+          activo: true,
+          cuentaCorrienteHabilitada: true,
+          userId: userCreado.id,
+          remiseriaId
+        }
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: clienteEmpresa,
+        message: `Empresa "${cleanNombre}" creada con código único ${cleanCodigo} y Cuenta Corriente activa.`
+      });
+    } catch (error) {
+      console.error('Error al crear cuenta empresa:', error);
+      return res.status(500).json({ success: false, message: 'Error interno al crear empresa' });
+    }
   }
 };

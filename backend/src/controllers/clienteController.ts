@@ -2193,18 +2193,21 @@ export async function calcularPrecioViaje(
 export const buscarClientePorDni = async (req: Request, res: Response) => {
   try {
     const { dni } = req.params;
-    const cleanDni = String(dni || '').replace(/\D/g, '');
+    const rawTerm = String(dni || '').trim();
+    const cleanCodigo = rawTerm.replace(/[^a-zA-Z0-9_-]/g, '');
 
-    if (!cleanDni || !/^\d{7,8}$/.test(cleanDni)) {
+    if (!cleanCodigo || cleanCodigo.length < 3 || cleanCodigo.length > 20) {
       return res.status(400).json({
         success: false,
-        error: 'El DNI debe contener únicamente números (7 u 8 dígitos)',
-        message: 'El DNI debe contener únicamente números (7 u 8 dígitos)'
+        error: 'Ingresá un DNI (7 u 8 dígitos) o un código único de empresa (ej: AMCOR, HOGAR)',
+        message: 'Ingresá un DNI (7 u 8 dígitos) o un código único de empresa (ej: AMCOR, HOGAR)'
       });
     }
 
-    const cliente = await prisma.cliente.findUnique({
-      where: { dni: cleanDni },
+    const cliente = await prisma.cliente.findFirst({
+      where: {
+        dni: { equals: cleanCodigo, mode: 'insensitive' }
+      },
       select: {
         id: true,
         nombre: true,
@@ -2213,6 +2216,7 @@ export const buscarClientePorDni = async (req: Request, res: Response) => {
         telefono: true,
         email: true,
         direccion: true,
+        cuentaCorrienteHabilitada: true,
         direccionesFrecuentes: true
       }
     });
