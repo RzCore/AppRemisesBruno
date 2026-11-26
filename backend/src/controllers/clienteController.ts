@@ -684,12 +684,17 @@ export const getClienteViajes = async (req: AuthenticatedRequest, res: Response)
       take: 25
     });
 
-    // Si el cliente tiene un viaje PENDIENTE, calcular su posición en la cola de espera para hora pico
-    const viajePendiente = viajes.find((v) => v.estado === 'PENDIENTE');
+    // Si el cliente tiene un viaje PENDIENTE (normal, excluyendo viajes programados de ART),
+    // calcular su posición real en la cola de espera para hora pico
+    const viajePendiente = viajes.find((v) => v.estado === 'PENDIENTE' && !v.artEmpresaId);
     let posicionEnCola: number | null = null;
     if (viajePendiente) {
       const colaPendientes = await prisma.viaje.findMany({
-        where: { estado: 'PENDIENTE' },
+        where: {
+          estado: 'PENDIENTE',
+          artEmpresaId: null,
+          ...(viajePendiente.remiseriaId ? { remiseriaId: viajePendiente.remiseriaId } : {}),
+        },
         select: { id: true },
         orderBy: [{ prioridad: 'desc' }, { createdAt: 'asc' }],
       });
@@ -698,7 +703,7 @@ export const getClienteViajes = async (req: AuthenticatedRequest, res: Response)
     }
 
     const viajesConCola = viajes.map((v) =>
-      v.estado === 'PENDIENTE' ? { ...v, posicionEnCola } : v
+      v.estado === 'PENDIENTE' && !v.artEmpresaId ? { ...v, posicionEnCola } : v
     );
 
     res.json({
@@ -2265,9 +2270,10 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
       }),
       prisma.viaje.findMany({
         where: {
-          estado: {
-            in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO']
-          }
+          OR: [
+            { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+            { estado: 'ACEPTADO', artEmpresaId: null }
+          ]
         },
         select: {
           id: true,

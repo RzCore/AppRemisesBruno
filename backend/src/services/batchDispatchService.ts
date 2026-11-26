@@ -172,12 +172,13 @@ export const batchDispatchService = {
   async calcularLoteOptimo(remiseriaId: string): Promise<BatchOptimizationResult> {
     const ahora = new Date();
 
-    // 1. Obtener viajes pendientes de la remisería ordenados por fecha de creación (antigüedad)
+    // 1. Obtener viajes pendientes normales de la remisería (excluir viajes programados de ART)
     const viajesPendientes = await prisma.viaje.findMany({
       where: {
         remiseriaId,
         estado: 'PENDIENTE',
-        choferId: null
+        choferId: null,
+        artEmpresaId: null
       },
       include: {
         cliente: true
@@ -200,11 +201,15 @@ export const batchDispatchService = {
     });
 
     // 3. Filtrar choferes que ya tienen un viaje activo o una oferta pendiente de aceptación
+    // (excluir viajes programados de ART que aún no comenzaron)
     const viajesActivosChoferes = await prisma.viaje.findMany({
       where: {
         remiseriaId,
         choferId: { not: null },
-        estado: { in: ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] }
+        OR: [
+          { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+          { estado: { in: ['PENDIENTE', 'ACEPTADO'] }, artEmpresaId: null }
+        ]
       },
       select: { choferId: true }
     });

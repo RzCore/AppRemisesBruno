@@ -1231,7 +1231,10 @@ export const choferController = {
             where: {
               remiseriaId: chofer.remiseriaId,
               choferId: { not: null },
-              estado: { in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] },
+              OR: [
+                { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+                { estado: 'ACEPTADO', artEmpresaId: null },
+              ],
             },
             select: { choferId: true },
           }),
@@ -1344,6 +1347,8 @@ export const choferController = {
         const candidatosViajes = await prisma.viaje.findMany({
           where: {
             estado: 'PENDIENTE',
+            // Los viajes de ART son programados y de asignación manual; nunca entran al despacho automático
+            artEmpresaId: null,
             OR: [
               // 1. Asignado específicamente a este chofer
               { choferId: chofer.id },
