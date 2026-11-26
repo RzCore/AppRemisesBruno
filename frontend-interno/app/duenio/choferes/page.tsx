@@ -213,17 +213,16 @@ export default function ChoferesPage() {
 
       const response = await choferService.create(payload);
       if (response.success) {
-        const emailAcceso = response.data?.email || formData.email || `${(formData.numeroChofer || '').toLowerCase()}@brunoremises.com.ar`;
         const alertas = (response as any).alertasVencimiento || [];
         const autoMsg = vehiculoMode === 'nuevo' ? ` + Auto ${nuevoVehiculo.patente.trim().toUpperCase()} asignado.` : '';
         if (alertas.length > 0) {
           toast.success(
-            `Chofer creado${autoMsg} (Acceso: ${emailAcceso} / Clave: ${formData.dni}). Se alertaron ${alertas.length} documento(s) por vencer.`,
+            `Chofer creado${autoMsg} (Ingresa en choferes.brunoremises.com.ar solo con DNI: ${formData.dni}). Se alertaron ${alertas.length} documento(s) por vencer.`,
             { duration: 6500 }
           );
         } else {
           toast.success(
-            `Chofer dado de alta${autoMsg} Ingresa con ${emailAcceso} y clave ${formData.dni}`,
+            `Chofer dado de alta${autoMsg} Ingresa a la App solo con su DNI: ${formData.dni} (sin clave)`,
             { duration: 6000 }
           );
         }
@@ -1605,26 +1604,12 @@ export default function ChoferesPage() {
                     {!isEdit && (
                       <div className="p-3 bg-emerald-50/80 rounded-xl border border-emerald-200 text-xs space-y-1">
                         <span className="text-[10px] text-emerald-700 font-bold uppercase block">
-                          Credenciales de acceso para la App del Chofer (choferes.brunoremises.com.ar)
+                          Acceso a la App del Chofer (choferes.brunoremises.com.ar)
                         </span>
                         <div className="text-slate-700">
-                          Usuario (Email):{' '}
-                          <strong className="font-mono text-slate-900">
-                            {(() => {
-                              if (formData.email?.trim()) return formData.email.trim().toLowerCase();
-                              const numSlug = (formData.numeroChofer || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-                              const dniSlug = (formData.dni || '').replace(/\D/g, '');
-                              const numCompartido = choferes.some(
-                                (c) => c.numeroChofer.trim().toLowerCase() === (formData.numeroChofer || '').trim().toLowerCase()
-                              );
-                              return numCompartido && dniSlug
-                                ? `${numSlug}.${dniSlug}@brunoremises.com.ar`
-                                : `${numSlug}@brunoremises.com.ar`;
-                            })()}
-                          </strong>
-                        </div>
-                        <div className="text-slate-700">
-                          Contraseña inicial: <strong className="font-mono text-slate-900">{formData.dni}</strong> (su DNI)
+                          Ingresá únicamente con su DNI:{' '}
+                          <strong className="font-mono text-slate-900">{formData.dni || '—'}</strong>{' '}
+                          <span className="text-emerald-700 font-semibold">(sin contraseña)</span>
                         </div>
                       </div>
                     )}

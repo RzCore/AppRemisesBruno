@@ -1190,3 +1190,133 @@ export const registroExpressCliente = async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: 'Error al registrar cliente' });
   }
 };
+
+// Login exclusivo para Choferes únicamente con número de DNI (sin contraseña)
+export const loginChofer = async (req: Request, res: Response) => {
+  try {
+    const rawDni = String(req.body?.dni || '').trim();
+    const cleanDni = rawDni.replace(/\D/g, '');
+
+    if (!cleanDni || cleanDni.length < 6 || cleanDni.length > 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ingresá un número de DNI válido (sin puntos ni espacios).',
+      });
+    }
+
+    // Buscar chofer tolerando DNI guardado con o sin puntos
+    const formattedDni = cleanDni.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    const chofer = await prisma.chofer.findFirst({
+      where: {
+        OR: [
+          { dni: cleanDni },
+          { dni: rawDni },
+          { dni: formattedDni },
+        ],
+      },
+      include: {
+        user: true,
+        vehiculo: true,
+        remiseria: {
+          select: {
+            id: true,
+            nombreFantasia: true,
+            razonSocial: true,
+          },
+        },
+      },
+    });
+
+    if (!chofer) {
+      return res.status(401).json({
+        success: false,
+        message: 'No encontramos ningún chofer registrado con ese DNI.',
+      });
+    }
+
+    if (chofer.estado === 'DADO_DE_BAJA') {
+      return res.status(403).json({
+        success: false,
+        message: 'Tu cuenta de chofer se encuentra dada de baja. Contactá a la agencia.',
+      });
+    }
+
+    if (chofer.estado === 'SUSPENDIDO') {
+      return res.status(403).json({
+        success: false,
+        message: 'Tu cuenta de chofer se encuentra suspendida. Contactá a la agencia.',
+      });
+    }
+
+    if (chofer.estado === 'RECHAZADO') {
+      return res.status(403).json({
+        success: false,
+        message: `Tu solicitud fue rechazada.${chofer.motivoRechazo ? ' Motivo: ' + chofer.motivoRechazo : ''}`,
+      });
+    }
+
+    const user = chofer.user;
+    if (!user || !user.activo) {
+      return res.status(401).json({
+        success: false,
+        message: 'Tu usuario no está activo en el sistema. Contactá a la agencia.',
+      });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET;
+    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
+    if (!jwtSecret || !jwtRefreshSecret) {
+      console.error('JWT secrets not configured');
+      return res.status(500).json({
+        success: false,
+        message: 'Error de configuración del servidor',
+      });
+    }
+
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, rol: user.rol },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      jwtRefreshSecret,
+      { expiresIn: '7d' }
+    );
+
+    await prisma.appUsage.create({
+      data: {
+        userId: user.id,
+        userEmail: user.email,
+        action: 'LOGIN_CHOFER_DNI',
+        details: JSON.stringify({ choferId: chofer.id, numeroChofer: chofer.numeroChofer, dni: cleanDni }),
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent') || null,
+      },
+    });
+
+    const { user: _omitUser, ...choferData } = chofer;
+
+    return res.json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          rol: user.rol,
+          chofer: choferData,
+        },
+        accessToken,
+        refreshToken,
+      },
+      message: 'Login exitoso',
+    });
+  } catch (error) {
+    console.error('Error en loginChofer:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+    });
+  }
+};

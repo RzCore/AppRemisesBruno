@@ -10,6 +10,7 @@ import {
   changePassword,
   verificarDni,
   loginCliente,
+  loginChofer,
   solicitarCodigoCliente,
   verificarCodigoCliente,
   registroExpressCliente
@@ -47,6 +48,9 @@ router.post('/cliente/login', loginCliente);
 router.post('/cliente/solicitar-codigo', solicitarCodigoCliente);
 router.post('/cliente/verificar-codigo', verificarCodigoCliente);
 router.post('/cliente/registro-express', registroExpressCliente);
+
+// Ruta exclusiva para login de Choferes solo con número de DNI (sin clave)
+router.post('/chofer/login', loginChofer);
 
 // Verificación de identidad oficial con ARCA (ex-AFIP) / ANSES por DNI
 router.get('/verificar-dni/:dni', verificarDni);

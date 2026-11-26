@@ -102,6 +102,7 @@ api.interceptors.response.use(
       isAuthTokenError &&
       !originalRequest._retry &&
       !originalRequest.url?.includes('/auth/login') &&
+      !originalRequest.url?.includes('/auth/chofer/login') &&
       !originalRequest.url?.includes('/auth/refresh')
     ) {
       originalRequest._retry = true;
@@ -228,6 +229,18 @@ export const authService = {
       return {
         success: false,
         message: error.response?.data?.message || 'Error al iniciar sesión',
+      };
+    }
+  },
+
+  loginChofer: async (dni: string): Promise<ApiResponse<AuthResponse>> => {
+    try {
+      const response = await api.post('/auth/chofer/login', { dni });
+      return handleApiResponse<AuthResponse>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'DNI no registrado',
       };
     }
   },
