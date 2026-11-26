@@ -1338,7 +1338,8 @@ export const cancelarViaje = async (req: AuthenticatedRequest, res: Response) =>
         motivoCancelacion: motivo || 'Cancelado por el cliente',
         canceladoPor: 'CLIENTE',
         debeAbonarMinimo,
-        costoCancelacion
+        costoCancelacion,
+        canceladoEn: new Date()
       },
       include: {
         cliente: true,
@@ -1346,6 +1347,24 @@ export const cancelarViaje = async (req: AuthenticatedRequest, res: Response) =>
         vehiculo: true
       }
     });
+
+    // Si corresponde abonar viaje mínimo (< 10 cuadras o chofer en puerta), registrar deuda pendiente a favor del chofer X
+    if (debeAbonarMinimo && costoCancelacion && viaje.choferId) {
+      const { registrarDeudaCancelacion } = await import('../services/deudaCancelacionService');
+      await registrarDeudaCancelacion({
+        remiseriaId: viaje.remiseriaId,
+        clienteId: viaje.clienteId,
+        clienteTelefono: viaje.clienteTelefono || updatedViaje.cliente?.telefono || null,
+        clienteNombre:
+          viaje.clienteNombre ||
+          (updatedViaje.cliente ? `${updatedViaje.cliente.nombre} ${updatedViaje.cliente.apellido}`.trim() : null),
+        viajeOrigenId: viaje.id,
+        choferAcreedorId: viaje.choferId,
+        monto: costoCancelacion,
+        motivo: 'CANCELACION_MENOS_10_CUADRAS',
+        observaciones: motivo || 'Cancelado por el cliente con móvil a menos de 10 cuadras'
+      });
+    }
 
     // Notificación sonora inmediata al chofer y al coordinador vía WebSockets
     try {

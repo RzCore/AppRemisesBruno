@@ -43,6 +43,7 @@ export default function VehiculosPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createStep, setCreateStep] = useState<number>(1);
   const [tipoPropietario, setTipoPropietario] = useState<'AGENCIA' | 'TERCERO' | 'CHOFER'>('AGENCIA');
+  const [nuevoDuenoTercero, setNuevoDuenoTercero] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editStep, setEditStep] = useState<number>(1);
   const [editingVehiculo, setEditingVehiculo] = useState<Vehiculo | null>(null);
@@ -233,10 +234,13 @@ export default function VehiculosPage() {
 
     if (propNormalized === 'agencia') {
       setTipoPropietario('AGENCIA');
+      setNuevoDuenoTercero(false);
     } else if (isChoferProp) {
       setTipoPropietario('CHOFER');
+      setNuevoDuenoTercero(false);
     } else {
       setTipoPropietario('TERCERO');
+      setNuevoDuenoTercero(false);
     }
 
     setFormData({
@@ -265,6 +269,7 @@ export default function VehiculosPage() {
     resetForm();
     setCreateStep(1);
     setTipoPropietario('AGENCIA');
+    setNuevoDuenoTercero(false);
     setFormData(prev => ({ ...prev, propietario: 'Agencia' }));
     setShowCreateModal(true);
   };
@@ -1021,62 +1026,96 @@ export default function VehiculosPage() {
                     )}
 
                     {/* Campo de ingreso del Dueño Tercero si seleccionó TERCERO */}
-                    {tipoPropietario === 'TERCERO' && (
-                      <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div>
-                          <label className="block text-xs font-bold text-blue-950 mb-1">
-                            Nombre completo del Dueño del Vehículo *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            autoFocus
-                            value={formData.propietario === 'Agencia' || formData.propietario === 'Chofer' ? '' : formData.propietario}
-                            onChange={(e) => setFormData({ ...formData, propietario: e.target.value })}
-                            className="w-full px-3.5 py-2.5 bg-white border border-blue-300 rounded-xl text-xs sm:text-sm uppercase font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 shadow-xs"
-                            placeholder="Ej: Carlos Gómez, María Benítez, etc."
-                          />
-                          <p className="text-[11px] text-blue-700 mt-1">
-                            Con este nombre podrás seleccionarlo y generar su reporte de liquidación en PDF.
+                    {tipoPropietario === 'TERCERO' && (() => {
+                      // Deduplicar dueños terceros ya registrados (case-insensitive) y ordenar alfabéticamente
+                      const duenosMap = new Map<string, string>();
+                      for (const v of vehiculos) {
+                        const raw = v.propietario?.trim();
+                        if (!raw) continue;
+                        const norm = raw.toLowerCase();
+                        if (norm === 'agencia' || norm === 'chofer') continue;
+                        // Excluir choferes que figuran como propietarios de su propio auto
+                        const esChoferDueno = v.choferes?.some(
+                          (c) => c.esPropietario && `${c.nombre} ${c.apellido}`.trim().toLowerCase() === norm
+                        );
+                        if (esChoferDueno) continue;
+                        if (!duenosMap.has(norm)) {
+                          duenosMap.set(norm, raw);
+                        }
+                      }
+                      const duenosRegistrados = Array.from(duenosMap.values()).sort((a, b) =>
+                        a.localeCompare(b, 'es', { sensitivity: 'base' })
+                      );
+
+                      const valorActual =
+                        formData.propietario === 'Agencia' || formData.propietario === 'Chofer'
+                          ? ''
+                          : formData.propietario;
+                      const matchRegistrado = duenosRegistrados.find(
+                        (d) => d.toLowerCase() === valorActual.trim().toLowerCase()
+                      );
+                      const mostrarInputNuevo =
+                        duenosRegistrados.length === 0 ||
+                        nuevoDuenoTercero ||
+                        (Boolean(valorActual.trim()) && !matchRegistrado);
+
+                      return (
+                        <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                          {duenosRegistrados.length > 0 && (
+                            <div>
+                              <label className="block text-xs font-bold text-blue-950 mb-1">
+                                Dueño del Vehículo *
+                              </label>
+                              <select
+                                value={mostrarInputNuevo ? '__NUEVO__' : (matchRegistrado || '')}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__NUEVO__') {
+                                    setNuevoDuenoTercero(true);
+                                    setFormData({ ...formData, propietario: '' });
+                                  } else {
+                                    setNuevoDuenoTercero(false);
+                                    setFormData({ ...formData, propietario: val });
+                                  }
+                                }}
+                                className="w-full px-3.5 py-2.5 bg-white border border-blue-300 rounded-xl text-xs sm:text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 shadow-xs"
+                              >
+                                <option value="">-- Seleccionar dueño registrado --</option>
+                                {duenosRegistrados.map((d) => (
+                                  <option key={d} value={d}>
+                                    {d}
+                                  </option>
+                                ))}
+                                <option value="__NUEVO__">➕ Cargar nuevo dueño...</option>
+                              </select>
+                            </div>
+                          )}
+
+                          {mostrarInputNuevo && (
+                            <div>
+                              <label className="block text-xs font-bold text-blue-950 mb-1">
+                                {duenosRegistrados.length > 0
+                                  ? 'Nombre completo del nuevo Dueño *'
+                                  : 'Nombre completo del Dueño del Vehículo *'}
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                autoFocus
+                                value={valorActual}
+                                onChange={(e) => setFormData({ ...formData, propietario: e.target.value })}
+                                className="w-full px-3.5 py-2.5 bg-white border border-blue-300 rounded-xl text-xs sm:text-sm uppercase font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 shadow-xs"
+                                placeholder="Ej: Carlos Gómez, María Benítez, etc."
+                              />
+                            </div>
+                          )}
+
+                          <p className="text-[11px] text-blue-700">
+                            Al guardar, este dueño quedará disponible en el desplegable para sus próximos vehículos y podrás generar su reporte de liquidación en PDF.
                           </p>
                         </div>
-
-                        {/* Sugerencias de dueños ya registrados en otros autos */}
-                        {(() => {
-                          const duenos = Array.from(
-                            new Set(
-                              vehiculos
-                                .map((v) => v.propietario?.trim())
-                                .filter((p) => p && p.toLowerCase() !== 'agencia' && p.toLowerCase() !== 'chofer')
-                            )
-                          );
-                          if (duenos.length === 0) return null;
-                          return (
-                            <div>
-                              <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block mb-1.5">
-                                O seleccioná un dueño ya registrado:
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {duenos.map((d) => (
-                                  <button
-                                    key={d}
-                                    type="button"
-                                    onClick={() => setFormData({ ...formData, propietario: d })}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                                      formData.propietario.toLowerCase() === d.toLowerCase()
-                                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                                        : 'bg-white text-blue-800 border-blue-200 hover:bg-blue-100'
-                                    }`}
-                                  >
-                                    {d}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
 

@@ -112,6 +112,9 @@ model Remiseria {
   // Relación 1:N con Cierres de Facturación ART
   cierresFacturacionArt CierreFacturacionArt[]
 
+  // Relación 1:N con Deudas por Cancelación / Pasajero Ausente
+  deudasCancelacion DeudaCancelacion[]
+
   @@map("remiserias")
 }
 
@@ -206,6 +209,9 @@ model Cliente {
   // Relación 1:N con PagosCuentaCorriente
   pagosCuentaCorriente PagoCuentaCorriente[]
 
+  // Relación 1:N con Deudas por Cancelación / Pasajero Ausente
+  deudasCancelacion DeudaCancelacion[]
+
   @@map("clientes")
 }
 
@@ -283,6 +289,10 @@ model Chofer {
 
   // Relación 1:N con Notificaciones Push
   pushSubscriptions PushSubscription[]
+
+  // Deudas por cancelación/ausente que le corresponden a este chofer o que cobró para otro chofer
+  deudasACobrar     DeudaCancelacion[] @relation("DeudaChoferAcreedor")
+  deudasCobradas    DeudaCancelacion[] @relation("DeudaChoferCobrador")
 
   @@index([remiseriaId, estado, isOnline])
   @@index([remiseriaId, numeroChofer])
@@ -452,6 +462,9 @@ model Viaje {
 
   // ID externo para deduplicación de viajes importados desde portales ART (ej. 'FELEVAL:2085980')
   externoId              String?   @unique
+
+  // Deuda por cancelación / pasajero ausente originada en este viaje
+  deudaCancelacion       DeudaCancelacion? @relation("DeudaViajeOrigen")
 
   @@index([remiseriaId, estado])
   @@index([choferId, estado])
@@ -817,5 +830,45 @@ model PushSubscription {
   @@index([choferId])
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// ==============================================================================
+// DEUDAS PENDIENTES POR CANCELACIÓN (< 10 CUADRAS) O PASAJERO AUSENTE
+// ==============================================================================
+model DeudaCancelacion {
+  id               String    @id @default(cuid())
+  remiseriaId      String
+  remiseria        Remiseria @relation(fields: [remiseriaId], references: [id], onDelete: Cascade)
+
+  clienteId        String?
+  cliente          Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  clienteTelefono  String?
+  clienteNombre    String?
+
+  viajeOrigenId    String    @unique
+  viajeOrigen      Viaje     @relation("DeudaViajeOrigen", fields: [viajeOrigenId], references: [id], onDelete: Cascade)
+
+  // Chofer X al que le corresponde este importe
+  choferAcreedorId String
+  choferAcreedor   Chofer    @relation("DeudaChoferAcreedor", fields: [choferAcreedorId], references: [id], onDelete: Cascade)
+
+  monto            Float
+  motivo           String    // 'CANCELACION_MENOS_10_CUADRAS' | 'PASAJERO_AUSENTE'
+  estado           String    @default("PENDIENTE") // 'PENDIENTE' | 'COBRADA' | 'CONDONADA'
+
+  // Cuando otro chofer Y (o el mismo) cobra esta deuda en un viaje posterior
+  viajeCobroId     String?
+  choferCobradorId String?
+  choferCobrador   Chofer?   @relation("DeudaChoferCobrador", fields: [choferCobradorId], references: [id], onDelete: SetNull)
+  fechaCobro       DateTime?
+  observaciones    String?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([remiseriaId, estado])
+  @@index([clienteId, estado])
+  @@index([clienteTelefono, estado])
+  @@map("deudas_cancelacion")
 }
  

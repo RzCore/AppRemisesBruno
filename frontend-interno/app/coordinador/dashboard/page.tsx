@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { coordinadorDashboardService, clienteAuthService, choferService, vehiculoService, artEmpresaService, getSocketUrl } from '@/lib/api';
 import { getArtColorClasses } from '@/lib/artColorUtils';
+import { buildGoogleMapsUrl, isSharedLocationText } from '@/lib/mapsLinkUtils';
 import { ArtEmpresa } from '@/types';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import LogoBruno from '@/components/LogoBruno';
@@ -2644,7 +2645,19 @@ export default function CoordinadorDashboard() {
                               <td className="px-3 sm:px-4 py-3">
                                 <div className="text-xs sm:text-sm text-gray-900 line-clamp-2 leading-snug" title={viaje.origen}>
                                   <LocationIcon className="h-3.5 w-3.5 mr-1 inline text-blue-500 shrink-0" />
-                                  <span>{viaje.origen}</span>
+                                  {isSharedLocationText(viaje.origen, (viaje as any).origenDetallado) ? (
+                                    <a
+                                      href={buildGoogleMapsUrl(viaje.origen, (viaje as any).origenDetallado, 'search')}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-700 hover:underline font-medium"
+                                      title="Abrir ubicación compartida en Google Maps"
+                                    >
+                                      {viaje.origen} <span className="text-[10px] font-bold text-blue-600">(Maps ↗)</span>
+                                    </a>
+                                  ) : (
+                                    <span>{viaje.origen}</span>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-3 sm:px-4 py-3">
@@ -2806,7 +2819,19 @@ export default function CoordinadorDashboard() {
                               <td className="px-3 sm:px-4 py-3">
                                 <div className="text-xs sm:text-sm text-gray-900 line-clamp-2 leading-snug" title={viaje.origen}>
                                   <LocationIcon className="h-3.5 w-3.5 mr-1 inline text-blue-500 shrink-0" />
-                                  <span>{viaje.origen}</span>
+                                  {isSharedLocationText(viaje.origen, (viaje as any).origenDetallado) ? (
+                                    <a
+                                      href={buildGoogleMapsUrl(viaje.origen, (viaje as any).origenDetallado, 'search')}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-700 hover:underline font-medium"
+                                      title="Abrir ubicación compartida en Google Maps"
+                                    >
+                                      {viaje.origen} <span className="text-[10px] font-bold text-blue-600">(Maps ↗)</span>
+                                    </a>
+                                  ) : (
+                                    <span>{viaje.origen}</span>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-3 sm:px-4 py-3">
@@ -2944,7 +2969,19 @@ export default function CoordinadorDashboard() {
                               <td className="px-3 sm:px-4 py-3">
                                 <div className="text-xs sm:text-sm text-gray-900 line-clamp-2 leading-snug" title={viaje.origen}>
                                   <LocationIcon className="h-3.5 w-3.5 mr-1 inline text-blue-500 shrink-0" />
-                                  <span>{viaje.origen}</span>
+                                  {isSharedLocationText(viaje.origen, (viaje as any).origenDetallado) ? (
+                                    <a
+                                      href={buildGoogleMapsUrl(viaje.origen, (viaje as any).origenDetallado, 'search')}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-700 hover:underline font-medium"
+                                      title="Abrir ubicación compartida en Google Maps"
+                                    >
+                                      {viaje.origen} <span className="text-[10px] font-bold text-blue-600">(Maps ↗)</span>
+                                    </a>
+                                  ) : (
+                                    <span>{viaje.origen}</span>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-3 sm:px-4 py-3">
@@ -3497,7 +3534,19 @@ export default function CoordinadorDashboard() {
                                     <td className="px-3 sm:px-4 py-3">
                                       <div className="text-xs sm:text-sm text-gray-900 line-clamp-2 leading-snug" title={viaje.origen}>
                                         <LocationIcon className="h-3.5 w-3.5 mr-1 inline text-blue-500 shrink-0" />
-                                        <span>{viaje.origen}</span>
+                                        {isSharedLocationText(viaje.origen, (viaje as any).origenDetallado) ? (
+                                          <a
+                                            href={buildGoogleMapsUrl(viaje.origen, (viaje as any).origenDetallado, 'search')}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-700 hover:underline font-medium"
+                                            title="Abrir ubicación compartida en Google Maps"
+                                          >
+                                            {viaje.origen} <span className="text-[10px] font-bold text-blue-600">(Maps ↗)</span>
+                                          </a>
+                                        ) : (
+                                          <span>{viaje.origen}</span>
+                                        )}
                                       </div>
                                     </td>
 

@@ -97,10 +97,10 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-async function geocodeNominatimSimple(address: string): Promise<{ lat: number; lon: number } | null> {
-  if (!address || address.length < 4) return null;
+async function queryNominatimOnce(query: string): Promise<{ lat: number; lon: number } | null> {
+  if (!query || query.length < 4) return null;
   try {
-    const q = address.toLowerCase().includes('argentina') ? address : `${address}, Argentina`;
+    const q = query.toLowerCase().includes('argentina') ? query : `${query}, Argentina`;
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=${encodeURIComponent(q)}`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'RemisesBrunoSync/1.0 (notificaciones@rzcore.dev)' },
@@ -114,6 +114,45 @@ async function geocodeNominatimSimple(address: string): Promise<{ lat: number; l
   } catch {
     // fallback silencioso
   }
+  return null;
+}
+
+async function geocodeNominatimSimple(
+  address: string
+): Promise<{ lat: number; lon: number; esAproximado?: boolean } | null> {
+  if (!address || address.length < 4) return null;
+
+  // 1. Intento directo con la dirección completa
+  const exact = await queryNominatimOnce(address);
+  if (exact) return exact;
+
+  // 2. Limpiar alturas rurales/inválidas como " 0", " S/N", " SN" en la calle
+  const parts = address
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    const calleSinCero = parts[0]
+      .replace(/\b(s\/n|s\.n\.|sn|0)\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (calleSinCero && calleSinCero !== parts[0]) {
+      const cleanedQuery = [calleSinCero, ...parts.slice(1)].join(', ');
+      const cleanedRes = await queryNominatimOnce(cleanedQuery);
+      if (cleanedRes) return cleanedRes;
+    }
+
+    // 3. Fallback a la localidad/ciudad (ej: "CUARTEL V 0, SUIPACHA, Buenos Aires" -> "SUIPACHA, Buenos Aires")
+    // Evita que direcciones rurales sin altura queden con 0 km y $0
+    const localidadQuery = parts.slice(1).join(', ');
+    if (localidadQuery.length >= 4) {
+      const locRes = await queryNominatimOnce(localidadQuery);
+      if (locRes) return { ...locRes, esAproximado: true };
+    }
+  }
+
   return null;
 }
 
@@ -560,10 +599,65 @@ export async function sincronizarArtFeleval(
     const existentesDb = pendientesNuevos.length > 0
       ? await prisma.viaje.findMany({
           where: { externoId: { in: pendientesNuevos.map((p) => p.externoId) } },
-          select: { externoId: true }
+          select: {
+            id: true,
+            externoId: true,
+            estado: true,
+            precio: true,
+            distanciaKmConPasajero: true,
+            origen: true,
+            destino: true,
+            horaTurno: true
+          }
         })
       : [];
     const existentesSet = new Set(existentesDb.map((e) => e.externoId));
+
+    // Recalcular automáticamente viajes existentes que hayan quedado en $0 por dirección rural sin geocodificar
+    const baseLatRepair = typeof art.remiseria?.latitud === 'number' ? art.remiseria.latitud : DEFAULT_BASE_LAT;
+    const baseLonRepair = typeof art.remiseria?.longitud === 'number' ? art.remiseria.longitud : DEFAULT_BASE_LON;
+    for (const ex of existentesDb) {
+      if (ex.estado === 'PENDIENTE' && Number(ex.precio || 0) === 0 && Number(ex.distanciaKmConPasajero || 0) === 0) {
+        try {
+          const logRepair = await calcularLogisticaFeleval({
+            origen: ex.origen,
+            destino: ex.destino,
+            horaTurno: ex.horaTurno || '08:00',
+            modalidad: '',
+            modoTabla: '',
+            baseLat: baseLatRepair,
+            baseLon: baseLonRepair
+          });
+          const pArt = logRepair.esLocal
+            ? Number(art.precioTramo || 0)
+            : logRepair.distanciaKm > 0
+            ? Math.round(logRepair.distanciaKm * Number(art.valorKm || 0))
+            : 0;
+          const pChofer =
+            art.pagaChoferTipo === 'PERSONALIZADO'
+              ? logRepair.esLocal
+                ? Number(art.choferPrecioTramo || pArt)
+                : logRepair.distanciaKm > 0
+                ? Math.round(logRepair.distanciaKm * Number(art.choferValorKm || 0))
+                : 0
+              : pArt;
+          if (pArt > 0 || pChofer > 0) {
+            await prisma.viaje.update({
+              where: { id: ex.id },
+              data: {
+                distanciaKmConPasajero: logRepair.distanciaKm,
+                horaSalidaChofer: logRepair.horaSalida,
+                precio: pChofer,
+                precioArt: pArt > 0 ? pArt : null
+              }
+            });
+          }
+        } catch {
+          // continuar
+        }
+      }
+    }
+
     const soloNuevos = pendientesNuevos.filter((p) => {
       if (existentesSet.has(p.externoId)) {
         yaExistentes++;
@@ -966,10 +1060,65 @@ export async function sincronizarArtSimar2(
       candidatos.length > 0
         ? await prisma.viaje.findMany({
             where: { externoId: { in: candidatos.map((c) => c.externoId) } },
-            select: { externoId: true }
+            select: {
+              id: true,
+              externoId: true,
+              estado: true,
+              precio: true,
+              distanciaKmConPasajero: true,
+              origen: true,
+              destino: true,
+              horaTurno: true
+            }
           })
         : [];
     const existentesSet = new Set(existentesDb.map((e) => e.externoId));
+
+    const baseLat = typeof art.remiseria?.latitud === 'number' ? art.remiseria.latitud : DEFAULT_BASE_LAT;
+    const baseLon = typeof art.remiseria?.longitud === 'number' ? art.remiseria.longitud : DEFAULT_BASE_LON;
+
+    // Recalcular automáticamente viajes existentes que hayan quedado en $0 por dirección rural sin geocodificar
+    for (const ex of existentesDb) {
+      if (ex.estado === 'PENDIENTE' && Number(ex.precio || 0) === 0 && Number(ex.distanciaKmConPasajero || 0) === 0) {
+        try {
+          const logRepair = await calcularLogisticaFeleval({
+            origen: ex.origen,
+            destino: ex.destino,
+            horaTurno: ex.horaTurno || '08:00',
+            modalidad: '',
+            modoTabla: '',
+            baseLat,
+            baseLon
+          });
+          const pArt = logRepair.esLocal
+            ? Number(art.precioTramo || 0)
+            : logRepair.distanciaKm > 0
+            ? Math.round(logRepair.distanciaKm * Number(art.valorKm || 0))
+            : 0;
+          const pChofer =
+            art.pagaChoferTipo === 'PERSONALIZADO'
+              ? logRepair.esLocal
+                ? Number(art.choferPrecioTramo || pArt)
+                : logRepair.distanciaKm > 0
+                ? Math.round(logRepair.distanciaKm * Number(art.choferValorKm || 0))
+                : 0
+              : pArt;
+          if (pArt > 0 || pChofer > 0) {
+            await prisma.viaje.update({
+              where: { id: ex.id },
+              data: {
+                distanciaKmConPasajero: logRepair.distanciaKm,
+                horaSalidaChofer: logRepair.horaSalida,
+                precio: pChofer,
+                precioArt: pArt > 0 ? pArt : null
+              }
+            });
+          }
+        } catch {
+          // continuar
+        }
+      }
+    }
 
     const soloNuevos = candidatos.filter((c) => {
       if (existentesSet.has(c.externoId)) {
@@ -978,9 +1127,6 @@ export async function sincronizarArtSimar2(
       }
       return true;
     });
-
-    const baseLat = typeof art.remiseria?.latitud === 'number' ? art.remiseria.latitud : DEFAULT_BASE_LAT;
-    const baseLon = typeof art.remiseria?.longitud === 'number' ? art.remiseria.longitud : DEFAULT_BASE_LON;
 
     for (const { simarId, externoId, row } of soloNuevos) {
       try {

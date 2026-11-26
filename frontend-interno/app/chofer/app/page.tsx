@@ -6,6 +6,12 @@ import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'react-hot-toast';
 import {
+  buildGoogleMapsUrl,
+  extractCoordsFromLocation,
+  extractGoogleMapsUrlFromChatText,
+  isSharedLocationText,
+} from '@/lib/mapsLinkUtils';
+import {
   MapPin,
   Navigation,
   Car,
@@ -424,30 +430,24 @@ export default function ChoferApp() {
   }, [viajesProgramados, dispararAlertaSalidaArt]);
 
   // 1. Lanzador Directo a GPS Externo (Google Maps / Waze)
-  const abrirNavegadorExterno = (app: 'google' | 'waze') => {
+  const abrirNavegadorExterno = (app: 'google' | 'waze', tipoObjetivo?: 'origen' | 'destino') => {
     if (!viajeActual) return;
-    const esBuscarPasajero = viajeActual.estado === 'ACEPTADO' || viajeActual.estado === 'EN_CAMINO';
+    const esBuscarPasajero =
+      tipoObjetivo === 'origen'
+        ? true
+        : tipoObjetivo === 'destino'
+        ? false
+        : viajeActual.estado === 'ACEPTADO' || viajeActual.estado === 'EN_CAMINO';
     const direccionObjetivo = esBuscarPasajero ? viajeActual.origen : viajeActual.destino;
     const detalleObjetivo = esBuscarPasajero ? viajeActual.origenDetallado : viajeActual.destinoDetallado;
 
-    let destinoParam = direccionObjetivo;
-    if (detalleObjetivo) {
-      try {
-        if (detalleObjetivo.startsWith('{')) {
-          const parsed = JSON.parse(detalleObjetivo);
-          if (parsed.lat && parsed.lng) {
-            destinoParam = `${parsed.lat},${parsed.lng}`;
-          }
-        } else if (detalleObjetivo.includes(',')) {
-          destinoParam = detalleObjetivo.trim();
-        }
-      } catch {}
-    }
+    const coords = extractCoordsFromLocation(direccionObjetivo, detalleObjetivo);
+    const destinoParam = coords ? `${coords.lat},${coords.lng}` : direccionObjetivo;
 
     if (app === 'google') {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destinoParam)}&travelmode=driving`, '_blank');
+      window.open(buildGoogleMapsUrl(direccionObjetivo, detalleObjetivo, 'dir'), '_blank', 'noopener,noreferrer');
     } else {
-      window.open(`https://waze.com/ul?q=${encodeURIComponent(destinoParam)}&navigate=yes`, '_blank');
+      window.open(`https://waze.com/ul?q=${encodeURIComponent(destinoParam)}&navigate=yes`, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -1839,6 +1839,53 @@ export default function ChoferApp() {
     }
   };
 
+  const reportarPasajeroAusente = async () => {
+    if (!viajeActual || actionLoading) return;
+    const montoMin = Number(viajeActual?.remiseria?.bajadaBandera || 3500);
+    const confirmacion = window.confirm(
+      `¿Confirmás que llegaste al domicilio y el pasajero ya se fue / no salió?\n\nSe cancelará el viaje y se dejará cargado el viaje mínimo ($${montoMin.toLocaleString('es-AR')}) como pago pendiente del pasajero a tu favor para su próximo viaje.`
+    );
+    if (!confirmacion) return;
+
+    setActionLoading(true);
+    try {
+      const res = await choferService.reportarPasajeroAusente(viajeActual.id);
+      if (res.success) {
+        previousViajeIdRef.current = null;
+        tripDistanceRef.current = { con: 0, sin: 0 };
+        setViajeActual(null);
+        toast.success(res.message || 'Viaje mínimo registrado a tu favor.', { duration: 5000 });
+        await sincronizarEstado(isActive);
+      } else {
+        toast.error(res.message || 'Error al reportar pasajero ausente');
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCobrarDeudaPasajero = async (deudaId: string) => {
+    if (!viajeActual || actionLoading) return;
+    setActionLoading(true);
+    try {
+      const res = await choferService.cobrarDeudaCancelacion(deudaId, viajeActual.id);
+      if (res.success) {
+        toast.success(res.message || 'Pago pendiente marcado como cobrado', { duration: 5000 });
+        setViajeActual((prev: any) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            deudasPendientesPasajero: (prev.deudasPendientesPasajero || []).filter((d: any) => d.id !== deudaId),
+          };
+        });
+      } else {
+        toast.error(res.message || 'Error al marcar deuda cobrada');
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const anularViaje = async () => {
     if (!viajeActual || actionLoading) return;
     const confirmacion = window.confirm(
@@ -2782,16 +2829,40 @@ export default function ChoferApp() {
               {/* Direcciones compactas en 1 línea cada una (cuando está reducido) */}
               {!viajeExpandido && (
                 <div className="grid grid-cols-1 gap-1 pt-1.5 border-t border-slate-200/70 dark:border-slate-700/70 text-xs">
-                  <div className="flex items-center gap-1.5 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => abrirNavegadorExterno('google', 'origen')}
+                    className="flex items-center gap-1.5 min-w-0 text-left hover:underline group"
+                    title="Abrir origen en Google Maps"
+                  >
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                     <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Orig:</span>
-                    <span className="font-semibold text-gray-900 dark:text-white truncate">{viajeActual.origen}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                      {viajeActual.origen}
+                    </span>
+                    {isSharedLocationText(viajeActual.origen, viajeActual.origenDetallado) && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-[9px] font-bold">
+                        📍 Maps
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => abrirNavegadorExterno('google', 'destino')}
+                    className="flex items-center gap-1.5 min-w-0 text-left hover:underline group"
+                    title="Abrir destino en Google Maps"
+                  >
                     <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
                     <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Dest:</span>
-                    <span className="font-semibold text-gray-900 dark:text-white truncate">{viajeActual.destino}</span>
-                  </div>
+                    <span className="font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                      {viajeActual.destino}
+                    </span>
+                    {isSharedLocationText(viajeActual.destino, viajeActual.destinoDetallado) && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-[9px] font-bold">
+                        📍 Maps
+                      </span>
+                    )}
+                  </button>
                 </div>
               )}
             </div>
@@ -2813,6 +2884,54 @@ export default function ChoferApp() {
                 <div className="text-xl font-black text-emerald-400 font-mono">
                   ${Math.max(bajadaBanderaChofer, precioRecalculadoGps).toLocaleString('es-AR')}
                 </div>
+              </div>
+            )}
+
+            {/* ALERTA DE PAGO PENDIENTE DEL PASAJERO (Viaje mínimo adeudado a otro chofer o al mismo) */}
+            {Array.isArray(viajeActual.deudasPendientesPasajero) && viajeActual.deudasPendientesPasajero.length > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-950/50 border-2 border-amber-400 dark:border-amber-600 rounded-xl p-3 space-y-2 shadow-xs">
+                <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="text-xs font-black uppercase tracking-wide">
+                    Pago pendiente del pasajero (Viaje mínimo)
+                  </span>
+                </div>
+                {viajeActual.deudasPendientesPasajero.map((deuda: any) => {
+                  const acreedor = deuda.choferAcreedor;
+                  const acreedorLabel = acreedor
+                    ? `Móvil #${acreedor.numeroChofer} (${acreedor.nombre} ${acreedor.apellido})`
+                    : 'Chofer anterior';
+                  const motivoLabel =
+                    deuda.motivo === 'PASAJERO_AUSENTE'
+                      ? 'Pasajero ausente / se retiró'
+                      : 'Cancelación a menos de 10 cuadras';
+                  return (
+                    <div
+                      key={deuda.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-lg border border-amber-200 dark:border-amber-800/70"
+                    >
+                      <div className="text-xs space-y-0.5">
+                        <p className="font-black text-amber-950 dark:text-amber-100">
+                          Cobrar adicional: ${Number(deuda.monto || 0).toLocaleString('es-AR')}
+                        </p>
+                        <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                          Corresponde a: {acreedorLabel}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          Motivo: {motivoLabel}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={actionLoading}
+                        onClick={() => handleCobrarDeudaPasajero(deuda.id)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shrink-0 shadow-xs active:scale-95 transition-all"
+                      >
+                        ✓ Marcar cobrado
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -2868,7 +2987,17 @@ export default function ChoferApp() {
                   <div className="flex-1 space-y-2">
                     <div>
                       <p className="text-[10px] text-gray-400 dark:text-slate-400 font-bold">ORIGEN COMPLETO</p>
-                      <p className="text-xs font-semibold text-gray-900 dark:text-white">{viajeActual.origen}</p>
+                      <a
+                        href={buildGoogleMapsUrl(viajeActual.origen, viajeActual.origenDetallado, 'dir')}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-semibold text-blue-700 dark:text-blue-300 hover:underline inline-flex items-center gap-1.5"
+                      >
+                        <span>{viajeActual.origen}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 font-bold shrink-0">
+                          📍 Abrir en Maps
+                        </span>
+                      </a>
                     </div>
 
                     {/* Paradas intermedias */}
@@ -2929,7 +3058,7 @@ export default function ChoferApp() {
                   )}
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {/* Botón para agregar parada intermedia */}
                   {['EN_CAMINO', 'EN_CURSO'].includes(viajeActual.estado) && (
                     <button
@@ -2939,6 +3068,19 @@ export default function ChoferApp() {
                     >
                       <Plus className="w-3.5 h-3.5 text-amber-600" />
                       <span>Agregar Parada</span>
+                    </button>
+                  )}
+
+                  {/* Botón Pasajero ausente / ya se fue (cuando el móvil ya llegó) */}
+                  {viajeActual.estado === 'EN_CAMINO' && (
+                    <button
+                      type="button"
+                      onClick={reportarPasajeroAusente}
+                      disabled={actionLoading}
+                      className="flex-1 py-2 px-3 bg-orange-50 dark:bg-orange-950/40 hover:bg-orange-100 border border-orange-300 dark:border-orange-800/60 rounded-xl text-orange-800 dark:text-orange-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                      <span>Pasajero se fue (Mínimo)</span>
                     </button>
                   )}
 
@@ -3422,6 +3564,7 @@ export default function ChoferApp() {
               ) : (
                 chatMensajesChofer.map((m, idx) => {
                   const isMe = m.remitente === 'CHOFER';
+                  const mapsUrl = extractGoogleMapsUrlFromChatText(m.texto);
                   return (
                     <div
                       key={idx}
@@ -3429,13 +3572,28 @@ export default function ChoferApp() {
                     >
                       <span className="text-[9px] text-slate-400 mb-0.5 px-1">{m.remitenteNombre}</span>
                       <div
-                        className={`max-w-[75%] px-3 py-2 rounded-2xl text-xs font-medium ${
+                        className={`max-w-[75%] px-3 py-2 rounded-2xl text-xs font-medium break-words ${
                           isMe
                             ? 'bg-blue-600 text-white rounded-br-xs shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-xs'
                         }`}
                       >
-                        {m.texto}
+                        <p>{m.texto}</p>
+                        {mapsUrl && (
+                          <a
+                            href={mapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                              isMe
+                                ? 'bg-white/20 text-white hover:bg-white/30'
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
+                          >
+                            <MapPin className="w-3.5 h-3.5 shrink-0" />
+                            Abrir ubicación en Google Maps
+                          </a>
+                        )}
                       </div>
                     </div>
                   );

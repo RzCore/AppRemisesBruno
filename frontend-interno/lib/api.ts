@@ -775,6 +775,33 @@ export const choferService = {
     }
   },
 
+  reportarPasajeroAusente: async (viajeId: string, observaciones?: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post(`/choferes/viajes/${viajeId}/pasajero-ausente`, { observaciones });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'Error al reportar pasajero ausente',
+      };
+    }
+  },
+
+  cobrarDeudaCancelacion: async (
+    deudaId: string,
+    viajeCobroId?: string
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.post(`/choferes/deudas-cancelacion/${deudaId}/cobrar`, { viajeCobroId });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || 'Error al marcar deuda cobrada',
+      };
+    }
+  },
+
   controlarEspera: async (viajeId: string, accion: 'INICIAR' | 'PAUSAR'): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post(`/choferes/viajes/${viajeId}/espera`, { accion });

@@ -25,6 +25,8 @@ router.post('/viajes/:viajeId/avisar-llegando', choferController.avisarLlegando)
 router.post('/viajes/:viajeId/paradas', choferController.agregarParada);
 router.post('/viajes/:viajeId/espera', choferController.controlarEspera);
 router.post('/viajes/:viajeId/chat', choferController.enviarMensajeChat);
+router.post('/viajes/:viajeId/pasajero-ausente', choferController.reportarPasajeroAusente);
+router.post('/deudas-cancelacion/:deudaId/cobrar', choferController.cobrarDeudaCancelacion);
 router.post('/viaje-calle', choferController.crearViajeCalle);
 
 // Rutas de Turno y Tracking de Kilometraje

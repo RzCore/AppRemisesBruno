@@ -2631,6 +2631,9 @@ export default function ClienteApp() {
               ) : (
                 mensajesChat.map((m, idx) => {
                   const isMe = m.remitente === 'CLIENTE';
+                  const mapsMatch = typeof m.texto === 'string'
+                    ? m.texto.match(/https?:\/\/(?:www\.)?(?:google\.com\/maps[^\s]*|maps\.google\.com[^\s]*|maps\.app\.goo\.gl\/[^\s]*)/i)
+                    : null;
                   return (
                     <div
                       key={idx}
@@ -2638,13 +2641,27 @@ export default function ClienteApp() {
                     >
                       <span className="text-[9px] text-slate-400 mb-0.5 px-1">{m.remitenteNombre}</span>
                       <div
-                        className={`max-w-[75%] px-3 py-2 rounded-2xl text-xs font-medium ${
+                        className={`max-w-[75%] px-3 py-2 rounded-2xl text-xs font-medium break-words ${
                           isMe
                             ? 'bg-primary-600 text-white rounded-br-xs shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-xs'
                         }`}
                       >
-                        {m.texto}
+                        <p>{m.texto}</p>
+                        {mapsMatch && (
+                          <a
+                            href={mapsMatch[0]}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                              isMe
+                                ? 'bg-white/20 text-white hover:bg-white/30'
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
+                          >
+                            📍 Abrir en Google Maps
+                          </a>
+                        )}
                       </div>
                     </div>
                   );
@@ -2654,6 +2671,35 @@ export default function ClienteApp() {
 
             {/* Input para mensaje personalizado */}
             <div className="p-2.5 border-t border-gray-200 dark:border-slate-800 flex gap-1.5">
+              <button
+                type="button"
+                title="Compartir mi ubicación actual en Google Maps"
+                disabled={isSendingChat}
+                onClick={() => {
+                  if (!navigator.geolocation) {
+                    toast.error('Tu navegador no soporta ubicación GPS');
+                    return;
+                  }
+                  const tid = toast.loading('Obteniendo tu ubicación...');
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                      toast.dismiss(tid);
+                      const { latitude, longitude } = pos.coords;
+                      handleEnviarMensaje(
+                        `📍 Mi ubicación actual: https://www.google.com/maps?q=${latitude.toFixed(6)},${longitude.toFixed(6)}`
+                      );
+                    },
+                    () => {
+                      toast.dismiss(tid);
+                      toast.error('No se pudo obtener tu ubicación GPS');
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                  );
+                }}
+                className="p-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl shadow-xs shrink-0"
+              >
+                <MapPin className="w-4 h-4" />
+              </button>
               <input
                 type="text"
                 value={chatInput}

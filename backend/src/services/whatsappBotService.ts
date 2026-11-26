@@ -2593,11 +2593,30 @@ export const whatsappBotService = {
           `━━━━━━━━━━━━━━━━━━━\n\n`;
       }
 
+      // Verificar si el pasajero tiene deuda pendiente de viaje mínimo anterior
+      let avisoDeudaPendiente = '';
+      try {
+        const { obtenerDeudasPendientesPasajero } = await import('./deudaCancelacionService');
+        const deudas = await obtenerDeudasPendientesPasajero({
+          remiseriaId,
+          clienteId: clienteExistente?.id || null,
+          clienteTelefono: cleanFrom,
+        });
+        if (deudas.length > 0) {
+          const totalDeuda = deudas.reduce((acc: number, d: any) => acc + Number(d.monto || 0), 0);
+          const detalleChoferes = deudas
+            .map((d: any) => `Móvil #${d.choferAcreedor.numeroChofer} (${d.choferAcreedor.nombre})`)
+            .join(', ');
+          avisoDeudaPendiente =
+            `\n⚠️ *Saldo pendiente anterior:* *$${totalDeuda.toLocaleString('es-AR')}* (viaje mínimo correspondiente a ${detalleChoferes}). El chofer te lo cobrará junto con este viaje.\n`;
+        }
+      } catch {}
+
       const confirmacionTexto =
         prefijoCumple +
         `🚕 *¡Pedido confirmado!*\n\n` +
         `Tu solicitud ya ingresó a nuestra central con el viaje *#${viaje.id.slice(-4).toUpperCase()}*.\n` +
-        `🔒 *PIN de inicio de viaje:* *${codigoPin}*\n\n` +
+        `🔒 *PIN de inicio de viaje:* *${codigoPin}*${avisoDeudaPendiente}\n\n` +
         `Estamos asignándote el mejor móvil disponible. Te avisaremos por acá en cuanto el chofer salga a buscarte.\n\n` +
         `📲 _Tip: Descargá nuestra App en_ *${APP_CLIENTES_URL}* _para ver el móvil en el mapa y pedir viajes aunque algún día se caiga WhatsApp._`;
 
@@ -3030,8 +3049,27 @@ export const whatsappBotService = {
       }
 
       const notaMinimo = debeAbonarMinimo
-        ? `\n\n⚠️ _Nota: Como el móvil ya se encontraba a menos de 10 cuadras, se registró el viaje mínimo ($${(costoCancelacion || 3500).toLocaleString('es-AR')})._`
+        ? `\n\n⚠️ _Nota: Como el móvil ya se encontraba a menos de 10 cuadras, se registró el viaje mínimo ($${(costoCancelacion || 3500).toLocaleString('es-AR')}) pendiente para abonar en tu próximo viaje._`
         : '';
+
+      if (debeAbonarMinimo && costoCancelacion && updatedViaje.choferId) {
+        try {
+          const { registrarDeudaCancelacion } = await import('./deudaCancelacionService');
+          await registrarDeudaCancelacion({
+            remiseriaId: viaje.remiseriaId,
+            clienteId: viaje.clienteId,
+            clienteTelefono: cleanFrom || viaje.clienteTelefono || null,
+            clienteNombre: viaje.clienteNombre || null,
+            viajeOrigenId: viaje.id,
+            choferAcreedorId: updatedViaje.choferId,
+            monto: costoCancelacion,
+            motivo: 'CANCELACION_MENOS_10_CUADRAS',
+            observaciones: motivo || 'Cancelado por WhatsApp con móvil a menos de 10 cuadras',
+          });
+        } catch (deudaErr) {
+          console.warn('Aviso registrando deuda cancelación WhatsApp:', deudaErr);
+        }
+      }
 
       return await whatsappService.enviarBotones(
         cleanFrom,

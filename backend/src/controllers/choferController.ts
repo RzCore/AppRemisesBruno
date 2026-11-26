@@ -1567,6 +1567,21 @@ export const choferController = {
       // Evaluar estado de vencimientos de documentación
       const documentacion = evaluarDocumentacionChoferYVehiculo(chofer, chofer.vehiculo);
 
+      // Si hay un viaje activo, consultar si el pasajero tiene pagos pendientes de cancelaciones/ausencias previas
+      let viajeActualConDeudas: any = viajeActual;
+      if (viajeActual) {
+        const { obtenerDeudasPendientesPasajero } = await import('../services/deudaCancelacionService');
+        const deudasPendientesPasajero = await obtenerDeudasPendientesPasajero({
+          remiseriaId: viajeActual.remiseriaId,
+          clienteId: viajeActual.clienteId,
+          clienteTelefono: viajeActual.clienteTelefono || viajeActual.cliente?.telefono || null,
+        });
+        viajeActualConDeudas = {
+          ...viajeActual,
+          deudasPendientesPasajero,
+        };
+      }
+
       res.json({
         success: true,
         data: {
@@ -1579,7 +1594,7 @@ export const choferController = {
             totalEnTabla,
           },
           documentacion,
-          viajeActual,
+          viajeActual: viajeActualConDeudas,
           viajesDisponibles,
           viajeEnColaTabla,
           viajesProgramados,
@@ -1955,9 +1970,19 @@ export const choferController = {
         }
       }
 
+      const { obtenerDeudasPendientesPasajero } = await import('../services/deudaCancelacionService');
+      const deudasPendientesPasajero = await obtenerDeudasPendientesPasajero({
+        remiseriaId: viajeActualizado.remiseriaId,
+        clienteId: viajeActualizado.clienteId,
+        clienteTelefono: viajeActualizado.clienteTelefono || viajeActualizado.cliente?.telefono || null,
+      });
+
       res.json({
         success: true,
-        data: viajeActualizado,
+        data: {
+          ...viajeActualizado,
+          deudasPendientesPasajero,
+        },
         message: 'Viaje aceptado exitosamente',
       });
     } catch (error) {
@@ -2320,6 +2345,152 @@ export const choferController = {
         success: false,
         message: 'Error interno del servidor',
       });
+    }
+  },
+
+  // Reportar que el chofer llegó al domicilio y el pasajero ya se fue (no-show):
+  // cancela el viaje y deja cargado el viaje mínimo pendiente a favor de este chofer X
+  async reportarPasajeroAusente(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { viajeId } = req.params;
+      const { observaciones } = req.body || {};
+
+      const viaje = await prisma.viaje.findUnique({
+        where: { id: viajeId },
+        include: {
+          cliente: true,
+          chofer: true,
+          remiseria: true,
+        },
+      });
+
+      if (!viaje) {
+        return res.status(404).json({ success: false, message: 'Viaje no encontrado' });
+      }
+
+      if (viaje.estado === 'COMPLETADO' || viaje.estado === 'CANCELADO') {
+        return res.status(400).json({
+          success: false,
+          message: 'El viaje ya fue finalizado o cancelado',
+        });
+      }
+
+      const montoMinimo = Number(viaje.remiseria?.bajadaBandera || 3500);
+      const choferId = viaje.choferId || req.user?.chofer?.id || null;
+
+      const updatedViaje = await prisma.viaje.update({
+        where: { id: viajeId },
+        data: {
+          estado: 'CANCELADO',
+          canceladoPor: 'CHOFER',
+          motivoCancelacion:
+            observaciones?.trim() || 'Pasajero ausente / ya se retiró del domicilio al llegar el móvil',
+          debeAbonarMinimo: true,
+          costoCancelacion: montoMinimo,
+          canceladoEn: new Date(),
+        },
+        include: {
+          cliente: true,
+          chofer: true,
+          vehiculo: true,
+        },
+      });
+
+      // Registrar deuda pendiente a favor del chofer que asistió al domicilio
+      const { registrarDeudaCancelacion } = await import('../services/deudaCancelacionService');
+      const deuda = await registrarDeudaCancelacion({
+        remiseriaId: viaje.remiseriaId,
+        clienteId: viaje.clienteId,
+        clienteTelefono: viaje.clienteTelefono || viaje.cliente?.telefono || null,
+        clienteNombre:
+          viaje.clienteNombre ||
+          (viaje.cliente ? `${viaje.cliente.nombre} ${viaje.cliente.apellido}`.trim() : null),
+        viajeOrigenId: viaje.id,
+        choferAcreedorId: choferId,
+        monto: montoMinimo,
+        motivo: 'PASAJERO_AUSENTE',
+        observaciones:
+          observaciones?.trim() || 'El móvil llegó al domicilio y el pasajero ya no se encontraba',
+      });
+
+      // Reingresar al chofer en la tabla/cola virtual
+      if (choferId) {
+        ofertasViajesMap.delete(viaje.id);
+        await prisma.chofer.update({
+          where: { id: choferId },
+          data: {
+            enParadaVirtual: true,
+            paradaVirtualIngreso: new Date(),
+          },
+        });
+      }
+
+      // Notificar vía Socket.IO a central y cliente
+      try {
+        const { getIO } = await import('../lib/socket');
+        const ioInstance = getIO();
+        ioInstance.to(viaje.remiseriaId).emit('viaje_cancelado', {
+          viajeId: viaje.id,
+          motivo: updatedViaje.motivoCancelacion,
+          canceladoPor: 'CHOFER',
+          debeAbonarMinimo: true,
+          costoCancelacion: montoMinimo,
+          deudaRegistrada: deuda,
+          viaje: updatedViaje,
+        });
+        ioInstance.to(viaje.remiseriaId).emit('viaje_estado_actualizado', {
+          viajeId: viaje.id,
+          estado: 'CANCELADO',
+          mensaje: `Pasajero ausente: se registró viaje mínimo de $${montoMinimo.toLocaleString('es-AR')} para cobrar en el próximo viaje.`,
+          viaje: updatedViaje,
+        });
+      } catch {}
+
+      res.json({
+        success: true,
+        data: { viaje: updatedViaje, deuda, montoMinimo },
+        message: deuda
+          ? `Se registró el viaje mínimo ($${montoMinimo.toLocaleString('es-AR')}) como pago pendiente del pasajero a tu favor.`
+          : `Viaje cancelado por pasajero ausente ($${montoMinimo.toLocaleString('es-AR')}).`,
+      });
+    } catch (error) {
+      console.error('Error reportando pasajero ausente:', error);
+      res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  },
+
+  // Marcar como cobrada una deuda pendiente de cancelación/ausencia (cobrada por el chofer Y para entregar al chofer X)
+  async cobrarDeudaCancelacion(req: AuthenticatedRequest, res: Response) {
+    try {
+      const { deudaId } = req.params;
+      const { viajeCobroId, observaciones } = req.body || {};
+
+      let choferCobradorId = req.user?.chofer?.id;
+      if (!choferCobradorId && req.user?.id) {
+        const ch = await prisma.chofer.findFirst({ where: { userId: req.user.id }, select: { id: true } });
+        choferCobradorId = ch?.id;
+      }
+
+      if (!choferCobradorId) {
+        return res.status(401).json({ success: false, message: 'No se pudo identificar al chofer cobrador' });
+      }
+
+      const { marcarDeudaCancelacionCobrada } = await import('../services/deudaCancelacionService');
+      const deudaActualizada = await marcarDeudaCancelacionCobrada({
+        deudaId,
+        choferCobradorId,
+        viajeCobroId: viajeCobroId || null,
+        observaciones: observaciones || null,
+      });
+
+      res.json({
+        success: true,
+        data: deudaActualizada,
+        message: `Deuda de $${Number(deudaActualizada.monto).toLocaleString('es-AR')} marcada como cobrada (corresponde a Móvil #${deudaActualizada.choferAcreedor.numeroChofer} - ${deudaActualizada.choferAcreedor.nombre} ${deudaActualizada.choferAcreedor.apellido}).`,
+      });
+    } catch (error) {
+      console.error('Error marcando deuda de cancelación como cobrada:', error);
+      res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
   },
 
