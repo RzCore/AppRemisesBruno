@@ -65,7 +65,7 @@ export const duenioClientesController = {
             orderBy: { fecha: 'desc' }
           },
           viajes: {
-            take: 50,
+            take: 1,
             orderBy: { fecha: 'desc' },
             select: {
               id: true,
@@ -81,11 +81,52 @@ export const duenioClientesController = {
         orderBy: { nombre: 'asc' }
       });
 
+      const clienteIds = clientes.map((c) => c.id);
+
+      // Agregaciones exactas en PostgreSQL sobre TODO el historial (sin límite de 50 ni 1000 filas)
+      const [completadosPorCliente, ccPorCliente] = clienteIds.length > 0
+        ? await Promise.all([
+            prisma.viaje.groupBy({
+              by: ['clienteId'],
+              where: {
+                clienteId: { in: clienteIds },
+                estado: 'COMPLETADO'
+              },
+              _count: { _all: true }
+            }),
+            prisma.viaje.groupBy({
+              by: ['clienteId'],
+              where: {
+                clienteId: { in: clienteIds },
+                estado: 'COMPLETADO',
+                metodoPago: 'CUENTA_CORRIENTE'
+              },
+              _count: { _all: true },
+              _sum: { precio: true }
+            })
+          ])
+        : [[], []];
+
+      const mapCompletados = new Map<string, number>();
+      for (const row of completadosPorCliente) {
+        if (row.clienteId) mapCompletados.set(row.clienteId, row._count._all);
+      }
+
+      const mapCC = new Map<string, { count: number; sum: number }>();
+      for (const row of ccPorCliente) {
+        if (row.clienteId) {
+          mapCC.set(row.clienteId, {
+            count: row._count._all,
+            sum: Number(row._sum.precio || 0)
+          });
+        }
+      }
+
       const listado = clientes.map(c => {
-        const viajesCompletados = c.viajes.filter(v => v.estado === 'COMPLETADO');
-        const viajesCC = viajesCompletados.filter(v => v.metodoPago === 'CUENTA_CORRIENTE');
-        const totalGastadoCC = viajesCC.reduce((sum, v) => sum + Number(v.precio || 0), 0);
-        
+        const viajesCompletadosCount = mapCompletados.get(c.id) || 0;
+        const ccStats = mapCC.get(c.id) || { count: 0, sum: 0 };
+        const totalGastadoCC = ccStats.sum;
+
         // El saldo actual es el saldo registrado en el perfil del cliente
         // Si nunca hizo pagos y saldoCuentaCorriente es 0 pero tiene viajes en CC, sincronizamos con totalGastadoCC
         let saldoPendiente = Math.max(0, Number(c.saldoCuentaCorriente || 0));
@@ -100,8 +141,8 @@ export const duenioClientesController = {
         return {
           ...clienteData,
           totalViajes: _count.viajes,
-          viajesCompletados: viajesCompletados.length,
-          viajesCuentaCorriente: viajesCC.length,
+          viajesCompletados: viajesCompletadosCount,
+          viajesCuentaCorriente: ccStats.count,
           totalGastadoCC,
           saldoPendiente,
           ultimoViaje: ultimoViaje ? {
