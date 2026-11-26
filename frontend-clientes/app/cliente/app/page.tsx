@@ -487,6 +487,11 @@ export default function ClienteApp() {
     const socket: Socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 10000,
+      timeout: 15000,
     });
     socketRef.current = socket;
 
@@ -495,7 +500,20 @@ export default function ClienteApp() {
       if (remId) {
         socket.emit('join_room', { remiseriaId: remId });
       }
+      if (activeViajeRef.current) {
+        buscarViajeActivo();
+      }
     });
+
+    const handleNetworkOnline = () => {
+      if (!socket.connected) {
+        socket.connect();
+      }
+      if (activeViajeRef.current) {
+        buscarViajeActivo();
+      }
+    };
+    window.addEventListener('online', handleNetworkOnline);
 
     // Cargar estado operativo de la remisería
     remiseriaService.getActiva().then((res) => {
@@ -688,6 +706,7 @@ export default function ClienteApp() {
     });
 
     return () => {
+      window.removeEventListener('online', handleNetworkOnline);
       socketRef.current = null;
       socket.disconnect();
     };
@@ -754,30 +773,28 @@ export default function ClienteApp() {
     const handleFocusRefresh = () => {
       if (document.visibilityState === 'visible') {
         refrescarPerfilCliente();
+        if (activeViajeRef.current) {
+          buscarViajeActivo();
+        } else {
+          cargarDisponibilidad();
+        }
       }
     };
     window.addEventListener('focus', refrescarPerfilCliente);
     document.addEventListener('visibilitychange', handleFocusRefresh);
 
-    const dispInterval = setInterval(cargarDisponibilidad, 6000);
+    // Disponibilidad de flota cada 12s solo si la pestaña está visible y no está en medio de un viaje
+    const dispInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (activeViajeRef.current) return;
+      cargarDisponibilidad();
+    }, 12000);
     return () => {
       clearInterval(dispInterval);
       window.removeEventListener('focus', refrescarPerfilCliente);
       document.removeEventListener('visibilitychange', handleFocusRefresh);
     };
   }, [user?.id, authLoading, router]);
-
-  // Polling de Resiliencia (QA): Si hay viaje activo y el socket se corta por 4G móvil,
-  // sincroniza automáticamente cada 4.5 segundos para evitar que la UI quede colgada
-  useEffect(() => {
-    if (estadoViaje === 'IDLE') return;
-
-    const syncInterval = setInterval(() => {
-      buscarViajeActivo();
-    }, 4500);
-
-    return () => clearInterval(syncInterval);
-  }, [estadoViaje]);
 
   const buscarViajeActivo = async () => {
     try {
@@ -821,16 +838,19 @@ export default function ClienteApp() {
     }
   };
 
-  // Polling del viaje activo cada 4 segundos
+  // Polling único de respaldo del viaje activo cada 7s (los cambios llegan al instante vía Socket.IO)
+  // Se pausa si la pantalla está oculta y sincroniza al volver visible o al reconectar 4G
   useEffect(() => {
-    if (!activeViaje) return;
+    const viajeId = activeViaje?.id;
+    if (!viajeId) return;
 
     const interval = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await clienteService.getViajes();
         if (res.success && res.data) {
-          const vActualizado = res.data.find((v: any) => v.id === activeViaje.id);
-          
+          const vActualizado = res.data.find((v: any) => v.id === viajeId);
+
           if (!vActualizado) {
             resetRequestState();
             return;
@@ -851,10 +871,10 @@ export default function ClienteApp() {
       } catch (error) {
         console.error('Error en polling de viaje:', error);
       }
-    }, 4000);
+    }, 7000);
 
     return () => clearInterval(interval);
-  }, [activeViaje]);
+  }, [activeViaje?.id]);
 
   const resetRequestState = () => {
     setActiveViaje(null);
