@@ -474,7 +474,13 @@ export const coordinatorDashboardController = {
               vehiculo: true
             }
           },
-          vehiculo: true
+          vehiculo: true,
+          artEmpresa: {
+            select: {
+              id: true,
+              nombre: true
+            }
+          }
         },
         orderBy: {
           fecha: 'asc'
@@ -619,8 +625,9 @@ export const coordinatorDashboardController = {
         }
       });
 
-      // Al asignarle viaje desde la central, sacarlo de la Tabla de espera
-      if (chofer.enParadaVirtual) {
+      // Al asignarle un viaje inmediato desde la central, sacarlo de la Tabla de espera
+      // (si es un viaje programado de ART, mantenerlo en la Tabla para que siga recibiendo viajes normales)
+      if (chofer.enParadaVirtual && !viaje.artEmpresaId) {
         await prisma.chofer.update({
           where: { id: chofer.id },
           data: { enParadaVirtual: false, paradaVirtualIngreso: null }
@@ -1640,7 +1647,10 @@ export const coordinatorDashboardController = {
       const viajesActivosFlota = await prisma.viaje.findMany({
         where: {
           remiseriaId: coordinador.remiseriaId,
-          estado: { in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] }
+          OR: [
+            { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+            { estado: 'ACEPTADO', artEmpresaId: null }
+          ]
         },
         select: { choferId: true, vehiculoId: true }
       });
@@ -1815,7 +1825,10 @@ export const coordinatorDashboardController = {
           where: {
             remiseriaId: coordinador.remiseriaId,
             choferId: { not: null },
-            estado: { in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] }
+            OR: [
+              { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+              { estado: 'ACEPTADO', artEmpresaId: null }
+            ]
           },
           select: { choferId: true }
         }),
@@ -1917,14 +1930,16 @@ export const coordinatorDashboardController = {
         prisma.viaje.count({
           where: {
             remiseriaId: coordinador.remiseriaId,
-            estado: {
-              in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO']
-            }
+            OR: [
+              { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+              { estado: 'ACEPTADO', artEmpresaId: null }
+            ]
           }
         }),
         prisma.viaje.count({
           where: {
             estado: 'PENDIENTE',
+            artEmpresaId: null,
             OR: [
               { remiseriaId: coordinador.remiseriaId },
               { clienteId: { not: null } }

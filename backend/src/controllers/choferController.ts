@@ -26,11 +26,14 @@ export const ofertasViajesMap = new Map<string, OfertaViajeState>();
 export const choferHeartbeatMap = new Map<string, number>();
 
 async function resolverChoferFallbackId(): Promise<string | undefined> {
-  // 1) Priorizar chofer que actualmente tenga un viaje activo en curso
+  // 1) Priorizar chofer que actualmente tenga un viaje activo en curso (excluyendo ART programados en ACEPTADO)
   const viajeActivo = await prisma.viaje.findFirst({
     where: {
       choferId: { not: null },
-      estado: { in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] },
+      OR: [
+        { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+        { estado: 'ACEPTADO', artEmpresaId: null },
+      ],
     },
     orderBy: { updatedAt: 'desc' },
     select: { choferId: true },
@@ -1361,6 +1364,19 @@ export const choferController = {
             : null,
         },
       });
+
+      // Actualizar heartbeat en memoria inmediatamente al cambiar estado online/offline
+      if (isOnline) {
+        choferHeartbeatMap.set(choferId, Date.now());
+      } else {
+        choferHeartbeatMap.delete(choferId);
+        for (const st of ofertasViajesMap.values()) {
+          if (st.choferOfertadoId === choferId) {
+            st.choferOfertadoId = '';
+            st.expiraEn = 0;
+          }
+        }
+      }
 
       // Manejar automáticamente el turno activo según el estado online
       let turnoActivo = null;

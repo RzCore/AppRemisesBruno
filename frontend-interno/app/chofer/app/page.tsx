@@ -92,7 +92,23 @@ function calcularDistanciaKm(lat1: number, lon1: number, lat2: number, lon2: num
 export default function ChoferApp() {
   const { user } = useAuth();
 
-  const [isActive, setIsActive] = useState(false);
+  const [isActive, setIsActive] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const saved = localStorage.getItem('chofer_isActive');
+      return saved ? Boolean(JSON.parse(saved)) : false;
+    } catch {
+      return false;
+    }
+  });
+  const [estadoInicializado, setEstadoInicializado] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem('chofer_isActive') !== null;
+    } catch {
+      return false;
+    }
+  });
   const [viajeActual, setViajeActual] = useState<any>(null);
   const [alertaViaje, setAlertaViaje] = useState<any>(null);
   const [viajesProgramados, setViajesProgramados] = useState<any[]>([]);
@@ -503,15 +519,25 @@ export default function ChoferApp() {
     }
   }, [isActive, solicitarWakeLock, liberarWakeLock]);
 
-  // Re-solicitar WakeLock si la pestaña vuelve a ser visible
+  // Re-solicitar WakeLock y sincronizar viajes inmediatamente cuando la app vuelve a primer plano
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleResume = () => {
       if (document.visibilityState === 'visible' && isActive) {
         solicitarWakeLock();
+        sincronizarEstadoRef.current?.(true);
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    const handleFocus = () => {
+      if (isActive) {
+        sincronizarEstadoRef.current?.(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleResume);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleResume);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [isActive, solicitarWakeLock]);
 
   // 3. Resiliencia de GPS y Detección Offline
@@ -806,6 +832,9 @@ export default function ChoferApp() {
     socket.on('connect', () => {
       console.log('⚡ Chofer conectado a Sockets. Sala:', remiseriaId);
       socket.emit('join_room', { remiseriaId });
+      if (isActiveRef.current && !viajeActualRef.current) {
+        sincronizarEstadoRef.current?.(true);
+      }
     });
 
     // Sincronización inmediata al entrar un nuevo pedido a la remisería
@@ -952,6 +981,7 @@ export default function ChoferApp() {
         }));
         try {
           localStorage.setItem('chofer_isActive', JSON.stringify(false));
+          window.dispatchEvent(new CustomEvent('chofer_online_changed', { detail: { isOnline: false } }));
         } catch {}
         toast.error(
           `⛔ ${data?.motivo || 'Fuiste desconectado por la central (fuera de tu turno).'}` ,
@@ -1204,7 +1234,45 @@ export default function ChoferApp() {
           setAlertaViaje(siguienteViaje);
           if (lastAlertedIdRef.current !== siguienteViaje.id) {
             lastAlertedIdRef.current = siguienteViaje.id;
-            toast('¡Nueva solicitud de viaje disponible!', { icon: '🚕' });
+            toast('¡Nueva solicitud de viaje disponible!', { icon: '🚕', duration: 6000 });
+
+            // Alerta sonora y vibración inmediata para que el chofer note el viaje entrante
+            try {
+              const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioContextClass) {
+                const ctx = new AudioContextClass();
+                const now = ctx.currentTime;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, now);
+                osc.frequency.setValueAtTime(1174.66, now + 0.14);
+                osc.frequency.setValueAtTime(880, now + 0.28);
+                osc.frequency.setValueAtTime(1174.66, now + 0.42);
+                gain.gain.setValueAtTime(0.45, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.65);
+              }
+            } catch {}
+
+            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+              try {
+                navigator.vibrate([300, 150, 300, 150, 400]);
+              } catch {}
+            }
+
+            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+              try {
+                new Notification('🚕 ¡Nuevo viaje disponible!', {
+                  body: `Turno #${siguienteViaje.puestoTabla || 1} en la Tabla. Tocá para aceptar el viaje.`,
+                  icon: '/pwa-192x192.png',
+                  tag: `oferta-viaje-${siguienteViaje.id}`,
+                });
+              } catch {}
+            }
           }
         } else {
           setAlertaViaje(null);
@@ -1225,26 +1293,31 @@ export default function ChoferApp() {
     if (!user) return;
 
     const init = async () => {
-      const savedLocal = localStorage.getItem('chofer_isActive');
-      const res = await choferService.getMiEstado(user?.chofer?.id);
+      try {
+        const savedLocal = localStorage.getItem('chofer_isActive');
+        const res = await choferService.getMiEstado(user?.chofer?.id);
 
-      if (res.success && res.data) {
-        const dbOnline = Boolean(res.data.chofer?.isOnline);
-        const localOnline = savedLocal !== null ? JSON.parse(savedLocal) : dbOnline;
+        if (res.success && res.data) {
+          const dbOnline = Boolean(res.data.chofer?.isOnline);
+          const localOnline = savedLocal !== null ? JSON.parse(savedLocal) : dbOnline;
 
-        if (localOnline && !dbOnline) {
-          await choferService.updateOnlineStatus(true, user?.chofer?.id);
+          if (localOnline && !dbOnline) {
+            await choferService.updateOnlineStatus(true, user?.chofer?.id);
+          }
+
+          const effectiveOnline = localOnline || dbOnline;
+          setIsActive(effectiveOnline);
+          localStorage.setItem('chofer_isActive', JSON.stringify(effectiveOnline));
+          window.dispatchEvent(new CustomEvent('chofer_online_changed', { detail: { isOnline: effectiveOnline } }));
+
+          if (res.data.documentacion) {
+            setDocumentacionResumen(res.data.documentacion);
+          }
+
+          await sincronizarEstado(effectiveOnline);
         }
-
-        const effectiveOnline = localOnline || dbOnline;
-        setIsActive(effectiveOnline);
-        localStorage.setItem('chofer_isActive', JSON.stringify(effectiveOnline));
-
-        if (res.data.documentacion) {
-          setDocumentacionResumen(res.data.documentacion);
-        }
-
-        await sincronizarEstado(effectiveOnline);
+      } finally {
+        setEstadoInicializado(true);
       }
     };
 
@@ -1400,6 +1473,7 @@ export default function ChoferApp() {
 
       setIsActive(newState);
       localStorage.setItem('chofer_isActive', JSON.stringify(newState));
+      window.dispatchEvent(new CustomEvent('chofer_online_changed', { detail: { isOnline: newState } }));
 
       if (newState) {
         toast.success('Ahora estás Activo. Esperando viajes...');
@@ -2368,7 +2442,12 @@ export default function ChoferApp() {
       )}
 
       {/* Botón de Estado / Toggle Activo */}
-      {!isActive ? (
+      {!estadoInicializado ? (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 flex flex-col items-center justify-center min-h-[40vh] transition-colors">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600 mb-3"></div>
+          <p className="text-xs font-semibold text-gray-500 dark:text-slate-400">Sincronizando tu estado...</p>
+        </div>
+      ) : !isActive ? (
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 flex flex-col items-center justify-center min-h-[50vh] transition-colors">
           <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-6">Comenzar Jornada</h2>
           <button

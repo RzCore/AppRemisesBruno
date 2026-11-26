@@ -112,7 +112,10 @@ export const initSocket = (server: HttpServer): Server => {
                 const viajeActivo = await prisma.viaje.findFirst({
                   where: {
                     choferId,
-                    estado: { in: ['ACEPTADO', 'EN_CAMINO', 'EN_CURSO'] }
+                    OR: [
+                      { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+                      { estado: 'ACEPTADO', artEmpresaId: null }
+                    ]
                   },
                   select: { id: true }
                 });

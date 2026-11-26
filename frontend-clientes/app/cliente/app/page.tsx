@@ -1431,7 +1431,7 @@ export default function ClienteApp() {
   if (!user) return null;
 
   return (
-    <div className="relative flex flex-col h-[calc(100vh-8rem)] bg-gray-50 dark:bg-slate-950 transition-colors">
+    <div className="relative flex flex-col min-h-[calc(100vh-8rem)] pb-4 bg-gray-50 dark:bg-slate-950 transition-colors">
       
       {/* MAPA DE FONDO */}
       <div className="absolute inset-0 bg-slate-100 dark:bg-slate-950 z-0">
@@ -1457,7 +1457,7 @@ export default function ClienteApp() {
 
       {/* CONTROLES SUPERIORES (Ingreso de dirección) */}
       {estadoViaje === 'IDLE' && (
-        <div className="z-20 p-4 w-full max-w-lg mx-auto overflow-y-auto max-h-[calc(100vh-14rem)] no-scrollbar">
+        <div className="relative z-20 p-4 pb-2 w-full max-w-lg mx-auto">
           {/* Banner de Aviso: Agencia Cerrada por Horario Especial o Festividades */}
           {!estadoAgencia.abierta && (
             <div className="mb-3.5 bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-amber-500/15 border-2 border-amber-500/40 rounded-2xl p-4 text-amber-900 dark:text-amber-200 shadow-md">
@@ -1496,7 +1496,7 @@ export default function ClienteApp() {
             <div className="p-4 space-y-3.5">
               
               {/* Input de Origen */}
-              <div className="relative z-20">
+              <div className="relative z-40">
                 <div className="flex gap-3 items-center">
                   <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0">
                     <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></div>
@@ -1625,7 +1625,7 @@ export default function ClienteApp() {
               <div className="w-0.5 h-3 bg-gray-200 dark:bg-slate-700 ml-[7px] -my-1"></div>
 
               {/* Input de Destino */}
-              <div className="relative z-10">
+              <div className="relative z-30">
                 <div className="flex gap-3 items-center">
                   <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0">
                     <div className="w-2.5 h-2.5 bg-rose-500 rounded-full"></div>
@@ -1764,7 +1764,7 @@ export default function ClienteApp() {
       )}
 
       {/* ÁREA INFERIOR (Presupuesto o Estado del Viaje) */}
-      <div className="mt-auto z-10 w-full max-w-lg mx-auto p-4 animate-slide-up">
+      <div className={`${estadoViaje === 'IDLE' ? 'relative pt-2' : 'mt-auto'} z-10 w-full max-w-lg mx-auto px-4 pb-4 animate-slide-up`}>
         
         {/* Caso 2: Calculando */}
         {isCalculando && estadoAgencia.abierta && (

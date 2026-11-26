@@ -31,6 +31,15 @@ export default function ChoferLayout({
   const { user } = useAuth();
   const pathname = usePathname();
   const [choferData, setChoferData] = useState<any>(null);
+  const [isOnlineLocal, setIsOnlineLocal] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const saved = localStorage.getItem('chofer_isActive');
+      return saved ? Boolean(JSON.parse(saved)) : false;
+    } catch {
+      return false;
+    }
+  });
   const [loadingEstado, setLoadingEstado] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,6 +49,7 @@ export default function ChoferLayout({
       const res = await choferService.getMiEstado();
       if (res.success && res.data?.chofer) {
         setChoferData(res.data.chofer);
+        setIsOnlineLocal(Boolean(res.data.chofer.isOnline));
         if (mostrarToast) {
           if (res.data.chofer.estado === 'ACTIVO') {
             toast.success('¡Tu cuenta ha sido aprobada!');
@@ -64,6 +74,20 @@ export default function ChoferLayout({
     }
   }, [user, consultarEstado]);
 
+  useEffect(() => {
+    const handleOnlineChange = (e: Event) => {
+      const custom = e as CustomEvent<{ isOnline?: boolean }>;
+      if (typeof custom.detail?.isOnline === 'boolean') {
+        setIsOnlineLocal(custom.detail.isOnline);
+        setChoferData((prev: any) => (prev ? { ...prev, isOnline: custom.detail.isOnline } : prev));
+      }
+    };
+    window.addEventListener('chofer_online_changed', handleOnlineChange);
+    return () => window.removeEventListener('chofer_online_changed', handleOnlineChange);
+  }, []);
+
+  const isOnlineNavbar = isOnlineLocal || Boolean(choferData?.isOnline);
+
   // Determinar el estado actual del chofer (de la API o del context)
   const estadoChofer = choferData?.estado || (user as any)?.chofer?.estado || 'ACTIVO';
   const motivoRechazo = choferData?.motivoRechazo || (user as any)?.chofer?.motivoRechazo;
@@ -79,13 +103,13 @@ export default function ChoferLayout({
             <div id="chofer-navbar-status" className="flex-1 min-w-0">
               {pathname !== '/chofer/app' && pathname !== '/app' && pathname !== '/' && (
                 <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${choferData?.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isOnlineNavbar ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
                   <div className="min-w-0">
                     <p className="text-xs font-extrabold leading-tight truncate">
-                      {choferData?.isOnline ? 'EN LÍNEA' : 'FUERA DE LÍNEA'}
+                      {isOnlineNavbar ? 'EN LÍNEA' : 'FUERA DE LÍNEA'}
                     </p>
                     <p className="text-[10px] text-white/80 dark:text-slate-400 leading-tight truncate">
-                      {choferData?.isOnline ? 'Esperando solicitudes de viaje...' : 'Sin turno activo'}
+                      {isOnlineNavbar ? 'Esperando solicitudes de viaje...' : 'Sin turno activo'}
                     </p>
                   </div>
                 </div>
