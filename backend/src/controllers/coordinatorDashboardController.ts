@@ -37,6 +37,27 @@ interface KnownPlaceEntry {
 
 const CHIVILCOY_KNOWN_PLACES: KnownPlaceEntry[] = [
   {
+    display_name: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+    lat: '-34.9011383',
+    lon: '-60.0137782',
+    keywords: [
+      'agencia',
+      'base',
+      'remiseria',
+      'remises bruno',
+      'avenida sarmiento 271',
+      'av sarmiento 271',
+      'sarmiento 271',
+    ],
+    address: {
+      amenity: 'Agencia Remises Bruno',
+      road: 'Avenida Sarmiento',
+      house_number: '271',
+      city: 'Chivilcoy',
+      state: 'Buenos Aires',
+    },
+  },
+  {
     display_name: 'Universidad Nacional de Luján (UNLu) - Centro Regional Chivilcoy, El Grito de Alcorta 110, Chivilcoy',
     lat: '-34.9189524',
     lon: '-59.9946500',
@@ -2256,17 +2277,40 @@ export const coordinatorDashboardController = {
             }
           });
 
+          let lugaresFrecuentes: Array<{ alias: string; direccion: string; lat?: number; lon?: number }> = [];
+          if (c.direccionesFrecuentes) {
+            try {
+              const parsed =
+                typeof c.direccionesFrecuentes === 'string'
+                  ? JSON.parse(c.direccionesFrecuentes)
+                  : c.direccionesFrecuentes;
+              if (Array.isArray(parsed)) {
+                lugaresFrecuentes = parsed
+                  .filter((d: any) => d && typeof d.direccion === 'string' && d.direccion.trim())
+                  .map((d: any) => ({
+                    alias: String(d.alias || 'Favorito').trim(),
+                    direccion: String(d.direccion).trim(),
+                    lat: d.lat !== undefined && !isNaN(Number(d.lat)) ? Number(d.lat) : undefined,
+                    lon: d.lon !== undefined && !isNaN(Number(d.lon)) ? Number(d.lon) : undefined,
+                  }));
+              }
+            } catch {}
+          }
+
           const origenesHabituales = Array.from(new Set([
+            ...lugaresFrecuentes.map((l) => l.direccion),
             ...(c.direccion ? [c.direccion] : []),
             ...ultimosViajes.map((v) => v.origen).filter(Boolean)
           ]));
-          const destinosHabituales = Array.from(new Set(
-            ultimosViajes.map((v) => v.destino).filter(Boolean)
-          ));
+          const destinosHabituales = Array.from(new Set([
+            ...lugaresFrecuentes.map((l) => l.direccion),
+            ...ultimosViajes.map((v) => v.destino).filter(Boolean)
+          ]));
 
           return {
             ...c,
             nombreCompleto: `${c.nombre} ${c.apellido}`.trim(),
+            lugaresFrecuentes,
             origenesHabituales,
             destinosHabituales,
             ultimoViaje: ultimosViajes[0] || null

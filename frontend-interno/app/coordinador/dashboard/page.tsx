@@ -4595,6 +4595,65 @@ export default function CoordinadorDashboard() {
                   placeholder="Ej: Av. San Martín 450"
                   className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
+                {/* Accesos rápidos de Origen: Agencia + Lugares frecuentes del pasajero */}
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpressData((prev) => ({
+                        ...prev,
+                        origen: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                      }));
+                      setExpressOrigenCoords({ lat: -34.9011383, lon: -60.0137782 });
+                      setIsExpressOrigenSelected(true);
+                      setExpressOrigenSuggestions([]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                    title="Avenida Sarmiento 271, Chivilcoy"
+                  >
+                    🏢 Agencia (Av. Sarmiento 271)
+                  </button>
+                  {Array.isArray(selectedPredictiveClient?.lugaresFrecuentes) &&
+                    selectedPredictiveClient.lugaresFrecuentes.map((lug: any, idx: number) => (
+                      <button
+                        key={`orig-freq-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setExpressData((prev) => ({ ...prev, origen: lug.direccion }));
+                          if (lug.lat && lug.lon) {
+                            setExpressOrigenCoords({ lat: Number(lug.lat), lon: Number(lug.lon) });
+                          } else {
+                            setExpressOrigenCoords(null);
+                          }
+                          setIsExpressOrigenSelected(true);
+                          setExpressOrigenSuggestions([]);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[230px] truncate"
+                        title={lug.direccion}
+                      >
+                        ⭐ {lug.alias}: {lug.direccion}
+                      </button>
+                    ))}
+                  {(!selectedPredictiveClient?.lugaresFrecuentes ||
+                    selectedPredictiveClient.lugaresFrecuentes.length === 0) &&
+                    Array.isArray(selectedPredictiveClient?.origenesHabituales) &&
+                    selectedPredictiveClient.origenesHabituales.slice(0, 3).map((dir: string, idx: number) => (
+                      <button
+                        key={`orig-hab-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setExpressData((prev) => ({ ...prev, origen: dir }));
+                          setExpressOrigenCoords(null);
+                          setIsExpressOrigenSelected(true);
+                          setExpressOrigenSuggestions([]);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[220px] truncate"
+                        title={dir}
+                      >
+                        📍 {dir}
+                      </button>
+                    ))}
+                </div>
                 {expressOrigenSuggestions.length > 0 && !isExpressOrigenSelected && (
                   <div className="absolute z-30 left-0 right-0 bg-white mt-1 border border-blue-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
                     <div className="px-3 py-1.5 bg-blue-50 text-[11px] font-bold text-blue-800 uppercase">
@@ -4648,6 +4707,65 @@ export default function CoordinadorDashboard() {
                   placeholder="Ej: Hospital Municipal / Terminal"
                   className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
+                {/* Accesos rápidos de Destino: Agencia + Lugares frecuentes del pasajero */}
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpressData((prev) => ({
+                        ...prev,
+                        destino: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                      }));
+                      setExpressDestinoCoords({ lat: -34.9011383, lon: -60.0137782 });
+                      setIsExpressDestinoSelected(true);
+                      setExpressDestinoSuggestions([]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                    title="Avenida Sarmiento 271, Chivilcoy"
+                  >
+                    🏢 Agencia (Av. Sarmiento 271)
+                  </button>
+                  {Array.isArray(selectedPredictiveClient?.lugaresFrecuentes) &&
+                    selectedPredictiveClient.lugaresFrecuentes.map((lug: any, idx: number) => (
+                      <button
+                        key={`dest-freq-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setExpressData((prev) => ({ ...prev, destino: lug.direccion }));
+                          if (lug.lat && lug.lon) {
+                            setExpressDestinoCoords({ lat: Number(lug.lat), lon: Number(lug.lon) });
+                          } else {
+                            setExpressDestinoCoords(null);
+                          }
+                          setIsExpressDestinoSelected(true);
+                          setExpressDestinoSuggestions([]);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[230px] truncate"
+                        title={lug.direccion}
+                      >
+                        ⭐ {lug.alias}: {lug.direccion}
+                      </button>
+                    ))}
+                  {(!selectedPredictiveClient?.lugaresFrecuentes ||
+                    selectedPredictiveClient.lugaresFrecuentes.length === 0) &&
+                    Array.isArray(selectedPredictiveClient?.destinosHabituales) &&
+                    selectedPredictiveClient.destinosHabituales.slice(0, 3).map((dir: string, idx: number) => (
+                      <button
+                        key={`dest-hab-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setExpressData((prev) => ({ ...prev, destino: dir }));
+                          setExpressDestinoCoords(null);
+                          setIsExpressDestinoSelected(true);
+                          setExpressDestinoSuggestions([]);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[220px] truncate"
+                        title={dir}
+                      >
+                        🏁 {dir}
+                      </button>
+                    ))}
+                </div>
                 {expressDestinoSuggestions.length > 0 && !isExpressDestinoSelected && (
                   <div className="absolute z-30 left-0 right-0 bg-white mt-1 border border-emerald-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
                     <div className="px-3 py-1.5 bg-emerald-50 text-[11px] font-bold text-emerald-800 uppercase">
