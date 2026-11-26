@@ -2212,7 +2212,8 @@ export const buscarClientePorDni = async (req: Request, res: Response) => {
         dni: true,
         telefono: true,
         email: true,
-        direccion: true
+        direccion: true,
+        direccionesFrecuentes: true
       }
     });
 
@@ -2221,6 +2222,27 @@ export const buscarClientePorDni = async (req: Request, res: Response) => {
         success: false,
         message: 'Cliente no encontrado'
       });
+    }
+
+    // Parsear lugares frecuentes guardados por el cliente en su perfil
+    let lugaresFrecuentes: Array<{ alias: string; direccion: string; lat?: number; lon?: number }> = [];
+    if (cliente.direccionesFrecuentes) {
+      try {
+        const parsed =
+          typeof cliente.direccionesFrecuentes === 'string'
+            ? JSON.parse(cliente.direccionesFrecuentes)
+            : cliente.direccionesFrecuentes;
+        if (Array.isArray(parsed)) {
+          lugaresFrecuentes = parsed
+            .filter((d: any) => d && typeof d.direccion === 'string' && d.direccion.trim())
+            .map((d: any) => ({
+              alias: String(d.alias || 'Favorito').trim(),
+              direccion: String(d.direccion).trim(),
+              lat: d.lat !== undefined && !isNaN(Number(d.lat)) ? Number(d.lat) : undefined,
+              lon: d.lon !== undefined && !isNaN(Number(d.lon)) ? Number(d.lon) : undefined,
+            }));
+        }
+      } catch {}
     }
 
     // Buscar viajes del cliente para obtener direcciones frecuentes
@@ -2236,13 +2258,19 @@ export const buscarClientePorDni = async (req: Request, res: Response) => {
       take: 20
     });
 
-    const uniqueOrigins = Array.from(new Set(pastVoyages.map(v => v.origen).filter(Boolean)));
+    const uniqueOrigins = Array.from(
+      new Set([
+        ...(cliente.direccion ? [cliente.direccion] : []),
+        ...pastVoyages.map(v => v.origen).filter(Boolean)
+      ])
+    );
     const uniqueDestinations = Array.from(new Set(pastVoyages.map(v => v.destino).filter(Boolean)));
 
     res.json({
       success: true,
       data: {
         ...cliente,
+        lugaresFrecuentes,
         direccionesFrecuentes: {
           origenes: uniqueOrigins,
           destinos: uniqueDestinations

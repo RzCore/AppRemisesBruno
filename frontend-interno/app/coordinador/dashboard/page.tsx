@@ -302,10 +302,16 @@ export default function CoordinadorDashboard() {
     diasSemana: [] as string[],
   });
 
+  const [clientFrequentPlaces, setClientFrequentPlaces] = useState<
+    Array<{ alias: string; direccion: string; lat?: number; lon?: number }>
+  >([]);
+
   const openStepModal = (mode: 'viaje' | 'reserva') => {
     setEditingReservaId(null);
     setModalMode(mode);
     setModalStep(1);
+    setClientFrequentPlaces([]);
+    setFrequentAddresses({ origenes: [], destinos: [] });
     setIsModalOpen(true);
   };
   
@@ -1122,11 +1128,26 @@ export default function CoordinadorDashboard() {
           direccion: c.direccion || ''
         });
 
+        const lugares: Array<{ alias: string; direccion: string; lat?: number; lon?: number }> = Array.isArray(c.lugaresFrecuentes)
+          ? c.lugaresFrecuentes
+          : [];
+        setClientFrequentPlaces(lugares);
+
         let origenes: string[] = [];
         let destinos: string[] = [];
-        if (c.viajes && Array.isArray(c.viajes)) {
-          origenes = Array.from<string>(new Set(c.viajes.map((v: any) => v.origen as string))).slice(0, 3);
-          destinos = Array.from<string>(new Set(c.viajes.map((v: any) => v.destino as string))).slice(0, 3);
+        if (c.direccionesFrecuentes && !Array.isArray(c.direccionesFrecuentes)) {
+          origenes = Array.isArray(c.direccionesFrecuentes.origenes)
+            ? c.direccionesFrecuentes.origenes.slice(0, 4)
+            : [];
+          destinos = Array.isArray(c.direccionesFrecuentes.destinos)
+            ? c.direccionesFrecuentes.destinos.slice(0, 4)
+            : [];
+        } else if (c.viajes && Array.isArray(c.viajes)) {
+          origenes = Array.from<string>(new Set(c.viajes.map((v: any) => v.origen as string))).slice(0, 4);
+          destinos = Array.from<string>(new Set(c.viajes.map((v: any) => v.destino as string))).slice(0, 4);
+        }
+        if (c.direccion && !origenes.includes(c.direccion)) {
+          origenes = [c.direccion, ...origenes].slice(0, 4);
         }
         setFrequentAddresses({ origenes, destinos });
 
@@ -1598,15 +1619,15 @@ export default function CoordinadorDashboard() {
     setIsExpressModalOpen(true);
   };
 
-  // Atajo global de teclado para Despacho Express: F2 o Alt+N
+  // Atajo global de teclado para Nuevo Viaje: F2 o Alt+N
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F2') {
         e.preventDefault();
-        abrirModalExpress();
+        openStepModal('viaje');
       } else if (e.altKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault();
-        abrirModalExpress();
+        openStepModal('viaje');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -2199,17 +2220,6 @@ export default function CoordinadorDashboard() {
                 <span>{agenciaAbierta ? 'Central Abierta' : '⛔ Central en Pausa'}</span>
               </button>
 
-              {/* Botón Despacho Express F2 */}
-              <button 
-                type="button"
-                onClick={abrirModalExpress}
-                className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-700 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg flex items-center space-x-1.5 text-xs sm:text-sm font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
-                title="Carga ultrarrápida express para pedidos telefónicos (< 5s). Atajo: Tecla F2"
-              >
-                <Zap className="h-4 w-4 fill-current text-yellow-200" />
-                <span>⚡ Despacho Express (F2)</span>
-              </button>
-
               {/* Botón Silenciar/Activar Alarma de Despacho */}
               <button
                 type="button"
@@ -2224,14 +2234,15 @@ export default function CoordinadorDashboard() {
                 {sonidoAlarmaHabilitado ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
               </button>
 
-              {/* Botón Nuevo Viaje Rápido */}
+              {/* Botón Nuevo Viaje Rápido (F2) */}
               <button 
                 type="button"
                 onClick={() => openStepModal('viaje')}
                 className="bg-green-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg flex items-center space-x-1.5 hover:bg-green-700 transition-colors text-xs sm:text-sm font-semibold shadow-sm"
+                title="Crear Nuevo Viaje (Atajo: Tecla F2)"
               >
                 <Plus className="h-4 w-4" />
-                <span>Nuevo Viaje</span>
+                <span>Nuevo Viaje (F2)</span>
               </button>
 
               {/* Cierre de Caja */}
@@ -3952,23 +3963,13 @@ export default function CoordinadorDashboard() {
                   </span>
                 </button>
 
-                {/* Despacho Express F2 */}
-                <button
-                  type="button"
-                  onClick={abrirModalExpress}
-                  className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-700 text-white px-4 py-3 rounded-xl flex items-center space-x-3 transition-all shadow-md font-bold text-sm cursor-pointer"
-                >
-                  <Zap className="h-5 w-5 fill-current text-yellow-200" />
-                  <span>⚡ Despacho Express (F2)</span>
-                </button>
-
                 <button 
                   type="button"
                   onClick={() => openStepModal('viaje')}
-                  className="w-full bg-green-600 text-white px-4 py-2.5 rounded-xl flex items-center space-x-3 hover:bg-green-700 transition-colors shadow-sm font-medium text-sm"
+                  className="w-full bg-green-600 text-white px-4 py-3 rounded-xl flex items-center space-x-3 hover:bg-green-700 transition-colors shadow-md font-bold text-sm"
                 >
-                  <Plus className="h-4 w-4" />
-                  <span>Nuevo Viaje Completo</span>
+                  <Plus className="h-5 w-5" />
+                  <span>Nuevo Viaje (F2)</span>
                 </button>
 
                 <button 
@@ -4101,8 +4102,36 @@ export default function CoordinadorDashboard() {
                       </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
-                      Ingresa el DNI del cliente para autocompletar sus datos y viajes anteriores.
+                      Ingresa el DNI del cliente para autocompletar sus datos y lugares frecuentes.
                     </p>
+                  </div>
+                  <div className="pt-2 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClientData({
+                          id: '',
+                          nombre: 'Pasajero',
+                          apellido: 'en Agencia',
+                          telefono: '',
+                          email: '',
+                          direccion: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                        });
+                        setClientFrequentPlaces([]);
+                        setFrequentAddresses({ origenes: [], destinos: [] });
+                        setTripData((prev) => ({
+                          ...prev,
+                          origen: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                        }));
+                        setOrigenCoords({ lat: -34.9011383, lon: -60.0137782 });
+                        setIsOrigenSelected(true);
+                        setOrigenSuggestions([]);
+                        setModalStep(3);
+                      }}
+                      className="w-full py-2.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <span>🏢 Pasajero en Agencia (Av. Sarmiento 271) — Sin DNI</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -4237,6 +4266,64 @@ export default function CoordinadorDashboard() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                       placeholder="Dirección de recogida..."
                     />
+                    {/* Accesos rápidos de Origen: Agencia + Lugares frecuentes del pasajero */}
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTripData((prev) => ({
+                            ...prev,
+                            origen: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                          }));
+                          setOrigenCoords({ lat: -34.9011383, lon: -60.0137782 });
+                          setIsOrigenSelected(true);
+                          setOrigenSuggestions([]);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                        title="Avenida Sarmiento 271, Chivilcoy"
+                      >
+                        🏢 Agencia (Av. Sarmiento 271)
+                      </button>
+                      {clientFrequentPlaces.map((lug, idx) => (
+                        <button
+                          key={`nv-orig-freq-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            setTripData((prev) => ({ ...prev, origen: lug.direccion }));
+                            if (lug.lat && lug.lon) {
+                              setOrigenCoords({ lat: Number(lug.lat), lon: Number(lug.lon) });
+                            } else {
+                              setOrigenCoords(null);
+                            }
+                            setIsOrigenSelected(true);
+                            setOrigenSuggestions([]);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[230px] truncate"
+                          title={lug.direccion}
+                        >
+                          ⭐ {lug.alias}: {lug.direccion}
+                        </button>
+                      ))}
+                      {frequentAddresses.origenes
+                        .filter((dir) => !clientFrequentPlaces.some((l) => l.direccion === dir))
+                        .slice(0, 3)
+                        .map((dir, idx) => (
+                          <button
+                            key={`nv-orig-hab-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              setTripData((prev) => ({ ...prev, origen: dir }));
+                              setOrigenCoords(null);
+                              setIsOrigenSelected(true);
+                              setOrigenSuggestions([]);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 transition-colors max-w-[220px] truncate"
+                            title={dir}
+                          >
+                            📍 {dir}
+                          </button>
+                        ))}
+                    </div>
                     {origenSuggestions.length > 0 && !isOrigenSelected && (
                       <div className="absolute z-20 w-full bg-white mt-1 border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto divide-y divide-gray-100">
                         {origenSuggestions.map((sug, idx) => {
@@ -4278,6 +4365,64 @@ export default function CoordinadorDashboard() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
                       placeholder="Dirección de destino..."
                     />
+                    {/* Accesos rápidos de Destino: Agencia + Lugares frecuentes del pasajero */}
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTripData((prev) => ({
+                            ...prev,
+                            destino: 'Agencia (Avenida Sarmiento 271, Chivilcoy)',
+                          }));
+                          setDestinoCoords({ lat: -34.9011383, lon: -60.0137782 });
+                          setIsDestinoSelected(true);
+                          setDestinoSuggestions([]);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                        title="Avenida Sarmiento 271, Chivilcoy"
+                      >
+                        🏢 Agencia (Av. Sarmiento 271)
+                      </button>
+                      {clientFrequentPlaces.map((lug, idx) => (
+                        <button
+                          key={`nv-dest-freq-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            setTripData((prev) => ({ ...prev, destino: lug.direccion }));
+                            if (lug.lat && lug.lon) {
+                              setDestinoCoords({ lat: Number(lug.lat), lon: Number(lug.lon) });
+                            } else {
+                              setDestinoCoords(null);
+                            }
+                            setIsDestinoSelected(true);
+                            setDestinoSuggestions([]);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[230px] truncate"
+                          title={lug.direccion}
+                        >
+                          ⭐ {lug.alias}: {lug.direccion}
+                        </button>
+                      ))}
+                      {frequentAddresses.destinos
+                        .filter((dir) => !clientFrequentPlaces.some((l) => l.direccion === dir))
+                        .slice(0, 3)
+                        .map((dir, idx) => (
+                          <button
+                            key={`nv-dest-hab-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              setTripData((prev) => ({ ...prev, destino: dir }));
+                              setDestinoCoords(null);
+                              setIsDestinoSelected(true);
+                              setDestinoSuggestions([]);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 transition-colors max-w-[220px] truncate"
+                            title={dir}
+                          >
+                            🏁 {dir}
+                          </button>
+                        ))}
+                    </div>
                     {destinoSuggestions.length > 0 && !isDestinoSelected && (
                       <div className="absolute z-20 w-full bg-white mt-1 border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto divide-y divide-gray-100">
                         {destinoSuggestions.map((sug, idx) => {
