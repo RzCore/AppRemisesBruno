@@ -1576,6 +1576,7 @@ export const coordinadorDashboardService = {
       latDestino?: number;
       lonDestino?: number;
       artEmpresaId?: string;
+      clienteId?: string;
       esViajeLocal?: boolean;
       cobrarDesdeBase?: boolean;
     }
@@ -1589,6 +1590,7 @@ export const coordinadorDashboardService = {
         latDestino: coords?.latDestino,
         lonDestino: coords?.lonDestino,
         artEmpresaId: coords?.artEmpresaId,
+        clienteId: coords?.clienteId,
         esViajeLocal: coords?.esViajeLocal,
         cobrarDesdeBase: coords?.cobrarDesdeBase
       });

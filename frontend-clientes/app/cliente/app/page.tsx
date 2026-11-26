@@ -1802,9 +1802,13 @@ export default function ClienteApp() {
                   {metodoPago === 'CUENTA_CORRIENTE' && (presupuesto.esTarifaDiferenciada || user?.cliente?.tipoTarifa === 'PERSONALIZADA') ? (
                     <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block">⭐ Tarifa Especial Cta. Cte.</span>
                   ) : (
-                    <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Tarifa fija</span>
+                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 block">Valor estimativo</span>
                   )}
                 </div>
+              </div>
+
+              <div className="bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-xl px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200 leading-snug">
+                ℹ️ <strong>Valor estimativo:</strong> el importe final puede variar si el auto debe desviarse, si se agregan paradas intermedias o por tiempo de espera.
               </div>
 
               {/* Indicaciones para el chofer */}

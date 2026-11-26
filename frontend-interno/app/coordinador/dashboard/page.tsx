@@ -339,6 +339,7 @@ export default function CoordinadorDashboard() {
 
   const [creandoViaje, setCreandoViaje] = useState(false);
   const [creandoCliente, setCreandoCliente] = useState(false);
+  const [calculandoPrecioNuevoViaje, setCalculandoPrecioNuevoViaje] = useState(false);
   const [distanciaEstimada, setDistanciaEstimada] = useState<number | null>(null);
   const [origenSuggestions, setOrigenSuggestions] = useState<any[]>([]);
   const [destinoSuggestions, setDestinoSuggestions] = useState<any[]>([]);
@@ -1066,38 +1067,48 @@ export default function CoordinadorDashboard() {
     return () => clearTimeout(delayDebounceFn);
   }, [clientData.direccion, isDireccionSelected]);
 
-  // Manejador de cálculo de precio cuando cambian origen o destino
+  // Manejador de cálculo de precio automático cuando cambian origen o destino en Nuevo Viaje
   useEffect(() => {
-    const calcularPrecioAutomatico = async () => {
-      if (tripData.origen && tripData.destino && origenCoords && destinoCoords) {
-        try {
-          const res = await coordinadorDashboardService.calcularPrecio(
-            tripData.origen,
-            tripData.destino,
-            {
-              latOrigen: origenCoords.lat,
-              lonOrigen: origenCoords.lon,
-              latDestino: destinoCoords.lat,
-              lonDestino: destinoCoords.lon
-            }
-          );
-          if (res.success && res.data) {
-            const nuevoPrecio = res.data.precio ?? res.data.precioEstimado ?? res.data.precioSugerido;
-            if (nuevoPrecio !== undefined && nuevoPrecio !== null) {
-              setTripData((prev) => ({ ...prev, precio: nuevoPrecio.toString() }));
-            }
-            if (res.data.distanciaKm !== undefined) {
-              setDistanciaEstimada(res.data.distanciaKm);
-            }
-          }
-        } catch (err) {
-          console.error('Error calculando precio automático:', err);
-        }
-      }
-    };
+    if (!isModalOpen) return;
+    const origenTrim = tripData.origen?.trim() || '';
+    const destinoTrim = tripData.destino?.trim() || '';
+    if (origenTrim.length < 3 || destinoTrim.length < 3) {
+      setDistanciaEstimada(null);
+      return;
+    }
 
-    calcularPrecioAutomatico();
-  }, [origenCoords, destinoCoords]);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setCalculandoPrecioNuevoViaje(true);
+      try {
+        const res = await coordinadorDashboardService.calcularPrecio(origenTrim, destinoTrim, {
+          latOrigen: origenCoords?.lat,
+          lonOrigen: origenCoords?.lon,
+          latDestino: destinoCoords?.lat,
+          lonDestino: destinoCoords?.lon,
+          clienteId: clientData.id || undefined,
+        });
+        if (!cancelled && res.success && res.data) {
+          const nuevoPrecio = res.data.precio ?? res.data.precioEstimado ?? res.data.precioSugerido;
+          if (nuevoPrecio !== undefined && nuevoPrecio !== null) {
+            setTripData((prev) => ({ ...prev, precio: nuevoPrecio.toString() }));
+          }
+          if (res.data.distanciaKm !== undefined) {
+            setDistanciaEstimada(res.data.distanciaKm);
+          }
+        }
+      } catch (err) {
+        console.error('Error calculando precio automático:', err);
+      } finally {
+        if (!cancelled) setCalculandoPrecioNuevoViaje(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isModalOpen, tripData.origen, tripData.destino, origenCoords, destinoCoords, clientData.id]);
 
   const handleLogout = async () => {
     try {
@@ -4075,8 +4086,8 @@ export default function CoordinadorDashboard() {
                   {modalMode === 'reserva'
                     ? editingReservaId
                       ? 'Modificar datos de la reserva'
-                      : `Programar reserva manual - Paso ${modalStep} de 3`
-                    : `Crear viaje manual - Paso ${modalStep} de 3`}
+                      : `Programar reserva manual - Paso ${modalStep} de 4`
+                    : `Crear viaje manual - Paso ${modalStep} de 4`}
                 </p>
               </div>
               <button 
@@ -4256,16 +4267,16 @@ export default function CoordinadorDashboard() {
               )}
 
               {modalStep === 3 && (
-                <form onSubmit={modalMode === 'reserva' ? handleCrearReserva : handleCrearViaje} className="space-y-3">
+                <div className="space-y-3">
                   <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200 flex justify-between items-center text-xs">
                     <div>
                       <span className="font-semibold text-gray-800">{clientData.nombre} {clientData.apellido}</span>
-                      <span className="text-gray-500 ml-2">({clientData.telefono})</span>
+                      {clientData.telefono && <span className="text-gray-500 ml-2">({clientData.telefono})</span>}
                     </div>
                     <button 
                       type="button" 
                       onClick={() => setModalStep(1)}
-                      className="text-blue-600 hover:underline"
+                      className="text-blue-600 hover:underline font-medium"
                     >
                       Cambiar
                     </button>
@@ -4469,22 +4480,78 @@ export default function CoordinadorDashboard() {
                     )}
                   </div>
 
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setModalStep(1)}
+                      className="text-gray-500 text-xs hover:underline"
+                    >
+                      ← Cambiar pasajero
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!tripData.origen.trim() || !tripData.destino.trim()) {
+                          toast.error('Completá origen y destino para continuar');
+                          return;
+                        }
+                        setModalStep(4);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-xs font-bold transition-colors"
+                    >
+                      Siguiente →
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {modalStep === 4 && (
+                <form onSubmit={modalMode === 'reserva' ? handleCrearReserva : handleCrearViaje} className="space-y-3">
+                  {/* Resumen compacto del recorrido */}
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-slate-800">
+                        {clientData.nombre} {clientData.apellido}
+                        {clientData.telefono ? ` (${clientData.telefono})` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setModalStep(3)}
+                        className="text-blue-600 hover:underline font-medium"
+                      >
+                        Editar ruta
+                      </button>
+                    </div>
+                    <p className="text-slate-600 truncate">📍 <strong>Origen:</strong> {tripData.origen}</p>
+                    <p className="text-slate-600 truncate">🏁 <strong>Destino:</strong> {tripData.destino}</p>
+                  </div>
+
                   {modalMode === 'viaje' ? (
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-0.5">Precio ($)</label>
+                      <label className="block text-xs font-medium text-gray-700 mb-0.5 flex items-center justify-between">
+                        <span>Precio Estimado ($)</span>
+                        {calculandoPrecioNuevoViaje && (
+                          <span className="inline-flex items-center text-[11px] text-blue-600 font-semibold">
+                            <Loader2 className="w-3 h-3 animate-spin mr-1" /> Calculando...
+                          </span>
+                        )}
+                      </label>
                       <input 
                         type="number"
                         min="0"
                         value={tripData.precio}
                         onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
-                        placeholder="Se calcula al ingresar origen y destino..."
-                        className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold text-emerald-700"
+                        placeholder="Se calcula automáticamente..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base font-bold text-emerald-700"
                       />
                       {distanciaEstimada !== null && (
                         <p className="text-[11px] text-emerald-700 font-medium mt-1">
                           🛣️ Distancia estimada: {distanciaEstimada} km
                         </p>
                       )}
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5">
+                        ℹ️ Valor estimativo: el importe final puede variar por desvíos, paradas adicionales o tiempo de espera.
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-3 pt-1">
@@ -4614,13 +4681,13 @@ export default function CoordinadorDashboard() {
                     />
                   </div>
 
-                  <div className="flex justify-end space-x-2 pt-2">
+                  <div className="flex justify-between items-center space-x-2 pt-2">
                     <button 
                       type="button" 
-                      onClick={() => setIsModalOpen(false)}
+                      onClick={() => setModalStep(3)}
                       className="px-4 py-2 border border-gray-300 rounded-xl text-gray-700 text-xs font-medium hover:bg-gray-50"
                     >
-                      Cancelar
+                      ← Atrás
                     </button>
                     <button 
                       type="submit" 
