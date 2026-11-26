@@ -416,7 +416,22 @@ export const duenioClientesController = {
         return res.status(404).json({ success: false, message: 'Remisería no encontrada' });
       }
 
-      const { nombre, codigoUnico, telefono, direccion, observaciones, pin } = req.body;
+      const {
+        nombre,
+        codigoUnico,
+        telefono,
+        direccion,
+        observaciones,
+        pin,
+        tipoTarifa,
+        tarifaPrecioTramo,
+        tarifaValorKm,
+        tarifaValorHoraEspera,
+        pagaChoferTipo,
+        choferPrecioTramo,
+        choferValorKm,
+        choferValorHoraEspera
+      } = req.body;
       const cleanNombre = String(nombre || '').trim();
       const cleanCodigo = String(codigoUnico || '')
         .trim()
@@ -464,6 +479,9 @@ export const duenioClientesController = {
         }
       });
 
+      const tipoTarifaFinal = tipoTarifa === 'PERSONALIZADA' ? 'PERSONALIZADA' : 'LISTA_NORMAL';
+      const pagaChoferTipoFinal = pagaChoferTipo === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'LISTA_NORMAL';
+
       const clienteEmpresa = await prisma.cliente.create({
         data: {
           nombre: cleanNombre,
@@ -477,6 +495,14 @@ export const duenioClientesController = {
           observaciones: observaciones ? String(observaciones).trim() : `Cuenta Empresa / Institución (Código: ${cleanCodigo})`,
           activo: true,
           cuentaCorrienteHabilitada: true,
+          tipoTarifa: tipoTarifaFinal,
+          tarifaPrecioTramo: tipoTarifaFinal === 'PERSONALIZADA' && tarifaPrecioTramo !== undefined ? Number(tarifaPrecioTramo) : null,
+          tarifaValorKm: tipoTarifaFinal === 'PERSONALIZADA' && tarifaValorKm !== undefined ? Number(tarifaValorKm) : null,
+          tarifaValorHoraEspera: tipoTarifaFinal === 'PERSONALIZADA' && tarifaValorHoraEspera !== undefined ? Number(tarifaValorHoraEspera) : null,
+          pagaChoferTipo: pagaChoferTipoFinal,
+          choferPrecioTramo: pagaChoferTipoFinal === 'PERSONALIZADO' && choferPrecioTramo !== undefined ? Number(choferPrecioTramo) : null,
+          choferValorKm: pagaChoferTipoFinal === 'PERSONALIZADO' && choferValorKm !== undefined ? Number(choferValorKm) : null,
+          choferValorHoraEspera: pagaChoferTipoFinal === 'PERSONALIZADO' && choferValorHoraEspera !== undefined ? Number(choferValorHoraEspera) : null,
           userId: userCreado.id,
           remiseriaId
         }

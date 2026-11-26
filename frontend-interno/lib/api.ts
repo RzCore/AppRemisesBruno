@@ -2639,6 +2639,14 @@ export const duenioClienteService = {
     direccion?: string;
     observaciones?: string;
     pin?: string;
+    tipoTarifa?: 'LISTA_NORMAL' | 'PERSONALIZADA';
+    tarifaPrecioTramo?: number;
+    tarifaValorKm?: number;
+    tarifaValorHoraEspera?: number;
+    pagaChoferTipo?: 'LISTA_NORMAL' | 'PERSONALIZADO';
+    choferPrecioTramo?: number;
+    choferValorKm?: number;
+    choferValorHoraEspera?: number;
   }): Promise<ApiResponse<Cliente>> => {
     try {
       const response = await api.post('/duenios/clientes/empresa', data);

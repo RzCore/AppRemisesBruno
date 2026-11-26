@@ -53,6 +53,14 @@ export default function DuenioClientesPage() {
     direccion: '',
     pin: '',
     observaciones: '',
+    tipoTarifa: 'LISTA_NORMAL' as 'LISTA_NORMAL' | 'PERSONALIZADA',
+    tarifaPrecioTramo: 3500,
+    tarifaValorKm: 1200,
+    tarifaValorHoraEspera: 10000,
+    pagaChoferTipo: 'LISTA_NORMAL' as 'LISTA_NORMAL' | 'PERSONALIZADO',
+    choferPrecioTramo: 3500,
+    choferValorKm: 1200,
+    choferValorHoraEspera: 10000,
   });
 
   useEffect(() => {
@@ -98,11 +106,34 @@ export default function DuenioClientesPage() {
         direccion: nuevaEmpresaForm.direccion.trim() || undefined,
         pin: nuevaEmpresaForm.pin.trim() || undefined,
         observaciones: nuevaEmpresaForm.observaciones.trim() || undefined,
+        tipoTarifa: nuevaEmpresaForm.tipoTarifa,
+        tarifaPrecioTramo: nuevaEmpresaForm.tipoTarifa === 'PERSONALIZADA' ? nuevaEmpresaForm.tarifaPrecioTramo : undefined,
+        tarifaValorKm: nuevaEmpresaForm.tipoTarifa === 'PERSONALIZADA' ? nuevaEmpresaForm.tarifaValorKm : undefined,
+        tarifaValorHoraEspera: nuevaEmpresaForm.tipoTarifa === 'PERSONALIZADA' ? nuevaEmpresaForm.tarifaValorHoraEspera : undefined,
+        pagaChoferTipo: nuevaEmpresaForm.pagaChoferTipo,
+        choferPrecioTramo: nuevaEmpresaForm.pagaChoferTipo === 'PERSONALIZADO' ? nuevaEmpresaForm.choferPrecioTramo : undefined,
+        choferValorKm: nuevaEmpresaForm.pagaChoferTipo === 'PERSONALIZADO' ? nuevaEmpresaForm.choferValorKm : undefined,
+        choferValorHoraEspera: nuevaEmpresaForm.pagaChoferTipo === 'PERSONALIZADO' ? nuevaEmpresaForm.choferValorHoraEspera : undefined,
       });
       if (res.success) {
         toast.success(res.message || 'Empresa creada con Cuenta Corriente activa');
         setModalNuevaEmpresaOpen(false);
-        setNuevaEmpresaForm({ nombre: '', codigoUnico: '', telefono: '', direccion: '', pin: '', observaciones: '' });
+        setNuevaEmpresaForm({
+          nombre: '',
+          codigoUnico: '',
+          telefono: '',
+          direccion: '',
+          pin: '',
+          observaciones: '',
+          tipoTarifa: 'LISTA_NORMAL',
+          tarifaPrecioTramo: 3500,
+          tarifaValorKm: 1200,
+          tarifaValorHoraEspera: 10000,
+          pagaChoferTipo: 'LISTA_NORMAL',
+          choferPrecioTramo: 3500,
+          choferValorKm: 1200,
+          choferValorHoraEspera: 10000,
+        });
         setSugerenciasDireccionEmpresa([]);
         setDireccionEmpresaSeleccionada(false);
         cargarClientes();
@@ -1450,8 +1481,8 @@ export default function DuenioClientesPage() {
 
       {/* MODAL NUEVA EMPRESA / INSTITUCIÓN (CÓDIGO ÚNICO + CTA CTE) */}
       {modalNuevaEmpresaOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-visible">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-visible my-auto">
             <div className="bg-indigo-600 text-white px-6 py-4 rounded-t-2xl flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-base">🏢 Nueva Empresa / Institución</h3>
@@ -1468,7 +1499,7 @@ export default function DuenioClientesPage() {
                 ×
               </button>
             </div>
-            <form onSubmit={handleCrearEmpresa} className="p-6 space-y-3.5">
+            <form onSubmit={handleCrearEmpresa} className="p-5 space-y-3.5 max-h-[82vh] overflow-y-auto">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre de Empresa / Institución *</label>
                 <input
@@ -1567,6 +1598,158 @@ export default function DuenioClientesPage() {
                   </ul>
                 )}
               </div>
+              {/* PRECIO QUE SE LE COBRA A LA EMPRESA */}
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">💰 Precio que se le cobra a la empresa</span>
+                  <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setNuevaEmpresaForm({ ...nuevaEmpresaForm, tipoTarifa: 'LISTA_NORMAL' })}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                        nuevaEmpresaForm.tipoTarifa === 'LISTA_NORMAL'
+                          ? 'bg-white text-indigo-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                    >
+                      Tarifa Normal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNuevaEmpresaForm({ ...nuevaEmpresaForm, tipoTarifa: 'PERSONALIZADA' })}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                        nuevaEmpresaForm.tipoTarifa === 'PERSONALIZADA'
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                    >
+                      Personalizada
+                    </button>
+                  </div>
+                </div>
+                {nuevaEmpresaForm.tipoTarifa === 'PERSONALIZADA' && (
+                  <div className="grid grid-cols-3 gap-2 bg-amber-50/70 border border-amber-200 rounded-xl p-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">Base / Tramo ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        required
+                        value={nuevaEmpresaForm.tarifaPrecioTramo || ''}
+                        onChange={(e) =>
+                          setNuevaEmpresaForm({ ...nuevaEmpresaForm, tarifaPrecioTramo: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">Valor Km ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        required
+                        value={nuevaEmpresaForm.tarifaValorKm || ''}
+                        onChange={(e) =>
+                          setNuevaEmpresaForm({ ...nuevaEmpresaForm, tarifaValorKm: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">Espera / hora ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={nuevaEmpresaForm.tarifaValorHoraEspera || ''}
+                        onChange={(e) =>
+                          setNuevaEmpresaForm({ ...nuevaEmpresaForm, tarifaValorHoraEspera: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* LO QUE SE LE PAGA AL CHOFER */}
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">🚗 Lo que se le paga al chofer</span>
+                  <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setNuevaEmpresaForm({ ...nuevaEmpresaForm, pagaChoferTipo: 'LISTA_NORMAL' })}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                        nuevaEmpresaForm.pagaChoferTipo === 'LISTA_NORMAL'
+                          ? 'bg-white text-indigo-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                    >
+                      Tarifa Normal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNuevaEmpresaForm({ ...nuevaEmpresaForm, pagaChoferTipo: 'PERSONALIZADO' })}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                        nuevaEmpresaForm.pagaChoferTipo === 'PERSONALIZADO'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                    >
+                      Personalizado
+                    </button>
+                  </div>
+                </div>
+                {nuevaEmpresaForm.pagaChoferTipo === 'PERSONALIZADO' && (
+                  <div className="grid grid-cols-3 gap-2 bg-emerald-50/70 border border-emerald-200 rounded-xl p-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">Base / Tramo ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        required
+                        value={nuevaEmpresaForm.choferPrecioTramo || ''}
+                        onChange={(e) =>
+                          setNuevaEmpresaForm({ ...nuevaEmpresaForm, choferPrecioTramo: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">Valor Km ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        required
+                        value={nuevaEmpresaForm.choferValorKm || ''}
+                        onChange={(e) =>
+                          setNuevaEmpresaForm({ ...nuevaEmpresaForm, choferValorKm: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-1">Espera / hora ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={nuevaEmpresaForm.choferValorHoraEspera || ''}
+                        onChange={(e) =>
+                          setNuevaEmpresaForm({ ...nuevaEmpresaForm, choferValorHoraEspera: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
