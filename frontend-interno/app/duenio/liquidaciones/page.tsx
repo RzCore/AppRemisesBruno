@@ -189,16 +189,43 @@ export default function HistorialLiquidacionesPage() {
   const totalSaldoAFavorPendienteDuenio = filteredLiquidaciones
     .filter((l) => l.saldoAFavorChofer > 0 && l.quienPagaSaldoAFavor === 'PENDIENTE_DUENIO')
     .reduce((sum, l) => sum + (l.saldoAFavorChofer || 0), 0);
+  const getTransferenciasLiq = (liq: any) => {
+    const trAgGuardada = Number(liq?.totalTransferenciaAgencia || 0);
+    const trPrGuardada = Number(liq?.totalTransferenciaPropia || 0);
+    if (trAgGuardada > 0 || trPrGuardada > 0) {
+      return { agencia: trAgGuardada, propia: trPrGuardada };
+    }
+    const viajesLiq = Array.isArray(liq?.viajes) ? liq.viajes : [];
+    if (viajesLiq.length > 0) {
+      let agencia = 0;
+      let propia = 0;
+      for (const v of viajesLiq) {
+        if (v.metodoPago === 'TRANSFERENCIA') {
+          const p = Number(v.precio || 0);
+          if (v.destinoTransferencia === 'CUENTA_PROPIA') {
+            propia += p;
+          } else {
+            agencia += p;
+          }
+        }
+      }
+      if (agencia > 0 || propia > 0) {
+        return { agencia, propia };
+      }
+    }
+    return { agencia: Number(liq?.totalTransferenciaViajes || 0), propia: 0 };
+  };
+
   const totalGananciaPropietarioChoferes = filteredLiquidaciones.reduce(
     (sum, l) => sum + (l.gananciaPropietario || 0),
     0
   );
   const totalTransferenciaAgenciaChoferes = filteredLiquidaciones.reduce(
-    (sum, l) => sum + (l.totalTransferenciaAgencia ?? l.totalTransferenciaViajes ?? 0),
+    (sum, l) => sum + getTransferenciasLiq(l).agencia,
     0
   );
   const totalTransferenciaPropiaChoferes = filteredLiquidaciones.reduce(
-    (sum, l) => sum + (l.totalTransferenciaPropia || 0),
+    (sum, l) => sum + getTransferenciasLiq(l).propia,
     0
   );
 
@@ -551,8 +578,8 @@ export default function HistorialLiquidacionesPage() {
       const totRec = lista.reduce((s, l) => s + (l.totalRecaudado || 0), 0);
       const totAgencia = lista.reduce((s, l) => s + (l.comisionAgencia || 0), 0);
       const totViajesEfec = lista.reduce((s, l) => s + (l.totalEfectivoViajes || 0), 0);
-      const totViajesTrAg = lista.reduce((s, l) => s + (l.totalTransferenciaAgencia ?? l.totalTransferenciaViajes ?? 0), 0);
-      const totViajesTrProp = lista.reduce((s, l) => s + (l.totalTransferenciaPropia || 0), 0);
+      const totViajesTrAg = lista.reduce((s, l) => s + getTransferenciasLiq(l).agencia, 0);
+      const totViajesTrProp = lista.reduce((s, l) => s + getTransferenciasLiq(l).propia, 0);
       const totViajesCC = lista.reduce((s, l) => s + (l.totalCuentaCorrienteViajes || 0), 0);
       const totPagarChofer = lista
         .filter((l) => getEstadoFinancieroLiq(l).tipo === 'PAGAR_CHOFER')
@@ -640,8 +667,7 @@ export default function HistorialLiquidacionesPage() {
           hour: '2-digit',
           minute: '2-digit'
         })}`;
-        const trAg = liq.totalTransferenciaAgencia ?? liq.totalTransferenciaViajes ?? 0;
-        const trProp = liq.totalTransferenciaPropia || 0;
+        const { agencia: trAg, propia: trProp } = getTransferenciasLiq(liq);
         const viajesDesglose = `Ef: ${fmt(liq.totalEfectivoViajes || 0)} | TrAg: ${fmt(trAg)} | TrPr: ${fmt(trProp)} | CC: ${fmt(liq.totalCuentaCorrienteViajes || 0)}`;
         const est = estadosPorFila[idx];
 
@@ -1385,11 +1411,11 @@ export default function HistorialLiquidacionesPage() {
                                 ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                               </span>
                               <span className="text-[10px] text-slate-500 block">
-                                {(liq.totalTransferenciaAgencia ?? liq.totalTransferenciaViajes ?? 0) > 0
-                                  ? `TrAg: $${(liq.totalTransferenciaAgencia ?? liq.totalTransferenciaViajes).toLocaleString('es-AR')} `
+                                {getTransferenciasLiq(liq).agencia > 0
+                                  ? `TrAg: $${getTransferenciasLiq(liq).agencia.toLocaleString('es-AR')} `
                                   : ''}
-                                {(liq.totalTransferenciaPropia || 0) > 0
-                                  ? `TrPr: $${liq.totalTransferenciaPropia.toLocaleString('es-AR')} `
+                                {getTransferenciasLiq(liq).propia > 0
+                                  ? `TrPr: $${getTransferenciasLiq(liq).propia.toLocaleString('es-AR')} `
                                   : ''}
                                 {(liq.totalCuentaCorrienteViajes || 0) > 0
                                   ? `CC: $${liq.totalCuentaCorrienteViajes.toLocaleString('es-AR')}`
@@ -2347,11 +2373,11 @@ export default function HistorialLiquidacionesPage() {
                   </div>
                   <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
                     <span className="text-blue-700 block font-semibold">🏦 Tr. Agencia</span>
-                    <span className="text-base font-black text-blue-800">${Number(detalleViajesModalLiq.totalTransferenciaAgencia ?? detalleViajesModalLiq.totalTransferenciaViajes ?? 0).toLocaleString('es-AR')}</span>
+                    <span className="text-base font-black text-blue-800">${getTransferenciasLiq(detalleViajesModalLiq).agencia.toLocaleString('es-AR')}</span>
                   </div>
                   <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
                     <span className="text-indigo-700 block font-semibold">📱 Tr. Propia</span>
-                    <span className="text-base font-black text-indigo-800">${Number(detalleViajesModalLiq.totalTransferenciaPropia || 0).toLocaleString('es-AR')}</span>
+                    <span className="text-base font-black text-indigo-800">${getTransferenciasLiq(detalleViajesModalLiq).propia.toLocaleString('es-AR')}</span>
                   </div>
                   <div className="p-3 rounded-xl bg-purple-50 border border-purple-200">
                     <span className="text-purple-700 block font-semibold">🏛️ Cta. Cte.</span>
