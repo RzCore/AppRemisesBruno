@@ -1397,14 +1397,16 @@ export default function ChoferApp() {
     init();
   }, [user]);
 
-  // Polling cada 3 segundos para detectar solicitudes de viaje entrantes o cambios de estado
+  // Polling de respaldo cada 8 segundos (los viajes y cambios llegan al instante vía Socket.IO)
+  // Se pausa si la pestaña está oculta y sincroniza al instante al volver a primer plano
   useEffect(() => {
     if (!user) return;
     if (!isActive && !viajeActual) return;
 
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       sincronizarEstado(isActive);
-    }, 3000);
+    }, 8000);
 
     return () => clearInterval(interval);
   }, [user, isActive, viajeActual, sincronizarEstado]);

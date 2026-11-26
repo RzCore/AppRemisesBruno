@@ -3,6 +3,19 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest, JwtPayload } from '../types';
 
+// Caché en memoria de usuarios autenticados (TTL 20s) para evitar 5 JOINs a PostgreSQL en cada request
+const AUTH_CACHE_TTL_MS = 20_000;
+const AUTH_CACHE_MAX_ENTRIES = 2000;
+const authUserCache = new Map<string, { user: NonNullable<AuthenticatedRequest['user']>; expiresAt: number }>();
+
+export const invalidateAuthUserCache = (userId?: string) => {
+  if (!userId) {
+    authUserCache.clear();
+  } else {
+    authUserCache.delete(userId);
+  }
+};
+
 export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -37,7 +50,14 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-    
+
+    const now = Date.now();
+    const cached = authUserCache.get(decoded.id);
+    if (cached && cached.expiresAt > now) {
+      req.user = cached.user;
+      return next();
+    }
+
     // Buscar el usuario completo con sus relaciones
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
@@ -50,10 +70,11 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
     });
 
     if (!user || !user.activo) {
+      authUserCache.delete(decoded.id);
       return res.status(401).json({ success: false, error: 'Usuario no encontrado o inactivo' });
     }
 
-    req.user = {
+    const mappedUser: NonNullable<AuthenticatedRequest['user']> = {
       id: user.id,
       email: user.email,
       rol: user.rol as 'ADMIN' | 'DUENIO' | 'COORDINADOR' | 'CLIENTE' | 'CHOFER',
@@ -99,7 +120,14 @@ export const authenticateToken = async (req: AuthenticatedRequest, res: Response
         motivoRechazo: user.chofer.motivoRechazo
       } : undefined
     };
-    
+
+    if (authUserCache.size >= AUTH_CACHE_MAX_ENTRIES) {
+      const oldestKey = authUserCache.keys().next().value;
+      if (oldestKey) authUserCache.delete(oldestKey);
+    }
+    authUserCache.set(decoded.id, { user: mappedUser, expiresAt: now + AUTH_CACHE_TTL_MS });
+
+    req.user = mappedUser;
     next();
   } catch (error) {
     return res.status(401).json({ success: false, error: 'Token inválido o expirado' });

@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { validationResult } from 'express-validator';
 import http from 'http';
+import zlib from 'zlib';
 import { initSocket } from './lib/socket';
 import { iniciarServicioRecordatorioART } from './services/artReminderService';
 import { iniciarServicioReservasAutomaticas } from './services/reservaSchedulerService';
@@ -52,6 +53,32 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware de seguridad
 app.use(helmet());
+
+// Compresión gzip ligera para respuestas JSON > 1 KB (reduce ~70-85% el tráfico en 4G)
+app.use((req, res, next) => {
+  const acceptEncoding = String(req.headers['accept-encoding'] || '');
+  if (!acceptEncoding.includes('gzip')) return next();
+
+  const originalJson = res.json.bind(res);
+  res.json = ((body: any) => {
+    try {
+      const jsonStr = JSON.stringify(body);
+      if (jsonStr && jsonStr.length > 1024 && !res.headersSent) {
+        const compressed = zlib.gzipSync(Buffer.from(jsonStr, 'utf8'));
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Vary', 'Accept-Encoding');
+        res.setHeader('Content-Length', compressed.length);
+        return res.send(compressed);
+      }
+    } catch {
+      // Fallback silencioso a respuesta sin comprimir
+    }
+    return originalJson(body);
+  }) as any;
+
+  next();
+});
 
 // Configuración de CORS
 app.use(cors({

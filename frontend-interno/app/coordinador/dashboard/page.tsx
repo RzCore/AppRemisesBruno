@@ -916,14 +916,19 @@ export default function CoordinadorDashboard() {
   }, [user?.coordinador?.remiseriaId, (user as any)?.remiseriaId]);
 
   // Actualizador por segundo del cronómetro de 10 minutos para solicitudes de WhatsApp
+  // Solo corre cuando hay solicitudes activas (evita 60 re-renders/minuto innecesarios del dashboard)
   const [, setTickCronometro] = useState(0);
   useEffect(() => {
+    if (solicitudesAtencion.length === 0) return;
     const timer = setInterval(() => {
+      const now = Date.now();
       setTickCronometro((t) => t + 1);
-      setSolicitudesAtencion((prev) => prev.filter((s) => s.expiraAt > Date.now()));
+      setSolicitudesAtencion((prev) =>
+        prev.some((s) => s.expiraAt <= now) ? prev.filter((s) => s.expiraAt > now) : prev
+      );
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [solicitudesAtencion.length]);
 
   const cargarEstadoCentral = async () => {
     try {
@@ -995,8 +1000,20 @@ export default function CoordinadorDashboard() {
   useEffect(() => {
     fetchData();
     cargarEstadoCentral();
-    const interval = setInterval(fetchData, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchData();
+    }, 10000);
+    const onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        fetchData();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   // Sincronizar filtros de fecha y móvil y recargar historial filtrado (solo cuando cambian)
