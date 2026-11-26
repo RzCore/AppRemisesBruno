@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { duenioClienteService } from '@/lib/api';
+import { duenioClienteService, coordinadorDashboardService } from '@/lib/api';
 import { Cliente, Viaje, PagoCuentaCorriente } from '@/types';
 import {
   Users,
@@ -43,6 +43,9 @@ export default function DuenioClientesPage() {
   // Modal Alta Rápida de Empresa / Institución (con código único y Cuenta Corriente)
   const [modalNuevaEmpresaOpen, setModalNuevaEmpresaOpen] = useState(false);
   const [creandoEmpresa, setCreandoEmpresa] = useState(false);
+  const [sugerenciasDireccionEmpresa, setSugerenciasDireccionEmpresa] = useState<any[]>([]);
+  const [buscandoDireccionEmpresa, setBuscandoDireccionEmpresa] = useState(false);
+  const [direccionEmpresaSeleccionada, setDireccionEmpresaSeleccionada] = useState(false);
   const [nuevaEmpresaForm, setNuevaEmpresaForm] = useState({
     nombre: '',
     codigoUnico: '',
@@ -51,6 +54,34 @@ export default function DuenioClientesPage() {
     pin: '',
     observaciones: '',
   });
+
+  useEffect(() => {
+    if (!modalNuevaEmpresaOpen || direccionEmpresaSeleccionada) {
+      setSugerenciasDireccionEmpresa([]);
+      return;
+    }
+    const query = nuevaEmpresaForm.direccion.trim();
+    if (query.length < 3) {
+      setSugerenciasDireccionEmpresa([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setBuscandoDireccionEmpresa(true);
+      try {
+        const res = await coordinadorDashboardService.geocode(query);
+        if (res.success && Array.isArray(res.data)) {
+          setSugerenciasDireccionEmpresa(res.data.slice(0, 6));
+        } else {
+          setSugerenciasDireccionEmpresa([]);
+        }
+      } catch {
+        setSugerenciasDireccionEmpresa([]);
+      } finally {
+        setBuscandoDireccionEmpresa(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [nuevaEmpresaForm.direccion, modalNuevaEmpresaOpen, direccionEmpresaSeleccionada]);
 
   const handleCrearEmpresa = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +103,8 @@ export default function DuenioClientesPage() {
         toast.success(res.message || 'Empresa creada con Cuenta Corriente activa');
         setModalNuevaEmpresaOpen(false);
         setNuevaEmpresaForm({ nombre: '', codigoUnico: '', telefono: '', direccion: '', pin: '', observaciones: '' });
+        setSugerenciasDireccionEmpresa([]);
+        setDireccionEmpresaSeleccionada(false);
         cargarClientes();
       } else {
         toast.error(res.message || 'No se pudo crear la empresa');
@@ -1418,15 +1451,18 @@ export default function DuenioClientesPage() {
       {/* MODAL NUEVA EMPRESA / INSTITUCIÓN (CÓDIGO ÚNICO + CTA CTE) */}
       {modalNuevaEmpresaOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
-            <div className="bg-indigo-600 text-white px-6 py-4 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-visible">
+            <div className="bg-indigo-600 text-white px-6 py-4 rounded-t-2xl flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-base">🏢 Nueva Empresa / Institución</h3>
                 <p className="text-xs text-indigo-100">Se crea con Cuenta Corriente activa y código único</p>
               </div>
               <button
                 type="button"
-                onClick={() => setModalNuevaEmpresaOpen(false)}
+                onClick={() => {
+                  setModalNuevaEmpresaOpen(false);
+                  setSugerenciasDireccionEmpresa([]);
+                }}
                 className="text-white/80 hover:text-white text-xl leading-none"
               >
                 ×
@@ -1489,15 +1525,47 @@ export default function DuenioClientesPage() {
                   />
                 </div>
               </div>
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-bold text-slate-700 mb-1">Dirección de Sede / Planta</label>
-                <input
-                  type="text"
-                  value={nuevaEmpresaForm.direccion}
-                  onChange={(e) => setNuevaEmpresaForm({ ...nuevaEmpresaForm, direccion: e.target.value })}
-                  placeholder="Ej: Parque Industrial Chivilcoy"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
-                />
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={nuevaEmpresaForm.direccion}
+                    onChange={(e) => {
+                      setDireccionEmpresaSeleccionada(false);
+                      setNuevaEmpresaForm({ ...nuevaEmpresaForm, direccion: e.target.value });
+                    }}
+                    placeholder="Ej: Parque Industrial Chivilcoy, Av. Sarmiento..."
+                    className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  {buscandoDireccionEmpresa && (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                  )}
+                </div>
+                {sugerenciasDireccionEmpresa.length > 0 && (
+                  <ul className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-slate-100">
+                    {sugerenciasDireccionEmpresa.map((sug: any, idx: number) => (
+                      <li key={idx}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNuevaEmpresaForm({
+                              ...nuevaEmpresaForm,
+                              direccion: sug.display_name || sug.address || '',
+                            });
+                            setDireccionEmpresaSeleccionada(true);
+                            setSugerenciasDireccionEmpresa([]);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-indigo-50 text-xs text-slate-700 flex items-start gap-2 transition-colors"
+                        >
+                          <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                          <span className="leading-snug">{sug.display_name}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
