@@ -668,3 +668,90 @@ export const batchDispatchService = {
     };
   }
 };
+
+// ============================================================================
+// DESPACHO INTELIGENTE AUTOMÁTICO POR LOTES
+// Solo se ejecuta cuando hay viajes pendientes sin asignar; si un chofer no
+// acepta en 25s, libera la oferta para reasignar al siguiente móvil óptimo.
+// ============================================================================
+const LOTE_OFERTA_TTL_MS = 25000;
+const loteOfertasActivas = new Map<string, { choferId: string; expiraEn: number }>();
+let batchAutoRunning = false;
+
+export async function ejecutarCicloDespachoInteligente() {
+  if (batchAutoRunning) return;
+  batchAutoRunning = true;
+  try {
+    const ahoraMs = Date.now();
+
+    // 1. Liberar ofertas de lote vencidas que el chofer no aceptó en 25s
+    for (const [viajeId, info] of loteOfertasActivas.entries()) {
+      if (ahoraMs >= info.expiraEn) {
+        loteOfertasActivas.delete(viajeId);
+        try {
+          const v = await prisma.viaje.findUnique({
+            where: { id: viajeId },
+            select: { id: true, estado: true, choferId: true, remiseriaId: true }
+          });
+          if (v && v.estado === 'PENDIENTE' && v.choferId === info.choferId) {
+            await prisma.viaje.update({
+              where: { id: viajeId },
+              data: { choferId: null, vehiculoId: null }
+            });
+          }
+        } catch {}
+      }
+    }
+
+    // 2. Consultar únicamente remiserías que tengan viajes normales PENDIENTES sin chofer
+    const viajesPendientes = await prisma.viaje.findMany({
+      where: {
+        estado: 'PENDIENTE',
+        choferId: null,
+        artEmpresaId: null
+      },
+      select: { remiseriaId: true },
+      distinct: ['remiseriaId']
+    });
+
+    if (!viajesPendientes || viajesPendientes.length === 0) {
+      return;
+    }
+
+    // 3. Ejecutar algoritmo óptimo por lote en cada remisería con pedidos pendientes
+    for (const { remiseriaId } of viajesPendientes) {
+      if (!remiseriaId) continue;
+      const optimizacion = await batchDispatchService.calcularLoteOptimo(remiseriaId);
+      if (optimizacion.success && optimizacion.matches.length > 0) {
+        const matchesPayload = optimizacion.matches.map((m) => ({
+          viajeId: m.viajeId,
+          choferId: m.choferId,
+          vehiculoId: m.vehiculoId
+        }));
+        const res = await batchDispatchService.aplicarLote(remiseriaId, matchesPayload);
+        if (res.success && res.totalAsignados > 0) {
+          for (const m of matchesPayload) {
+            loteOfertasActivas.set(m.viajeId, {
+              choferId: m.choferId,
+              expiraEn: Date.now() + LOTE_OFERTA_TTL_MS
+            });
+          }
+          console.log(
+            `⚡ [Despacho Inteligente] Remisería ${remiseriaId}: ${res.totalAsignados} viaje(s) ofertados óptimamente por lote.`
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error en ciclo de despacho inteligente por lote:', err);
+  } finally {
+    batchAutoRunning = false;
+  }
+}
+
+export function iniciarDespachoOptimoAutomatico() {
+  console.log('⚡ Servicio de despacho inteligente automático por lotes iniciado (cada 15s cuando hay pendientes).');
+  setInterval(() => {
+    ejecutarCicloDespachoInteligente().catch(() => {});
+  }, 15000);
+}

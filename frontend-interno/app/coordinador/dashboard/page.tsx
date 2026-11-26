@@ -3985,14 +3985,32 @@ export default function CoordinadorDashboard() {
                   <span>Historial y Auditoría</span>
                 </button>
 
-                <button 
-                  type="button"
-                  onClick={abrirModalLoteOptimo}
-                  className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white px-4 py-2.5 rounded-xl flex items-center space-x-3 transition-all shadow font-bold text-sm"
-                >
-                  <Zap className="h-4 w-4 fill-current" />
-                  <span>Despacho Óptimo (Lote)</span>
-                </button>
+                {viajesSinAsignarNormales.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={abrirModalLoteOptimo}
+                    className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-between transition-all shadow font-bold text-sm"
+                  >
+                    <span className="flex items-center space-x-2.5">
+                      <Zap className="h-4 w-4 fill-current animate-pulse" />
+                      <span>Despacho Óptimo ({viajesSinAsignarNormales.length})</span>
+                    </span>
+                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">Auto</span>
+                  </button>
+                ) : (
+                  <div
+                    className="w-full bg-amber-50 text-amber-800 border border-amber-200 px-4 py-2.5 rounded-xl flex items-center justify-between text-xs font-semibold"
+                    title="Se ejecuta automáticamente cada vez que ingresan viajes pendientes de asignación"
+                  >
+                    <span className="flex items-center space-x-2">
+                      <Zap className="h-4 w-4 text-amber-500" />
+                      <span>Despacho Inteligente</span>
+                    </span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                      Activo
+                    </span>
+                  </div>
+                )}
 
                 <button 
                   type="button"

@@ -1813,6 +1813,20 @@ export const coordinadorDashboardService = {
     }
   },
 
+  getReportesMetricas: async (periodo: 'hoy' | 'ayer' | 'semana' | 'mes' = 'hoy'): Promise<ApiResponse<any>> => {
+    try {
+      const response = await api.get('/coordinator-dashboard/reportes-metricas', {
+        params: { periodo },
+      });
+      return handleApiResponse<any>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al cargar reportes y métricas',
+      };
+    }
+  },
+
   aplicarDespachoOptimo: async (matches: Array<{ viajeId: string; choferId: string; vehiculoId?: string | null }>): Promise<ApiResponse<any>> => {
     try {
       const response = await api.post('/coordinator-dashboard/despacho-optimo/aplicar', { matches });

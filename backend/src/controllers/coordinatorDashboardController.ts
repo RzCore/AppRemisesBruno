@@ -3020,5 +3020,202 @@ export const coordinatorDashboardController = {
       console.error('Error actualizando estado de atención de la central:', error);
       return res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
+  },
+
+  // Reportes y métricas simplificadas del coordinador: facturación y viajes por auto + picos por hora
+  async getReportesMetricas(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const rol = req.user?.rol;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      const coordinador = await prisma.coordinador.findFirst({ where: { userId } });
+      let remiseriaId = coordinador?.remiseriaId || null;
+
+      if (!remiseriaId && rol === 'DUENIO') {
+        const duenio = await prisma.duenio.findUnique({
+          where: { userId },
+          include: { remiserias: true }
+        });
+        remiseriaId = duenio?.remiserias?.[0]?.remiseriaId || null;
+      }
+      if (!remiseriaId) {
+        const remDefault =
+          (await prisma.remiseria.findFirst({ where: { estado: true } })) ||
+          (await prisma.remiseria.findFirst());
+        remiseriaId = remDefault?.id || null;
+      }
+
+      if (!remiseriaId) {
+        return res.status(404).json({ success: false, message: 'Remisería no encontrada' });
+      }
+
+      const periodo = String(req.query.periodo || 'hoy').toLowerCase();
+      const ARG_OFFSET_MS = 3 * 60 * 60 * 1000;
+      const ahoraArg = new Date(Date.now() - ARG_OFFSET_MS);
+      const y = ahoraArg.getUTCFullYear();
+      const m = ahoraArg.getUTCMonth();
+      const d = ahoraArg.getUTCDate();
+
+      // Medianoche Argentina en UTC = 03:00:00Z
+      let desde: Date;
+      let hasta: Date;
+
+      if (periodo === 'ayer') {
+        desde = new Date(Date.UTC(y, m, d - 1, 3, 0, 0, 0));
+        hasta = new Date(Date.UTC(y, m, d, 2, 59, 59, 999));
+      } else if (periodo === 'semana') {
+        const dayOfWeek = ahoraArg.getUTCDay(); // 0=Dom .. 6=Sab
+        const diffLunes = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        desde = new Date(Date.UTC(y, m, d - diffLunes, 3, 0, 0, 0));
+        hasta = new Date(Date.UTC(y, m, d + 1, 2, 59, 59, 999));
+      } else if (periodo === 'mes') {
+        desde = new Date(Date.UTC(y, m, 1, 3, 0, 0, 0));
+        hasta = new Date(Date.UTC(y, m, d + 1, 2, 59, 59, 999));
+      } else {
+        // hoy
+        desde = new Date(Date.UTC(y, m, d, 3, 0, 0, 0));
+        hasta = new Date(Date.UTC(y, m, d + 1, 2, 59, 59, 999));
+      }
+
+      const viajes = await prisma.viaje.findMany({
+        where: {
+          remiseriaId,
+          estado: 'COMPLETADO',
+          fecha: { gte: desde, lte: hasta }
+        },
+        select: {
+          id: true,
+          precio: true,
+          fecha: true,
+          choferId: true,
+          vehiculoId: true,
+          chofer: {
+            select: {
+              id: true,
+              numeroChofer: true,
+              nombre: true,
+              apellido: true,
+              vehiculo: {
+                select: {
+                  id: true,
+                  patente: true,
+                  marca: true,
+                  modelo: true
+                }
+              }
+            }
+          },
+          vehiculo: {
+            select: {
+              id: true,
+              patente: true,
+              marca: true,
+              modelo: true
+            }
+          }
+        }
+      });
+
+      const porAutoMap = new Map<
+        string,
+        {
+          key: string;
+          numeroMovil: string;
+          patente: string;
+          vehiculo: string;
+          choferes: Set<string>;
+          cantidadViajes: number;
+          totalFacturado: number;
+        }
+      >();
+
+      const horasCount = Array.from({ length: 24 }, (_, h) => ({
+        hora: `${String(h).padStart(2, '0')}:00`,
+        horaNum: h,
+        cantidad: 0
+      }));
+
+      let totalFacturadoGeneral = 0;
+
+      for (const v of viajes) {
+        const precio = Number(v.precio) || 0;
+        totalFacturadoGeneral += precio;
+
+        // Hora en Argentina (UTC-3)
+        const fechaArg = new Date(new Date(v.fecha).getTime() - ARG_OFFSET_MS);
+        const hArg = fechaArg.getUTCHours();
+        if (hArg >= 0 && hArg < 24) {
+          horasCount[hArg].cantidad += 1;
+        }
+
+        const veh = v.vehiculo || v.chofer?.vehiculo || null;
+        const autoKey = veh?.id || v.choferId || 'sin-asignar';
+        const numeroMovil = v.chofer?.numeroChofer || '-';
+        const patente = veh?.patente || 'Sin patente';
+        const modelo = veh ? `${veh.marca || ''} ${veh.modelo || ''}`.trim() : 'Móvil';
+        const choferNombre = v.chofer
+          ? `${v.chofer.nombre || ''} ${v.chofer.apellido || ''}`.trim()
+          : 'Sin chofer';
+
+        let entry = porAutoMap.get(autoKey);
+        if (!entry) {
+          entry = {
+            key: autoKey,
+            numeroMovil,
+            patente,
+            vehiculo: modelo || 'Móvil',
+            choferes: new Set<string>(),
+            cantidadViajes: 0,
+            totalFacturado: 0
+          };
+          porAutoMap.set(autoKey, entry);
+        }
+        if (entry.numeroMovil === '-' && numeroMovil !== '-') {
+          entry.numeroMovil = numeroMovil;
+        }
+        if (choferNombre) entry.choferes.add(choferNombre);
+        entry.cantidadViajes += 1;
+        entry.totalFacturado += precio;
+      }
+
+      const autos = Array.from(porAutoMap.values())
+        .map((a) => ({
+          id: a.key,
+          numeroMovil: a.numeroMovil,
+          patente: a.patente,
+          vehiculo: a.vehiculo,
+          choferNombre: Array.from(a.choferes).join(' / '),
+          cantidadViajes: a.cantidadViajes,
+          totalFacturado: Math.round(a.totalFacturado * 100) / 100
+        }))
+        .sort((a, b) => b.totalFacturado - a.totalFacturado);
+
+      const horaPicoObj = horasCount.reduce(
+        (best, cur) => (cur.cantidad > best.cantidad ? cur : best),
+        horasCount[0]
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          periodo,
+          desde: desde.toISOString(),
+          hasta: hasta.toISOString(),
+          totalViajes: viajes.length,
+          totalFacturado: Math.round(totalFacturadoGeneral * 100) / 100,
+          autosActivos: autos.length,
+          horaPico: horaPicoObj && horaPicoObj.cantidad > 0 ? horaPicoObj.hora : null,
+          maxViajesHora: horaPicoObj?.cantidad || 0,
+          autos,
+          viajesPorHora: horasCount
+        }
+      });
+    } catch (error) {
+      console.error('Error obteniendo reportes y métricas del coordinador:', error);
+      return res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
   }
 };

@@ -10,6 +10,7 @@ import { initSocket } from './lib/socket';
 import { iniciarServicioRecordatorioART } from './services/artReminderService';
 import { iniciarServicioReservasAutomaticas } from './services/reservaSchedulerService';
 import { iniciarServicioSyncFeleval } from './services/felevalSyncService';
+import { iniciarDespachoOptimoAutomatico } from './services/batchDispatchService';
 
 // Importar rutas
 import authRoutes from './routes/auth';
@@ -43,6 +44,9 @@ iniciarServicioReservasAutomaticas();
 
 // Iniciar sincronización diaria automática con portal Feleval (23:59 hs AR)
 iniciarServicioSyncFeleval();
+
+// Iniciar despacho inteligente automático por lotes (solo cuando hay viajes pendientes)
+iniciarDespachoOptimoAutomatico();
 
 const PORT = process.env.PORT || 3001;
 
