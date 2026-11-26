@@ -4167,11 +4167,11 @@ export default function CoordinadorDashboard() {
                     </p>
                   </div>
 
-                  {/* Acceso rápido 1 clic: Empresas / Cuentas Corrientes */}
+                  {/* Acceso rápido 1 clic: Empresas / Instituciones */}
                   {cuentasCorrientesList.length > 0 && (
                     <div className="pt-2 border-t border-gray-100">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-                        🏢 Empresas / Cuentas Corrientes (1 clic)
+                        🏢 Empresas / Instituciones (1 clic)
                       </p>
                       <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
                         {cuentasCorrientesList.map((cc) => (

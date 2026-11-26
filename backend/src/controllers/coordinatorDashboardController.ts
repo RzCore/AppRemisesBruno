@@ -3262,7 +3262,15 @@ export const coordinatorDashboardController = {
         where: {
           activo: true,
           cuentaCorrienteHabilitada: true,
-          ...(remiseriaId ? { OR: [{ remiseriaId }, { remiseriaId: null }] } : {})
+          AND: [
+            ...(remiseriaId ? [{ OR: [{ remiseriaId }, { remiseriaId: null }] }] : []),
+            {
+              OR: [
+                { apellido: { in: ['(Empresa)', '(Institución)'] } },
+                { email: { endsWith: '@empresa.brunoremises.com.ar' } }
+              ]
+            }
+          ]
         },
         select: {
           id: true,
