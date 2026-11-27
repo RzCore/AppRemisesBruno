@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
-import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
+import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, calcularMinimoPorAnillo, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 import { calcularRutaAsfaltada } from '../lib/routingUtils';
 
@@ -1505,7 +1505,19 @@ export const coordinatorDashboardController = {
           valorKmRuta: remiseriaActual?.valorKmRuta,
           esTarifaPersonalizada: esTarifaPersonalizadaCliente,
         });
-        precioEstimado = precioNormal;
+        const minimoAnillo = calcularMinimoPorAnillo({
+          latOrigen: finalLatOrigen,
+          lonOrigen: finalLonOrigen,
+          baseLat: remiseriaActual?.latitud,
+          baseLon: remiseriaActual?.longitud,
+          bajadaBandera,
+          anillo2RadioKm: remiseriaActual?.anillo2RadioKm,
+          anillo2RecargoPorcentaje: remiseriaActual?.anillo2RecargoPorcentaje,
+          anillo3RadioKm: remiseriaActual?.anillo3RadioKm,
+          anillo3RecargoPorcentaje: remiseriaActual?.anillo3RecargoPorcentaje,
+          esTarifaPersonalizada: esTarifaPersonalizadaCliente,
+        });
+        precioEstimado = Math.max(precioNormal, minimoAnillo.precioMinimo);
       }
 
       const tienePeajes = detectarPeajesEnRecorrido({

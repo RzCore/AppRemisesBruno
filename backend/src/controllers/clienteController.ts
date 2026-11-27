@@ -7,7 +7,7 @@ import { AuthenticatedRequest } from '../types';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { searchNominatimCached } from './coordinatorDashboardController';
 import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBotService';
-import { calcularAjusteOrigenRemoto, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido } from '../lib/pricingUtils';
+import { calcularAjusteOrigenRemoto, calcularMinimoPorAnillo, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 import { calcularRutaAsfaltada } from '../lib/routingUtils';
 
@@ -2478,6 +2478,23 @@ export async function calcularPrecioViaje(
   if (cantidadParadas > 0) {
     const recargoParada = Math.round((valorKmAplicado * 1.5) / 100) * 100;
     precioEstimado += cantidadParadas * recargoParada;
+  }
+
+  // Mínimo por anillos para viajes cortos con origen alejado de la base (se actualiza solo con bajadaBandera)
+  const minimoAnillo = calcularMinimoPorAnillo({
+    latOrigen: latOri,
+    lonOrigen: lonOri,
+    baseLat: remiseria?.latitud,
+    baseLon: remiseria?.longitud,
+    bajadaBandera,
+    anillo2RadioKm: remiseria?.anillo2RadioKm,
+    anillo2RecargoPorcentaje: remiseria?.anillo2RecargoPorcentaje,
+    anillo3RadioKm: remiseria?.anillo3RadioKm,
+    anillo3RecargoPorcentaje: remiseria?.anillo3RecargoPorcentaje,
+    esTarifaPersonalizada: Boolean(customTarifas),
+  });
+  if (precioEstimado < minimoAnillo.precioMinimo) {
+    precioEstimado = minimoAnillo.precioMinimo;
   }
 
   // Redondear siempre en múltiplos de 100

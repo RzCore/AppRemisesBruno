@@ -50,6 +50,8 @@ export default function ConfiguracionPage() {
   const watchedBajada = watch('bajadaBandera', 3500);
   const watchedKm = watch('valorKm', 1200);
   const watchedKmRuta = watch('valorKmRuta', 900);
+  const watchedAnillo2Pct = watch('anillo2RecargoPorcentaje', 30);
+  const watchedAnillo3Pct = watch('anillo3RecargoPorcentaje', 85);
   const watchedComision = watch('comisionPorcentaje', 30);
   const watchedAgenciaAbierta = watch('agenciaAbierta', true);
 
@@ -64,6 +66,10 @@ export default function ConfiguracionPage() {
       bajadaBandera: miRemiseria.bajadaBandera || 3500,
       valorKm: miRemiseria.valorKm || 1200,
       valorKmRuta: miRemiseria.valorKmRuta || 900,
+      anillo2RadioKm: miRemiseria.anillo2RadioKm ?? 2.5,
+      anillo2RecargoPorcentaje: miRemiseria.anillo2RecargoPorcentaje ?? 30,
+      anillo3RadioKm: miRemiseria.anillo3RadioKm ?? 5.0,
+      anillo3RecargoPorcentaje: miRemiseria.anillo3RecargoPorcentaje ?? 85,
       valorHoraEspera: miRemiseria.valorHoraEspera || 10000,
       comisionPorcentaje: miRemiseria.comisionPorcentaje || 30.0,
       comisionDuenioAuto: miRemiseria.comisionDuenioAuto || 20.0,
@@ -125,6 +131,10 @@ export default function ConfiguracionPage() {
         bajadaBandera: Number(data.bajadaBandera),
         valorKm: Number(data.valorKm),
         valorKmRuta: Number(data.valorKmRuta),
+        anillo2RadioKm: Number(data.anillo2RadioKm),
+        anillo2RecargoPorcentaje: Number(data.anillo2RecargoPorcentaje),
+        anillo3RadioKm: Number(data.anillo3RadioKm),
+        anillo3RecargoPorcentaje: Number(data.anillo3RecargoPorcentaje),
         valorHoraEspera: Number(data.valorHoraEspera),
         comisionPorcentaje: Number(data.comisionPorcentaje),
         comisionDuenioAuto: Number(data.comisionDuenioAuto),
@@ -410,6 +420,103 @@ export default function ConfiguracionPage() {
                   />
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">Por demora del pasajero</p>
+              </div>
+            </div>
+
+            {/* Mínimos por Anillos (Zonas alejadas de la base) */}
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Mínimos por Anillos (Viajes cortos en zonas alejadas)
+                </h4>
+                <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  Se actualizan solos al cambiar la Bajada de Bandera
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Solo aplica cuando un viaje corto desde una zona alejada de la base da menos que el mínimo del anillo. Si el viaje ya supera ese importe (ej. desde Parque Industrial al centro), no suma nada extra. Poné 0% para desactivar un anillo.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Anillo 2 — Periferia</span>
+                    <span className="text-xs font-black text-primary-700 bg-primary-50 px-2 py-0.5 rounded-lg border border-primary-200">
+                      Mínimo hoy: $
+                      {(
+                        Math.round(
+                          ((Number(watchedBajada) || 3500) * (1 + (Number(watchedAnillo2Pct) || 0) / 100)) / 100
+                        ) * 100
+                      ).toLocaleString('es-AR')}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                        Desde (km de base)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        {...register('anillo2RadioKm', { min: { value: 0.5, message: 'Mín. 0.5 km' } })}
+                        className="input text-xs font-semibold py-2"
+                        placeholder="2.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                        Recargo s/ bajada (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="5"
+                        {...register('anillo2RecargoPorcentaje', { min: { value: 0, message: 'Mín. 0%' } })}
+                        className="input text-xs font-semibold py-2"
+                        placeholder="30"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Anillo 3 — Parque Ind. / Accesos</span>
+                    <span className="text-xs font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                      Mínimo hoy: $
+                      {(
+                        Math.round(
+                          ((Number(watchedBajada) || 3500) * (1 + (Number(watchedAnillo3Pct) || 0) / 100)) / 100
+                        ) * 100
+                      ).toLocaleString('es-AR')}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                        Desde (km de base)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        {...register('anillo3RadioKm', { min: { value: 1, message: 'Mín. 1 km' } })}
+                        className="input text-xs font-semibold py-2"
+                        placeholder="5"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                        Recargo s/ bajada (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="5"
+                        {...register('anillo3RecargoPorcentaje', { min: { value: 0, message: 'Mín. 0%' } })}
+                        className="input text-xs font-semibold py-2"
+                        placeholder="85"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

@@ -38,6 +38,10 @@ export interface Remiseria {
   valorKm?: number;
   valorKmRuta?: number;
   bajadaBandera?: number;
+  anillo2RadioKm?: number;
+  anillo2RecargoPorcentaje?: number;
+  anillo3RadioKm?: number;
+  anillo3RecargoPorcentaje?: number;
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;
   comisionPorcentaje?: number;
@@ -431,6 +435,10 @@ export interface UpdateRemiseriaData {
   valorKm?: number;
   valorKmRuta?: number;
   bajadaBandera?: number;
+  anillo2RadioKm?: number;
+  anillo2RecargoPorcentaje?: number;
+  anillo3RadioKm?: number;
+  anillo3RecargoPorcentaje?: number;
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;
   comisionPorcentaje?: number;

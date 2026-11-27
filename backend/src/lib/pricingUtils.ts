@@ -6,6 +6,98 @@ export const DEFAULT_BASE_LON = -60.0189;
 export const RADIO_URBANO_BASE_KM = 12; // Radio urbano de la base (coincide con isEnChivilcoy)
 export const UMBRAL_KM_RUTA = 15; // A partir de 15 km aplica tarifa Km en Ruta (sin bajada de bandera)
 export const DEFAULT_VALOR_KM_RUTA = 900;
+export const DEFAULT_ANILLO2_RADIO_KM = 2.5;
+export const DEFAULT_ANILLO2_RECARGO_PCT = 30;
+export const DEFAULT_ANILLO3_RADIO_KM = 5.0;
+export const DEFAULT_ANILLO3_RECARGO_PCT = 85;
+
+/**
+ * Calcula el precio mínimo según el anillo de distancia desde la base al origen.
+ * Se expresa como porcentaje sobre `bajadaBandera` para que al subir la tarifa base
+ * los mínimos por zona se actualicen automáticamente.
+ * Solo aplica dentro del radio urbano (<= 12 km); fuera de 12 km aplica `calcularAjusteOrigenRemoto`.
+ */
+export function calcularMinimoPorAnillo(params: {
+  latOrigen?: number;
+  lonOrigen?: number;
+  baseLat?: number | null;
+  baseLon?: number | null;
+  bajadaBandera: number;
+  anillo2RadioKm?: number | null;
+  anillo2RecargoPorcentaje?: number | null;
+  anillo3RadioKm?: number | null;
+  anillo3RecargoPorcentaje?: number | null;
+  esTarifaPersonalizada?: boolean;
+}): { anillo: 1 | 2 | 3; precioMinimo: number; distBaseAOrigenKm: number } {
+  const {
+    latOrigen,
+    lonOrigen,
+    bajadaBandera,
+    esTarifaPersonalizada = false,
+  } = params;
+
+  if (
+    esTarifaPersonalizada ||
+    typeof latOrigen !== 'number' ||
+    typeof lonOrigen !== 'number' ||
+    isNaN(latOrigen) ||
+    isNaN(lonOrigen)
+  ) {
+    return { anillo: 1, precioMinimo: bajadaBandera, distBaseAOrigenKm: 0 };
+  }
+
+  const baseLat =
+    typeof params.baseLat === 'number' && !isNaN(params.baseLat)
+      ? params.baseLat
+      : DEFAULT_BASE_LAT;
+  const baseLon =
+    typeof params.baseLon === 'number' && !isNaN(params.baseLon)
+      ? params.baseLon
+      : DEFAULT_BASE_LON;
+
+  const distBaseAOrigenKm =
+    Math.round(calcularDistanciaHaversineKm(baseLat, baseLon, latOrigen, lonOrigen) * 10) / 10;
+
+  if (distBaseAOrigenKm > RADIO_URBANO_BASE_KM) {
+    return { anillo: 1, precioMinimo: bajadaBandera, distBaseAOrigenKm };
+  }
+
+  const r2 =
+    typeof params.anillo2RadioKm === 'number' && params.anillo2RadioKm > 0
+      ? params.anillo2RadioKm
+      : DEFAULT_ANILLO2_RADIO_KM;
+  const pct2 =
+    typeof params.anillo2RecargoPorcentaje === 'number' && params.anillo2RecargoPorcentaje >= 0
+      ? params.anillo2RecargoPorcentaje
+      : DEFAULT_ANILLO2_RECARGO_PCT;
+
+  const r3 =
+    typeof params.anillo3RadioKm === 'number' && params.anillo3RadioKm > 0
+      ? params.anillo3RadioKm
+      : DEFAULT_ANILLO3_RADIO_KM;
+  const pct3 =
+    typeof params.anillo3RecargoPorcentaje === 'number' && params.anillo3RecargoPorcentaje >= 0
+      ? params.anillo3RecargoPorcentaje
+      : DEFAULT_ANILLO3_RECARGO_PCT;
+
+  if (distBaseAOrigenKm >= r3 && pct3 > 0) {
+    return {
+      anillo: 3,
+      precioMinimo: redondearPrecioMultiplo100(bajadaBandera * (1 + pct3 / 100)),
+      distBaseAOrigenKm,
+    };
+  }
+
+  if (distBaseAOrigenKm >= r2 && pct2 > 0) {
+    return {
+      anillo: 2,
+      precioMinimo: redondearPrecioMultiplo100(bajadaBandera * (1 + pct2 / 100)),
+      distBaseAOrigenKm,
+    };
+  }
+
+  return { anillo: 1, precioMinimo: bajadaBandera, distBaseAOrigenKm };
+}
 
 /**
  * Calcula el precio de un viaje normal aplicando:

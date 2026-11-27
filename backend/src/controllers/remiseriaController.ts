@@ -21,6 +21,10 @@ export const getRemiseriaActiva = async (req: Request, res: Response) => {
         valorKm: true,
         valorKmRuta: true,
         bajadaBandera: true,
+        anillo2RadioKm: true,
+        anillo2RecargoPorcentaje: true,
+        anillo3RadioKm: true,
+        anillo3RecargoPorcentaje: true,
         valorHoraEspera: true,
         comisionPorcentaje: true,
         comisionDuenioAuto: true,
@@ -417,6 +421,10 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
       valorKm, 
       valorKmRuta,
       bajadaBandera, 
+      anillo2RadioKm,
+      anillo2RecargoPorcentaje,
+      anillo3RadioKm,
+      anillo3RecargoPorcentaje,
       valorHoraEspera, 
       comisionDuenioAuto, 
       comisionPorcentaje, 
@@ -494,6 +502,10 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
     if (valorKm !== undefined) updateData.valorKm = valorKm;
     if (valorKmRuta !== undefined) updateData.valorKmRuta = valorKmRuta;
     if (bajadaBandera !== undefined) updateData.bajadaBandera = bajadaBandera;
+    if (anillo2RadioKm !== undefined) updateData.anillo2RadioKm = Number(anillo2RadioKm);
+    if (anillo2RecargoPorcentaje !== undefined) updateData.anillo2RecargoPorcentaje = Number(anillo2RecargoPorcentaje);
+    if (anillo3RadioKm !== undefined) updateData.anillo3RadioKm = Number(anillo3RadioKm);
+    if (anillo3RecargoPorcentaje !== undefined) updateData.anillo3RecargoPorcentaje = Number(anillo3RecargoPorcentaje);
     if (valorHoraEspera !== undefined) updateData.valorHoraEspera = valorHoraEspera;
     if (comisionDuenioAuto !== undefined) updateData.comisionDuenioAuto = comisionDuenioAuto;
     if (comisionPorcentaje !== undefined) updateData.comisionPorcentaje = comisionPorcentaje;
