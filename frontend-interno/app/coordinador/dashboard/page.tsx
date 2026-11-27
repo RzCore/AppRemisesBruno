@@ -354,6 +354,33 @@ export default function CoordinadorDashboard() {
   const [origenSuggestions, setOrigenSuggestions] = useState<any[]>([]);
   const [destinoSuggestions, setDestinoSuggestions] = useState<any[]>([]);
   const [direccionSuggestions, setDireccionSuggestions] = useState<any[]>([]);
+  const [focusedAddressField, setFocusedAddressField] = useState<'nv-origen' | 'nv-destino' | 'ex-origen' | 'ex-destino' | null>(null);
+  const [highlightedSuggestionIdx, setHighlightedSuggestionIdx] = useState<number>(-1);
+
+  const handleAddressKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    suggestions: any[],
+    onSelect: (sug: any) => void,
+    onClose: () => void
+  ) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    if (suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedSuggestionIdx((prev) => (prev + 1) % suggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedSuggestionIdx((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
+    } else if (e.key === 'Enter' && highlightedSuggestionIdx >= 0 && highlightedSuggestionIdx < suggestions.length) {
+      e.preventDefault();
+      onSelect(suggestions[highlightedSuggestionIdx]);
+      setHighlightedSuggestionIdx(-1);
+    }
+  };
   const [isOrigenSelected, setIsOrigenSelected] = useState(false);
   const [isDestinoSelected, setIsDestinoSelected] = useState(false);
   const [isDireccionSelected, setIsDireccionSelected] = useState(false);
@@ -4409,21 +4436,96 @@ export default function CoordinadorDashboard() {
                     </div>
                   )}
 
-                  <div className="relative">
+                  <div>
                     <label className="block text-xs font-medium text-gray-700 mb-0.5">Punto de Origen *</label>
-                    <input 
-                      type="text"
-                      required
-                      value={tripData.origen}
-                      onChange={(e) => {
-                        setTripData({ ...tripData, origen: e.target.value });
-                        setIsOrigenSelected(false);
-                      }}
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                      placeholder="Dirección de recogida..."
-                    />
-                    {/* Accesos rápidos de Origen: Agencia + Lugares frecuentes del pasajero */}
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        required
+                        value={tripData.origen}
+                        onFocus={() => {
+                          setFocusedAddressField('nv-origen');
+                          setHighlightedSuggestionIdx(-1);
+                        }}
+                        onBlur={() =>
+                          setTimeout(() => setFocusedAddressField((prev) => (prev === 'nv-origen' ? null : prev)), 150)
+                        }
+                        onKeyDown={(e) =>
+                          handleAddressKeyDown(
+                            e,
+                            focusedAddressField === 'nv-origen' && !isOrigenSelected ? origenSuggestions : [],
+                            (sug) => {
+                              const clean = formatCleanAddress(sug, tripData.origen);
+                              setTripData({ ...tripData, origen: clean.fullAddress });
+                              setIsOrigenSelected(true);
+                              setOrigenSuggestions([]);
+                              setFocusedAddressField(null);
+                              if (sug.lat && sug.lon) {
+                                setOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                              }
+                            },
+                            () => {
+                              setOrigenSuggestions([]);
+                              setFocusedAddressField(null);
+                            }
+                          )
+                        }
+                        onChange={(e) => {
+                          setTripData({ ...tripData, origen: e.target.value });
+                          setIsOrigenSelected(false);
+                          setHighlightedSuggestionIdx(-1);
+                        }}
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                        placeholder="Dirección de recogida..."
+                      />
+                      {focusedAddressField === 'nv-origen' && origenSuggestions.length > 0 && !isOrigenSelected && (
+                        <div className="absolute z-30 left-0 right-0 bg-white mt-1 border border-gray-200 rounded-lg shadow-xl max-h-44 overflow-y-auto divide-y divide-gray-100">
+                          <div className="px-2.5 py-1 bg-slate-50 flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase">
+                            <span>Sugerencias (↑↓ Enter • Esc)</span>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setOrigenSuggestions([]);
+                                setFocusedAddressField(null);
+                              }}
+                              className="text-slate-400 hover:text-slate-700 px-1"
+                              title="Cerrar sugerencias"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          {origenSuggestions.slice(0, 4).map((sug, idx) => {
+                            const clean = formatCleanAddress(sug, tripData.origen);
+                            return (
+                              <div
+                                key={idx}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setTripData({ ...tripData, origen: clean.fullAddress });
+                                  setIsOrigenSelected(true);
+                                  setOrigenSuggestions([]);
+                                  setFocusedAddressField(null);
+                                  if (sug.lat && sug.lon) {
+                                    setOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                                  }
+                                }}
+                                className={`p-2 cursor-pointer text-xs transition-colors ${
+                                  highlightedSuggestionIdx === idx ? 'bg-blue-50 text-blue-900' : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="font-semibold text-gray-800">{clean.mainText}</div>
+                                {clean.secondaryText && (
+                                  <div className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    {/* Accesos rápidos de Origen en 1 sola fila compacta */}
+                    <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -4435,10 +4537,10 @@ export default function CoordinadorDashboard() {
                           setIsOrigenSelected(true);
                           setOrigenSuggestions([]);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
                         title="Avenida Sarmiento 271, Chivilcoy"
                       >
-                        🏢 Agencia (Av. Sarmiento 271)
+                        🏢 Agencia
                       </button>
                       {clientFrequentPlaces.map((lug, idx) => (
                         <button
@@ -4454,10 +4556,10 @@ export default function CoordinadorDashboard() {
                             setIsOrigenSelected(true);
                             setOrigenSuggestions([]);
                           }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[230px] truncate"
+                          className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[200px] truncate"
                           title={lug.direccion}
                         >
-                          ⭐ {lug.alias}: {lug.direccion}
+                          ⭐ {lug.alias}
                         </button>
                       ))}
                       {frequentAddresses.origenes
@@ -4473,56 +4575,105 @@ export default function CoordinadorDashboard() {
                               setIsOrigenSelected(true);
                               setOrigenSuggestions([]);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 transition-colors max-w-[220px] truncate"
+                            className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 transition-colors max-w-[180px] truncate"
                             title={dir}
                           >
                             📍 {dir}
                           </button>
                         ))}
                     </div>
-                    {origenSuggestions.length > 0 && !isOrigenSelected && (
-                      <div className="absolute z-20 w-full bg-white mt-1 border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto divide-y divide-gray-100">
-                        {origenSuggestions.map((sug, idx) => {
-                          const clean = formatCleanAddress(sug, tripData.origen);
-                          return (
-                            <div
-                              key={idx}
-                              onClick={() => {
-                                setTripData({ ...tripData, origen: clean.fullAddress });
-                                setIsOrigenSelected(true);
-                                setOrigenSuggestions([]);
-                                if (sug.lat && sug.lon) {
-                                  setOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
-                                }
-                              }}
-                              className="p-2 hover:bg-gray-50 cursor-pointer text-xs"
-                            >
-                              <div className="font-semibold text-gray-800">{clean.mainText}</div>
-                              {clean.secondaryText && (
-                                <div className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
 
-                  <div className="relative">
+                  <div>
                     <label className="block text-xs font-medium text-gray-700 mb-0.5">Punto de Destino *</label>
-                    <input 
-                      type="text"
-                      required
-                      value={tripData.destino}
-                      onChange={(e) => {
-                        setTripData({ ...tripData, destino: e.target.value });
-                        setIsDestinoSelected(false);
-                      }}
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                      placeholder="Dirección de destino..."
-                    />
-                    {/* Accesos rápidos de Destino: Agencia + Lugares frecuentes del pasajero */}
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        required
+                        value={tripData.destino}
+                        onFocus={() => {
+                          setFocusedAddressField('nv-destino');
+                          setHighlightedSuggestionIdx(-1);
+                        }}
+                        onBlur={() =>
+                          setTimeout(() => setFocusedAddressField((prev) => (prev === 'nv-destino' ? null : prev)), 150)
+                        }
+                        onKeyDown={(e) =>
+                          handleAddressKeyDown(
+                            e,
+                            focusedAddressField === 'nv-destino' && !isDestinoSelected ? destinoSuggestions : [],
+                            (sug) => {
+                              const clean = formatCleanAddress(sug, tripData.destino);
+                              setTripData({ ...tripData, destino: clean.fullAddress });
+                              setIsDestinoSelected(true);
+                              setDestinoSuggestions([]);
+                              setFocusedAddressField(null);
+                              if (sug.lat && sug.lon) {
+                                setDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                              }
+                            },
+                            () => {
+                              setDestinoSuggestions([]);
+                              setFocusedAddressField(null);
+                            }
+                          )
+                        }
+                        onChange={(e) => {
+                          setTripData({ ...tripData, destino: e.target.value });
+                          setIsDestinoSelected(false);
+                          setHighlightedSuggestionIdx(-1);
+                        }}
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                        placeholder="Dirección de destino..."
+                      />
+                      {focusedAddressField === 'nv-destino' && destinoSuggestions.length > 0 && !isDestinoSelected && (
+                        <div className="absolute z-30 left-0 right-0 bg-white mt-1 border border-gray-200 rounded-lg shadow-xl max-h-44 overflow-y-auto divide-y divide-gray-100">
+                          <div className="px-2.5 py-1 bg-slate-50 flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase">
+                            <span>Sugerencias (↑↓ Enter • Esc)</span>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setDestinoSuggestions([]);
+                                setFocusedAddressField(null);
+                              }}
+                              className="text-slate-400 hover:text-slate-700 px-1"
+                              title="Cerrar sugerencias"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          {destinoSuggestions.slice(0, 4).map((sug, idx) => {
+                            const clean = formatCleanAddress(sug, tripData.destino);
+                            return (
+                              <div
+                                key={idx}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setTripData({ ...tripData, destino: clean.fullAddress });
+                                  setIsDestinoSelected(true);
+                                  setDestinoSuggestions([]);
+                                  setFocusedAddressField(null);
+                                  if (sug.lat && sug.lon) {
+                                    setDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                                  }
+                                }}
+                                className={`p-2 cursor-pointer text-xs transition-colors ${
+                                  highlightedSuggestionIdx === idx ? 'bg-emerald-50 text-emerald-900' : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="font-semibold text-gray-800">{clean.mainText}</div>
+                                {clean.secondaryText && (
+                                  <div className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    {/* Accesos rápidos de Destino en 1 sola fila compacta */}
+                    <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -4534,10 +4685,10 @@ export default function CoordinadorDashboard() {
                           setIsDestinoSelected(true);
                           setDestinoSuggestions([]);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
                         title="Avenida Sarmiento 271, Chivilcoy"
                       >
-                        🏢 Agencia (Av. Sarmiento 271)
+                        🏢 Agencia
                       </button>
                       {clientFrequentPlaces.map((lug, idx) => (
                         <button
@@ -4553,10 +4704,10 @@ export default function CoordinadorDashboard() {
                             setIsDestinoSelected(true);
                             setDestinoSuggestions([]);
                           }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[230px] truncate"
+                          className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[200px] truncate"
                           title={lug.direccion}
                         >
-                          ⭐ {lug.alias}: {lug.direccion}
+                          ⭐ {lug.alias}
                         </button>
                       ))}
                       {frequentAddresses.destinos
@@ -4572,39 +4723,13 @@ export default function CoordinadorDashboard() {
                               setIsDestinoSelected(true);
                               setDestinoSuggestions([]);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 transition-colors max-w-[220px] truncate"
+                            className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 transition-colors max-w-[180px] truncate"
                             title={dir}
                           >
                             🏁 {dir}
                           </button>
                         ))}
                     </div>
-                    {destinoSuggestions.length > 0 && !isDestinoSelected && (
-                      <div className="absolute z-20 w-full bg-white mt-1 border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto divide-y divide-gray-100">
-                        {destinoSuggestions.map((sug, idx) => {
-                          const clean = formatCleanAddress(sug, tripData.destino);
-                          return (
-                            <div
-                              key={idx}
-                              onClick={() => {
-                                setTripData({ ...tripData, destino: clean.fullAddress });
-                                setIsDestinoSelected(true);
-                                setDestinoSuggestions([]);
-                                if (sug.lat && sug.lon) {
-                                  setDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
-                                }
-                              }}
-                              className="p-2 hover:bg-gray-50 cursor-pointer text-xs"
-                            >
-                              <div className="font-semibold text-gray-800">{clean.mainText}</div>
-                              {clean.secondaryText && (
-                                <div className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
 
                   <div className="flex justify-between items-center pt-2 border-t border-gray-100">
@@ -4932,7 +5057,7 @@ export default function CoordinadorDashboard() {
               </div>
 
               {/* Origen y Destino */}
-              <div className="relative">
+              <div>
                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1 flex items-center justify-between">
                   <span>📍 Origen (Dirección de recogida) *</span>
                   {buscandoExpressOrigen && (
@@ -4941,19 +5066,97 @@ export default function CoordinadorDashboard() {
                     </span>
                   )}
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={expressData.origen}
-                  onChange={(e) => {
-                    setExpressData({ ...expressData, origen: e.target.value });
-                    setIsExpressOrigenSelected(false);
-                  }}
-                  placeholder="Ej: Av. San Martín 450"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-                {/* Accesos rápidos de Origen: Agencia + Lugares frecuentes del pasajero */}
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={expressData.origen}
+                    onFocus={() => {
+                      setFocusedAddressField('ex-origen');
+                      setHighlightedSuggestionIdx(-1);
+                    }}
+                    onBlur={() =>
+                      setTimeout(() => setFocusedAddressField((prev) => (prev === 'ex-origen' ? null : prev)), 150)
+                    }
+                    onKeyDown={(e) =>
+                      handleAddressKeyDown(
+                        e,
+                        focusedAddressField === 'ex-origen' && !isExpressOrigenSelected ? expressOrigenSuggestions : [],
+                        (sug) => {
+                          const clean = formatCleanAddress(sug, expressData.origen);
+                          setExpressData((prev) => ({ ...prev, origen: clean.fullAddress }));
+                          setIsExpressOrigenSelected(true);
+                          setExpressOrigenSuggestions([]);
+                          setFocusedAddressField(null);
+                          if (sug.lat && sug.lon) {
+                            setExpressOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                          }
+                        },
+                        () => {
+                          setExpressOrigenSuggestions([]);
+                          setFocusedAddressField(null);
+                        }
+                      )
+                    }
+                    onChange={(e) => {
+                      setExpressData({ ...expressData, origen: e.target.value });
+                      setIsExpressOrigenSelected(false);
+                      setHighlightedSuggestionIdx(-1);
+                    }}
+                    placeholder="Ej: Av. San Martín 450"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                  {focusedAddressField === 'ex-origen' && expressOrigenSuggestions.length > 0 && !isExpressOrigenSelected && (
+                    <div className="absolute z-40 left-0 right-0 bg-white mt-1 border border-blue-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                      <div className="px-3 py-1.5 bg-blue-50 flex items-center justify-between text-[10px] font-bold text-blue-800 uppercase">
+                        <span>Sugerencias (↑↓ Enter • Esc)</span>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setExpressOrigenSuggestions([]);
+                            setFocusedAddressField(null);
+                          }}
+                          className="text-blue-500 hover:text-blue-800 px-1"
+                          title="Cerrar sugerencias"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {expressOrigenSuggestions.slice(0, 4).map((sug, idx) => {
+                        const clean = formatCleanAddress(sug, expressData.origen);
+                        return (
+                          <div
+                            key={idx}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setExpressData((prev) => ({ ...prev, origen: clean.fullAddress }));
+                              setIsExpressOrigenSelected(true);
+                              setExpressOrigenSuggestions([]);
+                              setFocusedAddressField(null);
+                              if (sug.lat && sug.lon) {
+                                setExpressOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                              }
+                            }}
+                            className={`p-2.5 cursor-pointer text-xs text-gray-800 transition-colors flex items-start space-x-2 ${
+                              highlightedSuggestionIdx === idx ? 'bg-blue-100/70' : 'hover:bg-blue-50/70'
+                            }`}
+                          >
+                            <span className="text-blue-500 mt-0.5 shrink-0">📍</span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-semibold text-gray-900 leading-tight">{clean.mainText}</span>
+                              {clean.secondaryText && (
+                                <span className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                {/* Accesos rápidos de Origen en 1 sola fila compacta */}
+                <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -4965,10 +5168,10 @@ export default function CoordinadorDashboard() {
                       setIsExpressOrigenSelected(true);
                       setExpressOrigenSuggestions([]);
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                    className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
                     title="Avenida Sarmiento 271, Chivilcoy"
                   >
-                    🏢 Agencia (Av. Sarmiento 271)
+                    🏢 Agencia
                   </button>
                   {Array.isArray(selectedPredictiveClient?.lugaresFrecuentes) &&
                     selectedPredictiveClient.lugaresFrecuentes.map((lug: any, idx: number) => (
@@ -4985,10 +5188,10 @@ export default function CoordinadorDashboard() {
                           setIsExpressOrigenSelected(true);
                           setExpressOrigenSuggestions([]);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[230px] truncate"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[200px] truncate"
                         title={lug.direccion}
                       >
-                        ⭐ {lug.alias}: {lug.direccion}
+                        ⭐ {lug.alias}
                       </button>
                     ))}
                   {(!selectedPredictiveClient?.lugaresFrecuentes ||
@@ -5004,48 +5207,16 @@ export default function CoordinadorDashboard() {
                           setIsExpressOrigenSelected(true);
                           setExpressOrigenSuggestions([]);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[220px] truncate"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors max-w-[180px] truncate"
                         title={dir}
                       >
                         📍 {dir}
                       </button>
                     ))}
                 </div>
-                {expressOrigenSuggestions.length > 0 && !isExpressOrigenSelected && (
-                  <div className="absolute z-30 left-0 right-0 bg-white mt-1 border border-blue-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
-                    <div className="px-3 py-1.5 bg-blue-50 text-[11px] font-bold text-blue-800 uppercase">
-                      Direcciones sugeridas:
-                    </div>
-                    {expressOrigenSuggestions.map((sug, idx) => {
-                      const clean = formatCleanAddress(sug, expressData.origen);
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => {
-                            setExpressData((prev) => ({ ...prev, origen: clean.fullAddress }));
-                            setIsExpressOrigenSelected(true);
-                            setExpressOrigenSuggestions([]);
-                            if (sug.lat && sug.lon) {
-                              setExpressOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
-                            }
-                          }}
-                          className="p-2.5 hover:bg-blue-50/70 cursor-pointer text-xs text-gray-800 transition-colors flex items-start space-x-2"
-                        >
-                          <span className="text-blue-500 mt-0.5 shrink-0">📍</span>
-                          <div className="flex flex-col min-w-0">
-                            <span className="font-semibold text-gray-900 leading-tight">{clean.mainText}</span>
-                            {clean.secondaryText && (
-                              <span className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
-              <div className="relative">
+              <div>
                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1 flex items-center justify-between">
                   <span>🏁 Destino (Opcional o a convenir)</span>
                   {buscandoExpressDestino && (
@@ -5054,18 +5225,96 @@ export default function CoordinadorDashboard() {
                     </span>
                   )}
                 </label>
-                <input
-                  type="text"
-                  value={expressData.destino}
-                  onChange={(e) => {
-                    setExpressData({ ...expressData, destino: e.target.value });
-                    setIsExpressDestinoSelected(false);
-                  }}
-                  placeholder="Ej: Hospital Municipal / Terminal"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-                {/* Accesos rápidos de Destino: Agencia + Lugares frecuentes del pasajero */}
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={expressData.destino}
+                    onFocus={() => {
+                      setFocusedAddressField('ex-destino');
+                      setHighlightedSuggestionIdx(-1);
+                    }}
+                    onBlur={() =>
+                      setTimeout(() => setFocusedAddressField((prev) => (prev === 'ex-destino' ? null : prev)), 150)
+                    }
+                    onKeyDown={(e) =>
+                      handleAddressKeyDown(
+                        e,
+                        focusedAddressField === 'ex-destino' && !isExpressDestinoSelected ? expressDestinoSuggestions : [],
+                        (sug) => {
+                          const clean = formatCleanAddress(sug, expressData.destino);
+                          setExpressData((prev) => ({ ...prev, destino: clean.fullAddress }));
+                          setIsExpressDestinoSelected(true);
+                          setExpressDestinoSuggestions([]);
+                          setFocusedAddressField(null);
+                          if (sug.lat && sug.lon) {
+                            setExpressDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                          }
+                        },
+                        () => {
+                          setExpressDestinoSuggestions([]);
+                          setFocusedAddressField(null);
+                        }
+                      )
+                    }
+                    onChange={(e) => {
+                      setExpressData({ ...expressData, destino: e.target.value });
+                      setIsExpressDestinoSelected(false);
+                      setHighlightedSuggestionIdx(-1);
+                    }}
+                    placeholder="Ej: Hospital Municipal / Terminal"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                  {focusedAddressField === 'ex-destino' && expressDestinoSuggestions.length > 0 && !isExpressDestinoSelected && (
+                    <div className="absolute z-40 left-0 right-0 bg-white mt-1 border border-emerald-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                      <div className="px-3 py-1.5 bg-emerald-50 flex items-center justify-between text-[10px] font-bold text-emerald-800 uppercase">
+                        <span>Sugerencias (↑↓ Enter • Esc)</span>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setExpressDestinoSuggestions([]);
+                            setFocusedAddressField(null);
+                          }}
+                          className="text-emerald-600 hover:text-emerald-900 px-1"
+                          title="Cerrar sugerencias"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {expressDestinoSuggestions.slice(0, 4).map((sug, idx) => {
+                        const clean = formatCleanAddress(sug, expressData.destino);
+                        return (
+                          <div
+                            key={idx}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setExpressData((prev) => ({ ...prev, destino: clean.fullAddress }));
+                              setIsExpressDestinoSelected(true);
+                              setExpressDestinoSuggestions([]);
+                              setFocusedAddressField(null);
+                              if (sug.lat && sug.lon) {
+                                setExpressDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
+                              }
+                            }}
+                            className={`p-2.5 cursor-pointer text-xs text-gray-800 transition-colors flex items-start space-x-2 ${
+                              highlightedSuggestionIdx === idx ? 'bg-emerald-100/70' : 'hover:bg-emerald-50/70'
+                            }`}
+                          >
+                            <span className="text-emerald-500 mt-0.5 shrink-0">🏁</span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-semibold text-gray-900 leading-tight">{clean.mainText}</span>
+                              {clean.secondaryText && (
+                                <span className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                {/* Accesos rápidos de Destino en 1 sola fila compacta */}
+                <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -5077,10 +5326,10 @@ export default function CoordinadorDashboard() {
                       setIsExpressDestinoSelected(true);
                       setExpressDestinoSuggestions([]);
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
+                    className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition-colors"
                     title="Avenida Sarmiento 271, Chivilcoy"
                   >
-                    🏢 Agencia (Av. Sarmiento 271)
+                    🏢 Agencia
                   </button>
                   {Array.isArray(selectedPredictiveClient?.lugaresFrecuentes) &&
                     selectedPredictiveClient.lugaresFrecuentes.map((lug: any, idx: number) => (
@@ -5097,10 +5346,10 @@ export default function CoordinadorDashboard() {
                           setIsExpressDestinoSelected(true);
                           setExpressDestinoSuggestions([]);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[230px] truncate"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[200px] truncate"
                         title={lug.direccion}
                       >
-                        ⭐ {lug.alias}: {lug.direccion}
+                        ⭐ {lug.alias}
                       </button>
                     ))}
                   {(!selectedPredictiveClient?.lugaresFrecuentes ||
@@ -5116,45 +5365,13 @@ export default function CoordinadorDashboard() {
                           setIsExpressDestinoSelected(true);
                           setExpressDestinoSuggestions([]);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[220px] truncate"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors max-w-[180px] truncate"
                         title={dir}
                       >
                         🏁 {dir}
                       </button>
                     ))}
                 </div>
-                {expressDestinoSuggestions.length > 0 && !isExpressDestinoSelected && (
-                  <div className="absolute z-30 left-0 right-0 bg-white mt-1 border border-emerald-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
-                    <div className="px-3 py-1.5 bg-emerald-50 text-[11px] font-bold text-emerald-800 uppercase">
-                      Direcciones sugeridas:
-                    </div>
-                    {expressDestinoSuggestions.map((sug, idx) => {
-                      const clean = formatCleanAddress(sug, expressData.destino);
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => {
-                            setExpressData((prev) => ({ ...prev, destino: clean.fullAddress }));
-                            setIsExpressDestinoSelected(true);
-                            setExpressDestinoSuggestions([]);
-                            if (sug.lat && sug.lon) {
-                              setExpressDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
-                            }
-                          }}
-                          className="p-2.5 hover:bg-emerald-50/70 cursor-pointer text-xs text-gray-800 transition-colors flex items-start space-x-2"
-                        >
-                          <span className="text-emerald-500 mt-0.5 shrink-0">🏁</span>
-                          <div className="flex flex-col min-w-0">
-                            <span className="font-semibold text-gray-900 leading-tight">{clean.mainText}</span>
-                            {clean.secondaryText && (
-                              <span className="text-[11px] text-gray-500 truncate">{clean.secondaryText}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               {/* Convenio ART / Empresa Corporativa */}
