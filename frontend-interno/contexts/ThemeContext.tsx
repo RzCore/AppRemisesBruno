@@ -85,7 +85,7 @@ export const ThemeModuleProvider: React.FC<ThemeModuleProviderProps> = ({ childr
 
   const isDark = resolvedTheme === 'dark';
 
-  // Aplicar clase .dark en <html> solo cuando estemos en chofer o cliente
+  // Aplicar clase .dark en <html> solo cuando estemos en chofer, cliente o dueño
   useEffect(() => {
     if (!mounted || typeof document === 'undefined') return;
 
@@ -99,13 +99,17 @@ export const ThemeModuleProvider: React.FC<ThemeModuleProviderProps> = ({ childr
       root.classList.remove('dark');
       root.style.colorScheme = 'light';
     }
-
-    return () => {
-      // Limpieza preventiva al desmontar o cambiar de ruta
-      root.classList.remove('dark');
-      root.style.colorScheme = 'light';
-    };
   }, [mounted, pathname, isDark, isAllowedModule]);
+
+  // Limpiar .dark únicamente cuando se desmonte por completo el ThemeModuleProvider
+  useEffect(() => {
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.style.colorScheme = 'light';
+      }
+    };
+  }, []);
 
   const toggleTheme = useCallback(() => {
     // Si está en sistema, pasa a oscuro; si está en oscuro, pasa a claro; si está en claro, pasa a sistema

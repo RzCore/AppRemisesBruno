@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
 import { redondearKmArt } from '../lib/pricingUtils';
 import { encryptPortalPassword, sincronizarPortalArt } from '../services/felevalSyncService';
+import { getDuenioRemiseriasInfo } from '../lib/duenioLookupCache';
 
 async function resolveRemiseriaId(req: AuthenticatedRequest): Promise<string | null> {
   const userId = req.user?.id;
@@ -16,16 +17,9 @@ async function resolveRemiseriaId(req: AuthenticatedRequest): Promise<string | n
   }
 
   if (rol === 'DUENIO' && userId) {
-    const duenio = await prisma.duenio.findFirst({
-      where: { userId },
-      include: {
-        remiserias: {
-          select: { remiseriaId: true }
-        }
-      }
-    });
-    if (duenio && duenio.remiserias.length > 0) {
-      return duenio.remiserias[0].remiseriaId;
+    const info = await getDuenioRemiseriasInfo(userId);
+    if (info && info.remiseriaIds.length > 0) {
+      return info.remiseriaIds[0];
     }
   }
 
@@ -63,64 +57,126 @@ export const artEmpresaController = {
         whereClause.activo = true;
       }
 
+      const esDuenioOAdmin = req.user?.rol === 'DUENIO' || req.user?.rol === 'ADMIN';
+
       const listado = await prisma.artEmpresa.findMany({
         where: whereClause,
-        include: {
-          _count: {
-            select: { viajes: true }
-          },
-          viajes: {
-            where: { estado: 'COMPLETADO' },
-            select: {
-              precio: true,
-              precioArt: true,
-              distanciaKmConPasajero: true,
-              tiempoEsperaSegundos: true,
-              costoEspera: true,
-              fecha: true
+        include: esDuenioOAdmin
+          ? {
+              _count: {
+                select: { viajes: true }
+              }
             }
-          }
-        },
+          : undefined,
         orderBy: { nombre: 'asc' }
       });
 
-      const esDuenioOAdmin = req.user?.rol === 'DUENIO' || req.user?.rol === 'ADMIN';
+      // PRIVACIDAD ESTRICTA: Choferes y Coordinadores NUNCA pueden ver las tarifas de facturación ni ganancias
+      if (!esDuenioOAdmin) {
+        const data = listado.map((artData) => ({
+          id: artData.id,
+          nombre: artData.nombre,
+          activo: artData.activo,
+          pagaChoferTipo: artData.pagaChoferTipo,
+          choferValorKm: artData.choferValorKm,
+          choferPrecioTramo: artData.choferPrecioTramo,
+          choferValorHoraEspera: artData.choferValorHoraEspera
+        }));
+
+        return res.json({
+          success: true,
+          data,
+          message: 'ARTs obtenidas exitosamente'
+        });
+      }
+
+      const artIds = listado.map((a) => a.id);
+      const [aggAll, aggPrecioArt, legacySinPrecioArt] = artIds.length > 0
+        ? await Promise.all([
+            prisma.viaje.groupBy({
+              by: ['artEmpresaId'],
+              where: {
+                remiseriaId,
+                artEmpresaId: { in: artIds },
+                estado: 'COMPLETADO'
+              },
+              _count: { _all: true },
+              _sum: {
+                precio: true,
+                distanciaKmConPasajero: true,
+                tiempoEsperaSegundos: true,
+                costoEspera: true
+              }
+            }),
+            prisma.viaje.groupBy({
+              by: ['artEmpresaId'],
+              where: {
+                remiseriaId,
+                artEmpresaId: { in: artIds },
+                estado: 'COMPLETADO',
+                precioArt: { gt: 0 }
+              },
+              _sum: {
+                precioArt: true
+              }
+            }),
+            prisma.viaje.findMany({
+              where: {
+                remiseriaId,
+                artEmpresaId: { in: artIds },
+                estado: 'COMPLETADO',
+                OR: [{ precioArt: null }, { precioArt: { lte: 0 } }]
+              },
+              select: {
+                artEmpresaId: true,
+                distanciaKmConPasajero: true
+              }
+            })
+          ])
+        : [[], [], []];
+
+      const aggAllMap = new Map<string, typeof aggAll[number]>();
+      for (const row of aggAll) {
+        if (row.artEmpresaId) aggAllMap.set(row.artEmpresaId, row);
+      }
+
+      const precioArtMap = new Map<string, number>();
+      for (const row of aggPrecioArt) {
+        if (row.artEmpresaId) {
+          precioArtMap.set(row.artEmpresaId, Number(row._sum.precioArt || 0));
+        }
+      }
+
+      const legacyByArtMap = new Map<string, { distanciaKmConPasajero: number | null }[]>();
+      for (const v of legacySinPrecioArt) {
+        if (!v.artEmpresaId) continue;
+        const arr = legacyByArtMap.get(v.artEmpresaId) || [];
+        arr.push({ distanciaKmConPasajero: v.distanciaKmConPasajero });
+        legacyByArtMap.set(v.artEmpresaId, arr);
+      }
 
       const data = listado.map(art => {
-        const viajesCompletados = art.viajes.length;
-        
-        // El precio facturado a la ART es el precioArt o calculado con la tarifa ART
-        const totalFacturado = art.viajes.reduce((sum, v) => {
-          if (v.precioArt && Number(v.precioArt) > 0) return sum + Number(v.precioArt);
-          // Fallback si no tiene precioArt explícito
+        const agg = aggAllMap.get(art.id);
+        const viajesCompletados = agg?._count._all || 0;
+        let totalFacturado = precioArtMap.get(art.id) || 0;
+
+        const legacyRows = legacyByArtMap.get(art.id) || [];
+        for (const v of legacyRows) {
           const km = redondearKmArt(v.distanciaKmConPasajero || 0);
           const p = km > 0 && art.valorKm > 0 ? Math.round(km * art.valorKm) : (art.precioTramo || 0);
-          return sum + p;
-        }, 0);
-
-        const totalPagaChofer = art.viajes.reduce((sum, v) => sum + Number(v.precio || 0), 0);
-        const totalKm = art.viajes.reduce((sum, v) => sum + (v.distanciaKmConPasajero || 0), 0);
-        const totalEsperaSeg = art.viajes.reduce((sum, v) => sum + (v.tiempoEsperaSegundos || 0), 0);
-        const totalCostoEspera = art.viajes.reduce((sum, v) => sum + (v.costoEspera || 0), 0);
-
-        const { viajes, _count, ...artData } = art;
-
-        // PRIVACIDAD ESTRICTA: Choferes y Coordinadores NUNCA pueden ver las tarifas de facturación ni ganancias
-        if (!esDuenioOAdmin) {
-          return {
-            id: artData.id,
-            nombre: artData.nombre,
-            activo: artData.activo,
-            pagaChoferTipo: artData.pagaChoferTipo,
-            choferValorKm: artData.choferValorKm,
-            choferPrecioTramo: artData.choferPrecioTramo,
-            choferValorHoraEspera: artData.choferValorHoraEspera
-          };
+          totalFacturado += p;
         }
+
+        const totalPagaChofer = Number(agg?._sum.precio || 0);
+        const totalKm = Number(agg?._sum.distanciaKmConPasajero || 0);
+        const totalEsperaSeg = Number(agg?._sum.tiempoEsperaSegundos || 0);
+        const totalCostoEspera = Number(agg?._sum.costoEspera || 0);
+
+        const { _count, ...artData } = art as any;
 
         return {
           ...artData,
-          totalViajes: _count.viajes,
+          totalViajes: _count?.viajes || 0,
           viajesCompletados,
           totalFacturado: Math.round(totalFacturado),
           totalPagaChofer: Math.round(totalPagaChofer),

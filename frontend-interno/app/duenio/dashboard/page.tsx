@@ -4,7 +4,14 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { remiseriaService, duenioReportesService } from '@/lib/api';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
+import {
+  remiseriaService,
+  duenioReportesService,
+  coordinadorService,
+  choferService,
+  vehiculoService,
+} from '@/lib/api';
 import { Remiseria } from '@/types';
 import {
   DollarSign,
@@ -43,40 +50,150 @@ type PeriodType = 'hoy' | 'semana' | 'mes';
 export default function DuenioDashboard() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource, invalidate } = useDuenioData();
 
-  const [remiserias, setRemiserias] = useState<Remiseria[]>([]);
+  const initialRems = (() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    if (cached?.data?.success && cached.data.data) {
+      return (cached.data.data as Remiseria[]).filter(
+        (r) => !r.duenios?.length || r.duenios.some((d) => d.duenioId === user?.duenio?.id)
+      );
+    }
+    return [] as Remiseria[];
+  })();
+
+  const [remiserias, setRemiserias] = useState<Remiseria[]>(initialRems);
   const [selectedRemiseriaId, setSelectedRemiseriaId] = useState<string>('todas');
-  const [loading, setLoading] = useState(true);
+  const [diarioData, setDiarioData] = useState<any>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO('todas'), 45_000);
+    return c?.data?.success ? c.data.data : null;
+  });
+  const [semanalData, setSemanalData] = useState<any>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.INFORME_SEMANAL('todas'), 45_000);
+    return c?.data?.success ? c.data.data : null;
+  });
+  const [mensualData, setMensualData] = useState<any>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.INFORME_MENSUAL('todas'), 45_000);
+    return c?.data?.success ? c.data.data : null;
+  });
+  const [coordinadoresList, setCoordinadoresList] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.COORDINADORES, 90_000);
+    return c?.data?.success && Array.isArray(c.data.data) ? c.data.data : [];
+  });
+  const [choferesList, setChoferesList] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    return c?.data?.success && Array.isArray(c.data.data) ? c.data.data : [];
+  });
+  const [vehiculosList, setVehiculosList] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    return c?.data?.success && Array.isArray(c.data.data) ? c.data.data : [];
+  });
+  const [loading, setLoading] = useState(() => !getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO('todas'), 45_000)?.data?.success);
   const [refreshing, setRefreshing] = useState(false);
   const [showAmount, setShowAmount] = useState(true);
   const [period, setPeriod] = useState<PeriodType>('hoy');
 
-  // Datos de métricas financieras y operativas
-  const [diarioData, setDiarioData] = useState<any>(null);
-  const [semanalData, setSemanalData] = useState<any>(null);
-  const [mensualData, setMensualData] = useState<any>(null);
-
   // Control Operativo de la Central (Abierta / Cerrada / Horarios Especiales)
-  const [agenciaAbierta, setAgenciaAbierta] = useState<boolean>(true);
-  const [mensajeCierre, setMensajeCierre] = useState<string>('');
-  const [cierreAutomaticoFiestas, setCierreAutomaticoFiestas] = useState<boolean>(true);
+  const [agenciaAbierta, setAgenciaAbierta] = useState<boolean>(() => initialRems[0] ? initialRems[0].agenciaAbierta !== false : true);
+  const [mensajeCierre, setMensajeCierre] = useState<string>(() => initialRems[0]?.mensajeCierre || '');
+  const [cierreAutomaticoFiestas, setCierreAutomaticoFiestas] = useState<boolean>(() => initialRems[0] ? initialRems[0].cierreAutomaticoFiestas !== false : true);
   const [isGuardandoEstado, setIsGuardandoEstado] = useState<boolean>(false);
   const [mostrarConfigCierre, setMostrarConfigCierre] = useState<boolean>(false);
 
   const loadData = useCallback(async (isManualRefresh = false) => {
-    try {
-      if (isManualRefresh) setRefreshing(true);
-      else setLoading(true);
+    const targetKey = selectedRemiseriaId !== 'todas' ? selectedRemiseriaId : 'todas';
+    const targetId = selectedRemiseriaId !== 'todas' ? selectedRemiseriaId : undefined;
 
-      // 1. Cargar remiserías del dueño
-      const remRes = await remiseriaService.getAll();
-      let userRems: Remiseria[] = [];
+    const cachedDiario = getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO(targetKey), 45_000);
+    const cachedSemanal = getCached<any>(DUENIO_CACHE_KEYS.INFORME_SEMANAL(targetKey), 45_000);
+    const cachedMensual = getCached<any>(DUENIO_CACHE_KEYS.INFORME_MENSUAL(targetKey), 45_000);
+    const cachedRems = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const hasWarmData = Boolean(cachedDiario?.data?.success);
+
+    if (cachedDiario?.data?.success) setDiarioData(cachedDiario.data.data);
+    if (cachedSemanal?.data?.success) setSemanalData(cachedSemanal.data.data);
+    if (cachedMensual?.data?.success) setMensualData(cachedMensual.data.data);
+    if (cachedRems?.data?.success && cachedRems.data.data) {
+      const userRems = (cachedRems.data.data as Remiseria[]).filter(
+        (r) => !r.duenios?.length || r.duenios.some((d) => d.duenioId === user?.duenio?.id)
+      );
+      setRemiserias(userRems);
+      if (userRems[0]) {
+        setAgenciaAbierta(userRems[0].agenciaAbierta !== false);
+        setMensajeCierre(userRems[0].mensajeCierre || '');
+        setCierreAutomaticoFiestas(userRems[0].cierreAutomaticoFiestas !== false);
+      }
+    }
+
+    const needsNetwork =
+      isManualRefresh ||
+      !cachedDiario ||
+      cachedDiario.isStale ||
+      !cachedSemanal ||
+      cachedSemanal.isStale ||
+      !cachedMensual ||
+      cachedMensual.isStale ||
+      !cachedRems ||
+      cachedRems.isStale;
+
+    if (!needsNetwork) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    try {
+      if (isManualRefresh || hasWarmData) {
+        if (isManualRefresh) setRefreshing(true);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      // Cargar remiserías (lite) + 3 informes + catálogos compartidos en paralelo (sin waterfall secuencial)
+      const [remRes, diarioRes, semanalRes, mensualRes, coordRes, choferRes, vehRes] = await Promise.all([
+        fetchResource(
+          DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+          () => remiseriaService.getAll({ lite: true }),
+          { staleTimeMs: 120_000, force: isManualRefresh }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.INFORME_DIARIO(targetKey),
+          () => duenioReportesService.getInformeDiario(targetId),
+          { staleTimeMs: 45_000, force: isManualRefresh }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.INFORME_SEMANAL(targetKey),
+          () => duenioReportesService.getInformeSemanal(targetId),
+          { staleTimeMs: 45_000, force: isManualRefresh }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.INFORME_MENSUAL(targetKey),
+          () => duenioReportesService.getInformeMensual(targetId),
+          { staleTimeMs: 45_000, force: isManualRefresh }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.COORDINADORES,
+          () => coordinadorService.getAll(),
+          { staleTimeMs: 90_000, force: isManualRefresh }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.CHOFERES,
+          () => choferService.getAll(),
+          { staleTimeMs: 60_000, force: isManualRefresh }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.VEHICULOS,
+          () => vehiculoService.getAll(),
+          { staleTimeMs: 60_000, force: isManualRefresh }
+        ),
+      ]);
+
       if (remRes.success && remRes.data) {
-        userRems = remRes.data.filter(r =>
-          r.duenios?.some(d => d.duenioId === user?.duenio?.id)
+        const userRems = remRes.data.filter(
+          (r) => !r.duenios?.length || r.duenios.some((d) => d.duenioId === user?.duenio?.id)
         );
         setRemiserias(userRems);
-
         if (userRems[0]) {
           setAgenciaAbierta(userRems[0].agenciaAbierta !== false);
           setMensajeCierre(userRems[0].mensajeCierre || '');
@@ -84,33 +201,26 @@ export default function DuenioDashboard() {
         }
       }
 
-      const targetId = selectedRemiseriaId !== 'todas' ? selectedRemiseriaId : undefined;
-
-      // 2. Cargar informes en paralelo
-      const [diarioRes, semanalRes, mensualRes] = await Promise.all([
-        duenioReportesService.getInformeDiario(targetId),
-        duenioReportesService.getInformeSemanal(targetId),
-        duenioReportesService.getInformeMensual(targetId),
-      ]);
-
       if (diarioRes.success) setDiarioData(diarioRes.data);
       if (semanalRes.success) setSemanalData(semanalRes.data);
       if (mensualRes.success) setMensualData(mensualRes.data);
+      if (coordRes.success && Array.isArray(coordRes.data)) setCoordinadoresList(coordRes.data);
+      if (choferRes.success && Array.isArray(choferRes.data)) setChoferesList(choferRes.data);
+      if (vehRes.success && Array.isArray(vehRes.data)) setVehiculosList(vehRes.data);
 
       if (isManualRefresh) {
         toast.success('Métricas actualizadas al instante', { icon: '⚡' });
       }
     } catch (error) {
       console.error('Error al cargar métricas del dueño:', error);
-      toast.error('No se pudieron actualizar los datos');
+      if (!hasWarmData) {
+        toast.error('No se pudieron actualizar los datos');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
-      if (typeof window !== 'undefined') {
-        window.scrollTo(0, 0);
-      }
     }
-  }, [user, selectedRemiseriaId]);
+  }, [user, selectedRemiseriaId, getCached, fetchResource]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -150,6 +260,7 @@ export default function DuenioDashboard() {
       const res = await remiseriaService.update(rem.id, payload);
       if (res.success) {
         setAgenciaAbierta(nuevoEstado);
+        invalidate(['remiserias:']);
         toast.success(
           nuevoEstado 
             ? '✅ ¡Central ABIERTA! Se habilitaron los pedidos en la App y el Bot.' 
@@ -182,6 +293,7 @@ export default function DuenioDashboard() {
 
       const res = await remiseriaService.update(rem.id, payload);
       if (res.success) {
+        invalidate(['remiserias:']);
         toast.success('💾 Mensaje de cierre y horarios guardados y sincronizados con la App y el Bot.', { duration: 4500 });
         setMostrarConfigCierre(false);
       } else {
@@ -231,16 +343,22 @@ export default function DuenioDashboard() {
 
   const metrics = getPeriodMetrics();
 
-  // Contadores de flota activa
-  const totalCoordinadores = remiserias.reduce((acc, r) =>
-    acc + (r.coordinadores?.filter(c => c.activo).length || 0), 0
-  );
-  const totalChoferesActivos = remiserias.reduce((acc, r) =>
-    acc + (r.choferes?.filter(c => c.estado === 'ACTIVO').length || 0), 0
-  );
-  const totalVehiculos = remiserias.reduce((acc, r) =>
-    acc + (r.vehiculos?.filter(v => v.estado === 'ACTIVO').length || 0), 0
-  );
+  // Contadores de flota activa (usa listas cacheadas si están disponibles, o fallback a arrays/counts de remisería)
+  const totalCoordinadores = coordinadoresList.length > 0
+    ? coordinadoresList.filter((c) => c.activo).length
+    : remiserias.reduce((acc, r: any) =>
+        acc + (r.coordinadores?.filter((c: any) => c.activo).length ?? r._count?.coordinadores ?? 0), 0
+      );
+  const totalChoferesActivos = choferesList.length > 0
+    ? choferesList.filter((c) => c.estado === 'ACTIVO').length
+    : remiserias.reduce((acc, r: any) =>
+        acc + (r.choferes?.filter((c: any) => c.estado === 'ACTIVO').length ?? r._count?.choferes ?? 0), 0
+      );
+  const totalVehiculos = vehiculosList.length > 0
+    ? vehiculosList.filter((v) => v.estado === 'ACTIVO').length
+    : remiserias.reduce((acc, r: any) =>
+        acc + (r.vehiculos?.filter((v: any) => v.estado === 'ACTIVO').length ?? r._count?.vehiculos ?? 0), 0
+      );
 
   const formatMoney = (val: number) => {
     return new Intl.NumberFormat('es-AR', {

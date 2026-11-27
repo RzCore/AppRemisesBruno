@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import { duenioReportesService } from '@/lib/api';
 import { 
@@ -31,20 +32,65 @@ interface DesgloseDia {
 export default function InformeSemanalPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource } = useDuenioData();
   useAppTracking('DUENIO_INFORME_SEMANAL');
 
-  const [remiserias, setRemiserias] = useState<{ id: string; nombre: string }[]>([]);
+  const initialRep = getCached<any>(DUENIO_CACHE_KEYS.INFORME_SEMANAL('todas'), 45_000);
+  const initialData = initialRep?.data?.success ? initialRep.data.data : null;
+
+  const [remiserias, setRemiserias] = useState<{ id: string; nombre: string }[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.MIS_REMISERIAS, 120_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
   const [selectedRemiseria, setSelectedRemiseria] = useState<string>('todas');
   
-  const [totalSemana, setTotalSemana] = useState<number>(0);
-  const [totalSemanaAnterior, setTotalSemanaAnterior] = useState<number>(0);
-  const [variacion, setVariacion] = useState<number>(0);
-  const [viajesCompletados, setViajesCompletados] = useState<number>(0);
-  const [promedioDiario, setPromedioDiario] = useState<number>(0);
-  const [desgloseGrafico, setDesgloseGrafico] = useState<DesgloseDia[]>([]);
+  const [totalSemana, setTotalSemana] = useState<number>(() => initialData?.totalSemana ?? 0);
+  const [totalSemanaAnterior, setTotalSemanaAnterior] = useState<number>(() => initialData?.totalSemanaAnterior ?? 0);
+  const [variacion, setVariacion] = useState<number>(() => initialData?.variacion ?? 0);
+  const [viajesCompletados, setViajesCompletados] = useState<number>(() => initialData?.viajesCompletados ?? 0);
+  const [promedioDiario, setPromedioDiario] = useState<number>(() => initialData?.promedioDiario ?? 0);
+  const [desgloseGrafico, setDesgloseGrafico] = useState<DesgloseDia[]>(() => initialData?.desgloseGrafico ?? []);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !initialData);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  const applyData = useCallback((d: any) => {
+    setTotalSemana(d.totalSemana);
+    setTotalSemanaAnterior(d.totalSemanaAnterior);
+    setVariacion(d.variacion);
+    setViajesCompletados(d.viajesCompletados);
+    setPromedioDiario(d.promedioDiario);
+    setDesgloseGrafico(d.desgloseGrafico || []);
+  }, []);
+
+  const fetchReportData = useCallback(async (remId: string, force = false) => {
+    const cacheKey = DUENIO_CACHE_KEYS.INFORME_SEMANAL(remId);
+    const cached = getCached<any>(cacheKey, 45_000);
+    const hasWarm = Boolean(cached?.data?.success && cached.data.data);
+    if (hasWarm && !force) {
+      applyData(cached!.data.data);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      setLoadingReport(true);
+      const response = await fetchResource(
+        cacheKey,
+        () => duenioReportesService.getInformeSemanal(remId === 'todas' ? undefined : remId),
+        { staleTimeMs: 45_000, force }
+      );
+      if (response.success && response.data) {
+        applyData(response.data);
+      } else if (!hasWarm) {
+        toast.error(response.message || 'Error al obtener informe semanal');
+      }
+    } catch (error) {
+      console.error('Error al obtener informe semanal:', error);
+      if (!hasWarm) toast.error('Error al conectar con el servidor');
+    } finally {
+      setLoadingReport(false);
+    }
+  }, [getCached, fetchResource, applyData]);
 
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
@@ -53,54 +99,51 @@ export default function InformeSemanalPage() {
     }
 
     const initData = async () => {
+      const cachedRems = getCached<any>(DUENIO_CACHE_KEYS.MIS_REMISERIAS, 120_000);
+      const cachedRep = getCached<any>(DUENIO_CACHE_KEYS.INFORME_SEMANAL('todas'), 45_000);
+      const hasWarmRep = Boolean(cachedRep?.data?.success && cachedRep.data.data);
+
+      if (cachedRems?.data?.success && cachedRems.data.data) {
+        setRemiserias(cachedRems.data.data);
+      }
+      if (hasWarmRep) {
+        applyData(cachedRep!.data.data);
+        setLoading(false);
+        if (!cachedRep!.isStale && cachedRems && !cachedRems.isStale) return;
+      }
+
       try {
-        setLoading(true);
-        const resRem = await duenioReportesService.getMisRemiserias();
+        if (!hasWarmRep) setLoading(true);
+        const [resRem] = await Promise.all([
+          fetchResource(
+            DUENIO_CACHE_KEYS.MIS_REMISERIAS,
+            () => duenioReportesService.getMisRemiserias(),
+            { staleTimeMs: 120_000 }
+          ),
+          fetchReportData('todas', false),
+        ]);
         if (resRem.success && resRem.data) {
           setRemiserias(resRem.data);
         }
-        await fetchReportData('todas');
       } catch (error) {
         console.error('Error inicializando informe semanal:', error);
-        toast.error('Error al cargar datos iniciales');
+        if (!hasWarmRep) toast.error('Error al cargar datos iniciales');
       } finally {
         setLoading(false);
       }
     };
 
     initData();
-  }, [user, router]);
-
-  const fetchReportData = async (remId: string) => {
-    try {
-      setLoadingReport(true);
-      const response = await duenioReportesService.getInformeSemanal(remId === 'todas' ? undefined : remId);
-      if (response.success && response.data) {
-        setTotalSemana(response.data.totalSemana);
-        setTotalSemanaAnterior(response.data.totalSemanaAnterior);
-        setVariacion(response.data.variacion);
-        setViajesCompletados(response.data.viajesCompletados);
-        setPromedioDiario(response.data.promedioDiario);
-        setDesgloseGrafico(response.data.desgloseGrafico);
-      } else {
-        toast.error(response.message || 'Error al obtener informe semanal');
-      }
-    } catch (error) {
-      console.error('Error al obtener informe semanal:', error);
-      toast.error('Error al conectar con el servidor');
-    } finally {
-      setLoadingReport(false);
-    }
-  };
+  }, [user, router, getCached, fetchResource, fetchReportData, applyData]);
 
   const handleRemiseriaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setSelectedRemiseria(value);
-    fetchReportData(value);
+    fetchReportData(value, false);
   };
 
   const handleRefresh = () => {
-    fetchReportData(selectedRemiseria);
+    fetchReportData(selectedRemiseria, true);
     toast.success('Analíticas de la semana actualizadas');
   };
 

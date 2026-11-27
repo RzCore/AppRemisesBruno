@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import { duenioReportesService } from '@/lib/api';
 import { 
@@ -48,17 +49,61 @@ interface Viaje {
 export default function InformeDiarioPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource } = useDuenioData();
   useAppTracking('DUENIO_INFORME_DIARIO');
 
-  const [remiserias, setRemiserias] = useState<{ id: string; nombre: string }[]>([]);
+  const [remiserias, setRemiserias] = useState<{ id: string; nombre: string }[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.MIS_REMISERIAS, 120_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
   const [selectedRemiseria, setSelectedRemiseria] = useState<string>('todas');
   
-  const [resumen, setResumen] = useState<Resumen | null>(null);
-  const [viajes, setViajes] = useState<Viaje[]>([]);
+  const [resumen, setResumen] = useState<Resumen | null>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO('todas'), 45_000);
+    return c?.data?.success && c.data.data ? c.data.data.resumen : null;
+  });
+  const [viajes, setViajes] = useState<Viaje[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO('todas'), 45_000);
+    return c?.data?.success && c.data.data ? c.data.data.viajes : [];
+  });
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO('todas'), 45_000);
+    return !c?.data?.success;
+  });
   const [loadingReport, setLoadingReport] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const fetchReportData = useCallback(async (remId: string, force = false) => {
+    const cacheKey = DUENIO_CACHE_KEYS.INFORME_DIARIO(remId);
+    const cached = getCached<any>(cacheKey, 45_000);
+    const hasWarm = Boolean(cached?.data?.success && cached.data.data);
+    if (hasWarm && !force) {
+      setResumen(cached!.data.data.resumen);
+      setViajes(cached!.data.data.viajes);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      setLoadingReport(true);
+      const response = await fetchResource(
+        cacheKey,
+        () => duenioReportesService.getInformeDiario(remId === 'todas' ? undefined : remId),
+        { staleTimeMs: 45_000, force }
+      );
+      if (response.success && response.data) {
+        setResumen(response.data.resumen);
+        setViajes(response.data.viajes);
+      } else if (!hasWarm) {
+        toast.error(response.message || 'Error al obtener informe diario');
+      }
+    } catch (error) {
+      console.error('Error al obtener informe diario:', error);
+      if (!hasWarm) toast.error('Error al conectar con el servidor');
+    } finally {
+      setLoadingReport(false);
+    }
+  }, [getCached, fetchResource]);
 
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
@@ -67,51 +112,52 @@ export default function InformeDiarioPage() {
     }
 
     const initData = async () => {
+      const cachedRems = getCached<any>(DUENIO_CACHE_KEYS.MIS_REMISERIAS, 120_000);
+      const cachedRep = getCached<any>(DUENIO_CACHE_KEYS.INFORME_DIARIO('todas'), 45_000);
+      const hasWarmRep = Boolean(cachedRep?.data?.success && cachedRep.data.data);
+
+      if (cachedRems?.data?.success && cachedRems.data.data) {
+        setRemiserias(cachedRems.data.data);
+      }
+      if (hasWarmRep) {
+        setResumen(cachedRep!.data.data.resumen);
+        setViajes(cachedRep!.data.data.viajes);
+        setLoading(false);
+        if (!cachedRep!.isStale && cachedRems && !cachedRems.isStale) return;
+      }
+
       try {
-        setLoading(true);
-        // Cargar remiserías del dueño
-        const resRem = await duenioReportesService.getMisRemiserias();
+        if (!hasWarmRep) setLoading(true);
+        const [resRem] = await Promise.all([
+          fetchResource(
+            DUENIO_CACHE_KEYS.MIS_REMISERIAS,
+            () => duenioReportesService.getMisRemiserias(),
+            { staleTimeMs: 120_000 }
+          ),
+          fetchReportData('todas', false),
+        ]);
         if (resRem.success && resRem.data) {
           setRemiserias(resRem.data);
         }
-        await fetchReportData('todas');
       } catch (error) {
         console.error('Error inicializando informe diario:', error);
-        toast.error('Error al cargar datos iniciales');
+        if (!hasWarmRep) toast.error('Error al cargar datos iniciales');
       } finally {
         setLoading(false);
       }
     };
 
     initData();
-  }, [user, router]);
-
-  const fetchReportData = async (remId: string) => {
-    try {
-      setLoadingReport(true);
-      const response = await duenioReportesService.getInformeDiario(remId === 'todas' ? undefined : remId);
-      if (response.success && response.data) {
-        setResumen(response.data.resumen);
-        setViajes(response.data.viajes);
-      } else {
-        toast.error(response.message || 'Error al obtener informe diario');
-      }
-    } catch (error) {
-      console.error('Error al obtener informe diario:', error);
-      toast.error('Error al conectar con el servidor');
-    } finally {
-      setLoadingReport(false);
-    }
-  };
+  }, [user, router, getCached, fetchResource, fetchReportData]);
 
   const handleRemiseriaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setSelectedRemiseria(value);
-    fetchReportData(value);
+    fetchReportData(value, false);
   };
 
   const handleRefresh = () => {
-    fetchReportData(selectedRemiseria);
+    fetchReportData(selectedRemiseria, true);
     toast.success('Datos actualizados en vivo');
   };
 

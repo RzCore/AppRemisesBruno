@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { CreateRemiseriaRequest, UpdateRemiseriaRequest, AuthenticatedRequest, ApiResponse } from '../types';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
+import { getDuenioRemiseriasInfo, invalidateDuenioLookupCache } from '../lib/duenioLookupCache';
 
 export const getRemiseriaActiva = async (req: Request, res: Response) => {
   try {
@@ -56,8 +57,63 @@ export const getRemiseriaActiva = async (req: Request, res: Response) => {
 export const getAllRemiserias = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { rol, id: userId } = req.user!;
+    const isLite = req.query.lite === 'true';
 
     let remiserias;
+
+    if (isLite) {
+      if (rol === 'ADMIN') {
+        remiserias = await prisma.remiseria.findMany({
+          include: {
+            duenios: {
+              select: {
+                duenioId: true
+              }
+            },
+            _count: {
+              select: {
+                coordinadores: true,
+                choferes: true,
+                vehiculos: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        });
+      } else {
+        const duenioInfo = await getDuenioRemiseriasInfo(userId);
+        const ids = duenioInfo?.remiseriaIds || [];
+        remiserias = ids.length > 0
+          ? await prisma.remiseria.findMany({
+              where: { id: { in: ids } },
+              include: {
+                duenios: {
+                  select: {
+                    duenioId: true
+                  }
+                },
+                _count: {
+                  select: {
+                    coordinadores: true,
+                    choferes: true,
+                    vehiculos: true
+                  }
+                }
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
+            })
+          : [];
+      }
+
+      return res.json({
+        success: true,
+        data: remiserias
+      });
+    }
 
     if (rol === 'ADMIN') {
       // Admin ve todas las remiserías
@@ -327,6 +383,8 @@ export const createRemiseria = async (req: AuthenticatedRequest, res: Response) 
       });
     }
 
+    invalidateDuenioLookupCache();
+
     const response: ApiResponse = {
       success: true,
       data: result,
@@ -492,6 +550,8 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
       }
     });
 
+    invalidateDuenioLookupCache();
+
     const response: ApiResponse = {
       success: true,
       data: remiseria,
@@ -528,6 +588,8 @@ export const deleteRemiseria = async (req: AuthenticatedRequest, res: Response) 
         userAgent: req.get('User-Agent') || null
       }
     });
+
+    invalidateDuenioLookupCache();
 
     const response: ApiResponse = {
       success: true,

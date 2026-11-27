@@ -1,9 +1,17 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { artEmpresaService, remiseriaService, choferService, coordinadorDashboardService } from '@/lib/api';
+
+const ArtConfigModals = dynamic(() => import('@/components/duenio/ArtConfigModals'), { ssr: false });
+const ArtIncidentModals = dynamic(() => import('@/components/duenio/ArtIncidentModals'), { ssr: false });
+const ArtCierreModals = dynamic(() => import('@/components/duenio/ArtCierreModals'), { ssr: false });
+const ArtNuevoViajeModal = dynamic(() => import('@/components/duenio/ArtNuevoViajeModal'), { ssr: false });
+const ArtPortalDetailModals = dynamic(() => import('@/components/duenio/ArtPortalDetailModals'), { ssr: false });
 import { getArtColorClasses } from '@/lib/artColorUtils';
 import { ArtEmpresa, CreateArtEmpresaData, UpdateArtEmpresaData, FacturacionArtResponse, CierreFacturacionArt } from '@/types';
 import {
@@ -48,20 +56,38 @@ import { toast } from 'react-hot-toast';
 export default function ArtPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource, invalidate } = useDuenioData();
 
-  // Estados generales
+  // Estados generales (hidratados desde caché si existen)
   const [activeTab, setActiveTab] = useState<'tarifas' | 'pendientes' | 'facturacion' | 'cierres'>('tarifas');
-  const [loading, setLoading] = useState(true);
-  const [artList, setArtList] = useState<ArtEmpresa[]>([]);
-  const [choferesList, setChoferesList] = useState<any[]>([]);
-  const [viajesArtPendientes, setViajesArtPendientes] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.ART_EMPRESAS, 60_000);
+    return !c?.data?.success;
+  });
+  const [artList, setArtList] = useState<ArtEmpresa[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.ART_EMPRESAS, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [choferesList, setChoferesList] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    return c?.data?.success && c.data.data
+      ? c.data.data.filter((ch: any) => ch.estado === 'ACTIVO')
+      : [];
+  });
+  const [viajesArtPendientes, setViajesArtPendientes] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS, 45_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
   const [choferSeleccionadoPorViaje, setChoferSeleccionadoPorViaje] = useState<Record<string, string>>({});
   const [horaSalidaPorViaje, setHoraSalidaPorViaje] = useState<Record<string, string>>({});
   const [asignandoViajeId, setAsignandoViajeId] = useState<string | null>(null);
   const [filtroArtPendiente, setFiltroArtPendiente] = useState<string>('all');
   const [filtroEstadoPendiente, setFiltroEstadoPendiente] = useState<'todos' | 'sin_chofer' | 'asignados'>('todos');
   const [filtroFechaPendiente, setFiltroFechaPendiente] = useState<string>('');
-  const [remiseriaNombre, setRemiseriaNombre] = useState('Remises Bruno');
+  const [remiseriaNombre, setRemiseriaNombre] = useState<string>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return c?.data?.success && c.data.data?.[0]?.nombreFantasia ? c.data.data[0].nombreFantasia : 'Remises Bruno';
+  });
 
   const toLocalDateKey = (d: Date) => {
     const year = d.getFullYear();
@@ -157,7 +183,7 @@ export default function ArtPage() {
         toast.success('Configuración de sincronización guardada');
         setPortalModalArt(res.data || portalModalArt);
         setPortalConfigForm((prev) => ({ ...prev, portalExternoPassword: '' }));
-        cargarDatos();
+        cargarDatos(true);
       } else {
         toast.error(res.message || 'No se pudo guardar la configuración');
       }
@@ -175,13 +201,13 @@ export default function ArtPage() {
       const res = await artEmpresaService.sincronizarPortalExterno(portalModalArt.id);
       if (res.success) {
         toast.success(res.message || 'Sincronización completada');
-        await cargarDatos();
-        if (activeTab === 'facturacion') cargarFacturacion();
+        await cargarDatos(true);
+        if (activeTab === 'facturacion') cargarFacturacion(true);
         setPortalModalArt(null);
         setActiveTab('pendientes');
       } else {
         toast.error(res.message || 'Error al sincronizar');
-        cargarDatos();
+        cargarDatos(true);
       }
     } catch {
       toast.error('Error de red al sincronizar');
@@ -196,11 +222,11 @@ export default function ArtPage() {
       const res = await artEmpresaService.sincronizarPortalExterno(art.id);
       if (res.success) {
         toast.success(res.message || `Sincronización de ${art.nombre} completada`);
-        await cargarDatos();
-        if (activeTab === 'facturacion') cargarFacturacion();
+        await cargarDatos(true);
+        if (activeTab === 'facturacion') cargarFacturacion(true);
       } else {
         toast.error(res.message || `No se pudo sincronizar ${art.nombre}`);
-        await cargarDatos();
+        await cargarDatos(true);
       }
     } catch {
       toast.error(`Error de red al sincronizar ${art.nombre}`);
@@ -225,7 +251,7 @@ export default function ArtPage() {
       });
       if (res.success) {
         toast.success('Chofer asignado correctamente');
-        await cargarDatos();
+        await cargarDatos(true);
       } else {
         toast.error(res.message || 'No se pudo asignar el chofer');
       }
@@ -549,9 +575,9 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Viaje ART creado y asignado al chofer correctamente');
         setIsModalNuevoViajeArtOpen(false);
-        cargarDatos();
+        cargarDatos(true);
         if (activeTab === 'facturacion') {
-          cargarFacturacion();
+          cargarFacturacion(true);
         }
       } else {
         toast.error(res.message || 'No se pudo crear el viaje ART');
@@ -648,16 +674,6 @@ export default function ArtPage() {
   const [observacionesCobroInput, setObservacionesCobroInput] = useState('');
   const [savingCobro, setSavingCobro] = useState(false);
 
-  // Proteger ruta
-  useEffect(() => {
-    if (!user || user.rol !== 'DUENIO') {
-      router.push('/login');
-      return;
-    }
-    inicializarFechasMes();
-    cargarDatos();
-  }, [user, router]);
-
   const inicializarFechasMes = () => {
     const hoy = new Date();
     const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
@@ -696,14 +712,54 @@ export default function ArtPage() {
   };
 
   // Cargar lista de ARTs, choferes y nombre de remisería
-  const cargarDatos = async () => {
+  const cargarDatos = useCallback(async (force = false) => {
+    const cArt = getCached<any>(DUENIO_CACHE_KEYS.ART_EMPRESAS, 60_000);
+    const cRem = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const cChof = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    const cProg = getCached<any>(DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS, 45_000);
+    const hasWarm = Boolean(cArt?.data?.success);
+
+    if (hasWarm && !force) {
+      setArtList(cArt!.data.data || []);
+      if (cProg?.data?.success && cProg.data.data) setViajesArtPendientes(cProg.data.data);
+      if (cRem?.data?.success && cRem.data.data?.[0]) {
+        setRemiseriaNombre(cRem.data.data[0].nombreFantasia || 'Remises Bruno');
+      }
+      if (cChof?.data?.success && cChof.data.data) {
+        setChoferesList(cChof.data.data.filter((c: any) => c.estado === 'ACTIVO'));
+      }
+      setLoading(false);
+      if (!cArt!.isStale && cRem && !cRem.isStale && cChof && !cChof.isStale && cProg && !cProg.isStale) {
+        return;
+      }
+    }
+
     try {
-      setLoading(true);
+      if (force) {
+        invalidate(['art:']);
+      }
+      if (!hasWarm && !force) setLoading(true);
       const [artRes, remRes, choferRes, progRes] = await Promise.all([
-        artEmpresaService.getAll(),
-        remiseriaService.getAll(),
-        choferService.getAll(),
-        artEmpresaService.getViajesProgramados()
+        fetchResource(
+          DUENIO_CACHE_KEYS.ART_EMPRESAS,
+          () => artEmpresaService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+          () => remiseriaService.getAll({ lite: true }),
+          { staleTimeMs: 120_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.CHOFERES,
+          () => choferService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS,
+          () => artEmpresaService.getViajesProgramados(),
+          { staleTimeMs: 45_000, force }
+        ),
       ]);
 
       if (artRes.success && artRes.data) {
@@ -721,42 +777,69 @@ export default function ArtPage() {
       }
     } catch (error) {
       console.error('Error cargando ARTs:', error);
-      toast.error('Error al cargar la lista de ARTs');
+      if (!hasWarm) toast.error('Error al cargar la lista de ARTs');
     } finally {
       setLoading(false);
     }
-  };
+  }, [getCached, fetchResource]);
+
+  // Proteger ruta
+  useEffect(() => {
+    if (!user || user.rol !== 'DUENIO') {
+      router.push('/login');
+      return;
+    }
+    inicializarFechasMes();
+    cargarDatos(false);
+  }, [user, router, cargarDatos]);
 
   // Cargar datos de Facturación
-  const cargarFacturacion = async () => {
-    try {
-      setLoadingFacturacion(true);
-      const params: any = {
-        artEmpresaId: selectedArtFilter !== 'all' ? selectedArtFilter : undefined,
-        desde: fechaDesde || undefined,
-        hasta: fechaHasta || undefined,
-        estado: estadoViajeFiltro !== 'TODOS' ? estadoViajeFiltro : undefined
-      };
+  const cargarFacturacion = useCallback(async (force = false) => {
+    const params: any = {
+      artEmpresaId: selectedArtFilter !== 'all' ? selectedArtFilter : undefined,
+      desde: fechaDesde || undefined,
+      hasta: fechaHasta || undefined,
+      estado: estadoViajeFiltro !== 'TODOS' ? estadoViajeFiltro : undefined
+    };
+    const cacheKey = DUENIO_CACHE_KEYS.ART_FACTURACION(JSON.stringify(params));
+    const cached = getCached<any>(cacheKey, 45_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setFacturacionData(cached!.data.data);
+      setLoadingFacturacion(false);
+      if (!cached!.isStale) return;
+    }
 
-      const res = await artEmpresaService.getFacturacion(params);
+    try {
+      if (force) {
+        invalidate(['art:facturacion:']);
+      }
+      if (!hasWarm && !force) setLoadingFacturacion(true);
+      const res = await fetchResource(
+        cacheKey,
+        () => artEmpresaService.getFacturacion(params),
+        { staleTimeMs: 45_000, force }
+      );
       if (res.success && res.data) {
         setFacturacionData(res.data);
-      } else {
+      } else if (!hasWarm) {
         toast.error(res.message || 'Error al obtener datos de facturación');
       }
     } catch (error) {
       console.error('Error cargando facturación:', error);
-      toast.error('Error al generar la facturación');
+      if (!hasWarm) toast.error('Error al generar la facturación');
     } finally {
       setLoadingFacturacion(false);
     }
-  };
+  }, [selectedArtFilter, fechaDesde, fechaHasta, estadoViajeFiltro, getCached, fetchResource]);
 
   useEffect(() => {
     if (activeTab === 'facturacion') {
       cargarFacturacion();
     } else if (activeTab === 'cierres') {
       cargarCierres();
+    } else if (activeTab === 'tarifas' || activeTab === 'pendientes') {
+      cargarDatos(false);
     }
   }, [activeTab, selectedArtFilter, fechaDesde, fechaHasta, estadoViajeFiltro, filtroArtCierre, filtroEstadoCierre]);
 
@@ -823,7 +906,7 @@ export default function ArtPage() {
         if (res.success) {
           toast.success(`ART "${formData.nombre}" actualizada exitosamente`);
           setIsModalOpen(false);
-          cargarDatos();
+          cargarDatos(true);
         } else {
           toast.error(res.message || 'Error al actualizar ART');
         }
@@ -832,7 +915,7 @@ export default function ArtPage() {
         if (res.success) {
           toast.success(`ART "${formData.nombre}" creada con éxito`);
           setIsModalOpen(false);
-          cargarDatos();
+          cargarDatos(true);
         } else {
           toast.error(res.message || 'Error al crear ART');
         }
@@ -850,7 +933,7 @@ export default function ArtPage() {
       const res = await artEmpresaService.toggleActivo(art.id);
       if (res.success) {
         toast.success(`ART ${art.activo ? 'desactivada' : 'activada'}`);
-        cargarDatos();
+        cargarDatos(true);
       }
     } catch (error) {
       toast.error('Error al alternar estado');
@@ -863,7 +946,7 @@ export default function ArtPage() {
       const res = await artEmpresaService.delete(art.id);
       if (res.success) {
         toast.success(res.message || 'ART eliminada correctamente');
-        cargarDatos();
+        cargarDatos(true);
       }
     } catch (error) {
       toast.error('Error al eliminar ART');
@@ -891,7 +974,8 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Viaje actualizado correctamente');
         setModalViajeArtOpen(false);
-        cargarFacturacion();
+        invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+        cargarFacturacion(true);
       } else {
         toast.error(res.message || 'Error al actualizar el viaje');
       }
@@ -925,7 +1009,8 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Viaje reasignado correctamente al nuevo chofer');
         setIsModalReasignarOpen(false);
-        cargarFacturacion();
+        invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+        cargarFacturacion(true);
       } else {
         toast.error(res.message || 'Error al reasignar chofer');
       }
@@ -961,7 +1046,8 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Auxilio mecánico activado. Viaje transferido al nuevo móvil.');
         setIsModalAuxilioOpen(false);
-        cargarFacturacion();
+        invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+        cargarFacturacion(true);
       } else {
         toast.error(res.message || 'Error al procesar auxilio');
       }
@@ -998,7 +1084,8 @@ export default function ArtPage() {
         if (res.success) {
           toast.success('Siniestro actualizado con éxito');
           setIsModalSiniestroOpen(false);
-          cargarFacturacion();
+          invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+          cargarFacturacion(true);
         } else {
           toast.error(res.message || 'Error al modificar siniestro');
         }
@@ -1010,7 +1097,8 @@ export default function ArtPage() {
         if (res.success) {
           toast.success('Viaje de siniestro anulado');
           setIsModalSiniestroOpen(false);
-          cargarFacturacion();
+          invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+          cargarFacturacion(true);
         } else {
           toast.error(res.message || 'Error al anular siniestro');
         }
@@ -1044,7 +1132,8 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Estado de coordinación actualizado');
         setIsModalCoordinacionOpen(false);
-        cargarFacturacion();
+        invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+        cargarFacturacion(true);
       } else {
         toast.error(res.message || 'Error al actualizar coordinación');
       }
@@ -1076,7 +1165,8 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Peajes actualizados correctamente');
         setIsModalPeajesOpen(false);
-        cargarFacturacion();
+        invalidate([DUENIO_CACHE_KEYS.ART_EMPRESAS, DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS]);
+        cargarFacturacion(true);
       } else {
         toast.error(res.message || 'Error al actualizar peajes');
       }
@@ -1109,13 +1199,29 @@ export default function ArtPage() {
   };
 
   // Cierres Handlers (Punto 7)
-  const cargarCierres = async () => {
+  const cargarCierres = useCallback(async (force = false) => {
+    const params: any = {};
+    if (filtroArtCierre !== 'all') params.artEmpresaId = filtroArtCierre;
+    if (filtroEstadoCierre !== 'all') params.estado = filtroEstadoCierre;
+    const cacheKey = DUENIO_CACHE_KEYS.ART_CIERRES(JSON.stringify(params));
+    const cached = getCached<any>(cacheKey, 45_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setCierresList(cached!.data.data || []);
+      setLoadingCierres(false);
+      if (!cached!.isStale) return;
+    }
+
     try {
-      setLoadingCierres(true);
-      const params: any = {};
-      if (filtroArtCierre !== 'all') params.artEmpresaId = filtroArtCierre;
-      if (filtroEstadoCierre !== 'all') params.estado = filtroEstadoCierre;
-      const res = await artEmpresaService.getCierresFacturacion(params);
+      if (force) {
+        invalidate(['art:cierres:']);
+      }
+      if (!hasWarm && !force) setLoadingCierres(true);
+      const res = await fetchResource(
+        cacheKey,
+        () => artEmpresaService.getCierresFacturacion(params),
+        { staleTimeMs: 45_000, force }
+      );
       if (res.success && res.data) {
         setCierresList(res.data);
       }
@@ -1124,7 +1230,7 @@ export default function ArtPage() {
     } finally {
       setLoadingCierres(false);
     }
-  };
+  }, [filtroArtCierre, filtroEstadoCierre, getCached, fetchResource]);
 
   const handleAbrirModalGenerarCierre = () => {
     if (selectedArtFilter === 'all') {
@@ -1156,7 +1262,7 @@ export default function ArtPage() {
         toast.success(res.message || 'Cierre de facturación generado exitosamente');
         setIsModalGenerarCierreOpen(false);
         setActiveTab('cierres');
-        cargarCierres();
+        cargarCierres(true);
       } else {
         toast.error(res.message || 'Error al generar cierre');
       }
@@ -1193,7 +1299,7 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('Factura registrada y agendada exitosamente');
         setIsModalRegistrarFacturaOpen(false);
-        cargarCierres();
+        cargarCierres(true);
       } else {
         toast.error(res.message || 'Error al registrar factura');
       }
@@ -1230,7 +1336,7 @@ export default function ArtPage() {
       if (res.success) {
         toast.success('¡Cierre marcado como COBRADO!');
         setIsModalMarcarCobradoOpen(false);
-        cargarCierres();
+        cargarCierres(true);
       } else {
         toast.error(res.message || 'Error al registrar cobro');
       }
@@ -1249,7 +1355,7 @@ export default function ArtPage() {
       const res = await artEmpresaService.anularCierreFacturacion(cierre.id);
       if (res.success) {
         toast.success('Cierre anulado y viajes liberados');
-        cargarCierres();
+        cargarCierres(true);
       } else {
         toast.error(res.message || 'Error al anular cierre');
       }
@@ -1413,7 +1519,7 @@ export default function ArtPage() {
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={cargarDatos}
+            onClick={() => cargarDatos(true)}
             className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors"
             title="Refrescar datos"
           >
@@ -3213,7 +3319,7 @@ export default function ArtPage() {
                   <span>Nuevo Cierre de Facturación</span>
                 </button>
                 <button
-                  onClick={cargarCierres}
+                  onClick={() => cargarCierres(true)}
                   disabled={loadingCierres}
                   className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
                   title="Actualizar cierres"
@@ -3511,2421 +3617,186 @@ export default function ArtPage() {
         </div>
       )}
 
-      {/* ============================================================== */}
-      {/* MODAL CREAR / EDITAR ART                                       */}
-      {/* ============================================================== */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {/* Encabezado del Modal */}
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-primary-100 text-primary-700 flex items-center justify-center font-bold">
-                  <Briefcase className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    {editingArt ? `Editar ART: ${editingArt.nombre}` : 'Nueva ART'}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Fijá los precios especiales de kilómetro, tramo local y hora de espera.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Formulario */}
-            <form onSubmit={handleGuardarArt} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
-              {/* Datos Generales */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Nombre de la ART *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. Provincia ART, La Segunda ART, Prevención ART"
-                    value={formData.nombre}
-                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    CUIT de Facturación
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej. 30-70809012-4"
-                    value={formData.cuit || ''}
-                    onChange={(e) => setFormData({ ...formData, cuit: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Razón Social
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Provincia ART S.A."
-                    value={formData.razonSocial || ''}
-                    onChange={(e) => setFormData({ ...formData, razonSocial: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Teléfono Contacto / Autorizaciones
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej. 0800-333-1234"
-                    value={formData.telefono || ''}
-                    onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Email para Facturas
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="facturacion@art.com.ar"
-                    value={formData.email || ''}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-              </div>
-
-              {/* SECCIÓN CRÍTICA DE TARIFAS SOLICITADAS POR EL USUARIO */}
-              <div className="p-4 rounded-2xl bg-primary-50/50 border border-primary-100 space-y-3">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="w-4 h-4 text-primary-700" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-primary-800">
-                    Tarifas Acordadas con esta ART
-                  </span>
-                </div>
-                <p className="text-xs text-primary-600">
-                  Precios que se usarán automáticamente para cotizar y facturar los viajes de esta ART en {remiseriaNombre}.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  {/* Precio por Tramo (Viajes Locales) */}
-                  <div className="bg-white p-3 rounded-xl border border-primary-200 shadow-xs">
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Precio Tramo Local ($) *
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        required
-                        placeholder="0"
-                        value={formData.precioTramo || ''}
-                        onChange={(e) => setFormData({ ...formData, precioTramo: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-400 block mt-1">Tarifa fija para viajes locales (sin importar distancia)</span>
-                  </div>
-
-                  {/* Precio por Kilómetro */}
-                  <div className="bg-white p-3 rounded-xl border border-primary-200 shadow-xs">
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Precio por Km ($/km) *
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        required
-                        placeholder="0"
-                        value={formData.valorKm || ''}
-                        onChange={(e) => setFormData({ ...formData, valorKm: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-primary-700 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-400 block mt-1">Por cada km adicional</span>
-                  </div>
-
-                  {/* Precio Hora de Espera */}
-                  <div className="bg-white p-3 rounded-xl border border-primary-200 shadow-xs">
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Hora de Espera ($/h) *
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        required
-                        placeholder="0"
-                        value={formData.valorHoraEspera || ''}
-                        onChange={(e) => setFormData({ ...formData, valorHoraEspera: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-amber-700 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-400 block mt-1">Espera en clínica / turno</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* SECCIÓN DE TARIFA PAGADA AL CHOFER (CONFIDENCIAL) */}
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Car className="w-4 h-4 text-amber-700" />
-                    <span className="text-xs font-bold uppercase tracking-wider text-amber-900">
-                      Tarifa Pagada al Chofer (Liquidación del Móvil)
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
-                    Confidencial
-                  </span>
-                </div>
-                <p className="text-xs text-amber-800">
-                  Bajo ningún punto de vista el chofer o coordinador conocerá el precio pactado con la ART. Seleccioná cómo se le liquida al chofer:
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                  <label
-                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
-                      formData.pagaChoferTipo === 'LISTA_NORMAL'
-                        ? 'border-amber-500 bg-white shadow-xs'
-                        : 'border-amber-200/60 bg-amber-50/40 hover:bg-white'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="pagaChoferTipo"
-                      value="LISTA_NORMAL"
-                      checked={formData.pagaChoferTipo === 'LISTA_NORMAL'}
-                      onChange={() => setFormData({ ...formData, pagaChoferTipo: 'LISTA_NORMAL' })}
-                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 block">Lista Normal de la Remisería</span>
-                      <span className="text-[10px] text-slate-500 block mt-0.5">
-                        El chofer cobra la bajada de bandera y precio por km normal de {remiseriaNombre}.
-                      </span>
-                    </div>
-                  </label>
-
-                  <label
-                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
-                      formData.pagaChoferTipo === 'PERSONALIZADO'
-                        ? 'border-amber-500 bg-white shadow-xs'
-                        : 'border-amber-200/60 bg-amber-50/40 hover:bg-white'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="pagaChoferTipo"
-                      value="PERSONALIZADO"
-                      checked={formData.pagaChoferTipo === 'PERSONALIZADO'}
-                      onChange={() => setFormData({ ...formData, pagaChoferTipo: 'PERSONALIZADO' })}
-                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 block">Tarifa Especial para Chofer</span>
-                      <span className="text-[10px] text-slate-500 block mt-0.5">
-                        Fijar precios específicos a liquidar al chofer para los viajes de esta ART.
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
-                {formData.pagaChoferTipo === 'PERSONALIZADO' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
-                    <div className="bg-white p-2.5 rounded-xl border border-amber-300">
-                      <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                        Tramo Chofer ($)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        placeholder="0"
-                        value={formData.choferPrecioTramo || ''}
-                        onChange={(e) =>
-                          setFormData({ ...formData, choferPrecioTramo: parseFloat(e.target.value) || 0 })
-                        }
-                        className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-900"
-                      />
-                    </div>
-
-                    <div className="bg-white p-2.5 rounded-xl border border-amber-300">
-                      <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                        Por Km Chofer ($/km)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        placeholder="0"
-                        value={formData.choferValorKm || ''}
-                        onChange={(e) =>
-                          setFormData({ ...formData, choferValorKm: parseFloat(e.target.value) || 0 })
-                        }
-                        className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-900"
-                      />
-                    </div>
-
-                    <div className="bg-white p-2.5 rounded-xl border border-amber-300">
-                      <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                        Espera Chofer ($/h)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        placeholder="0"
-                        value={formData.choferValorHoraEspera || ''}
-                        onChange={(e) =>
-                          setFormData({ ...formData, choferValorHoraEspera: parseFloat(e.target.value) || 0 })
-                        }
-                        className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-900"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* CICLO DE FACTURACIÓN DE LA ART */}
-              <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-indigo-700" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-indigo-900">
-                    Ciclo de Cierre y Facturación de la ART
-                  </span>
-                </div>
-                <p className="text-xs text-indigo-700">
-                  Configurá la periodicidad con la que esta aseguradora exige el envío de la facturación y cierre de cuenta.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Frecuencia de Cierre *
-                    </label>
-                    <select
-                      value={formData.periodoFacturacion || 'MENSUAL'}
-                      onChange={(e) => setFormData({ ...formData, periodoFacturacion: e.target.value as any })}
-                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="SEMANAL">Semanal (Cierre cada 7 días)</option>
-                      <option value="QUINCENAL">Quincenal (Día 1 al 15 y 16 a fin de mes)</option>
-                      <option value="MENSUAL">Mensual (Mes calendario completo)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Día de Corte / Vencimiento
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={formData.diaCorteFacturacion ?? 1}
-                      onChange={(e) => setFormData({ ...formData, diaCorteFacturacion: parseInt(e.target.value) || 1 })}
-                      placeholder="Ej: 1 o 15"
-                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <span className="text-[10px] text-slate-400 block mt-1">
-                      Día del mes o semana en que se genera la liquidación
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Observaciones y Estado */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Notas de Facturación u Observaciones
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Ej. Exige número de bono o autorización en cada viaje. Facturación del 1 al 5."
-                  value={formData.observaciones || ''}
-                  onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 pt-2">
-                <input
-                  type="checkbox"
-                  id="artActivo"
-                  checked={formData.activo}
-                  onChange={(e) => setFormData({ ...formData, activo: e.target.checked })}
-                  className="w-4 h-4 rounded text-primary-600 focus:ring-primary-500 border-slate-300"
-                >
-                </input>
-                <label htmlFor="artActivo" className="text-sm font-semibold text-slate-800 cursor-pointer">
-                  ART activa para asignación de viajes
-                </label>
-              </div>
-
-              {/* Botones de acción */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingArt}
-                  className="px-5 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold shadow-sm shadow-primary-200 transition-colors disabled:opacity-50"
-                >
-                  {savingArt ? 'Guardando...' : editingArt ? 'Guardar Cambios' : 'Registrar ART'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {(isModalOpen || (modalViajeArtOpen && viajeSeleccionado)) && (
+        <ArtConfigModals
+          isModalOpen={isModalOpen}
+          setIsModalOpen={setIsModalOpen}
+          editingArt={editingArt}
+          savingArt={savingArt}
+          formData={formData}
+          setFormData={setFormData}
+          remiseriaNombre={remiseriaNombre}
+          handleGuardarArt={handleGuardarArt}
+          modalViajeArtOpen={modalViajeArtOpen}
+          setModalViajeArtOpen={setModalViajeArtOpen}
+          viajeSeleccionado={viajeSeleccionado}
+          nuevoArtIdViaje={nuevoArtIdViaje}
+          setNuevoArtIdViaje={setNuevoArtIdViaje}
+          artList={artList}
+          nuevoSiniestroViaje={nuevoSiniestroViaje}
+          setNuevoSiniestroViaje={setNuevoSiniestroViaje}
+          recalcularTarifaViaje={recalcularTarifaViaje}
+          setRecalcularTarifaViaje={setRecalcularTarifaViaje}
+          guardandoViajeArt={guardandoViajeArt}
+          guardarCambioViajeArt={guardarCambioViajeArt}
+        />
       )}
 
-      {/* ============================================================== */}
-      {/* MODAL REASIGNAR ART O SINIESTRO A VIAJE                        */}
-      {/* ============================================================== */}
-      {modalViajeArtOpen && viajeSeleccionado && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <h3 className="text-lg font-bold text-slate-900">Asignar ART o Siniestro al Viaje</h3>
-            <p className="text-xs text-slate-500">
-              Modificá la cuenta o número de siniestro del viaje de{' '}
-              <span className="font-semibold text-slate-800">
-                {viajeSeleccionado.clienteNombre || 'Pasajero'}
-              </span>
-              .
-            </p>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ART
-                </label>
-                <select
-                  value={nuevoArtIdViaje}
-                  onChange={(e) => setNuevoArtIdViaje(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 focus:bg-white"
-                >
-                  <option value="">Sin ART (Viaje Particular Normal)</option>
-                  {artList.map((art) => (
-                    <option key={art.id} value={art.id}>
-                      {art.nombre} (Tramo: ${art.precioTramo} - Km: ${art.valorKm})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  N° de Siniestro o Autorización
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej. SIN-98234-A"
-                  value={nuevoSiniestroViaje}
-                  onChange={(e) => setNuevoSiniestroViaje(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              {nuevoArtIdViaje && (
-                <div className="flex items-center gap-2 p-3 bg-primary-50 rounded-xl">
-                  <input
-                    type="checkbox"
-                    id="recalcTarifa"
-                    checked={recalcularTarifaViaje}
-                    onChange={(e) => setRecalcularTarifaViaje(e.target.checked)}
-                    className="w-4 h-4 rounded text-primary-600"
-                  />
-                  <label htmlFor="recalcTarifa" className="text-xs font-medium text-primary-900 cursor-pointer">
-                    Recalcular precio del viaje usando las tarifas de la ART seleccionada
-                  </label>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                onClick={() => setModalViajeArtOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={guardarCambioViajeArt}
-                disabled={guardandoViajeArt}
-                className="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold disabled:opacity-50"
-              >
-                {guardandoViajeArt ? 'Guardando...' : 'Confirmar'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {((isModalReasignarOpen && viajeParaReasignar) ||
+        (isModalAuxilioOpen && viajeParaAuxilio) ||
+        (isModalSiniestroOpen && viajeParaSiniestro) ||
+        (isModalCoordinacionOpen && viajeParaCoordinacion) ||
+        (isModalPeajesOpen && viajeParaPeajes)) && (
+        <ArtIncidentModals
+          choferesList={choferesList}
+          isModalReasignarOpen={isModalReasignarOpen}
+          setIsModalReasignarOpen={setIsModalReasignarOpen}
+          viajeParaReasignar={viajeParaReasignar}
+          nuevoChoferId={nuevoChoferId}
+          setNuevoChoferId={setNuevoChoferId}
+          motivoReasignacion={motivoReasignacion}
+          setMotivoReasignacion={setMotivoReasignacion}
+          savingReasignacion={savingReasignacion}
+          handleGuardarReasignar={handleGuardarReasignar}
+          isModalAuxilioOpen={isModalAuxilioOpen}
+          setIsModalAuxilioOpen={setIsModalAuxilioOpen}
+          viajeParaAuxilio={viajeParaAuxilio}
+          choferAuxilioId={choferAuxilioId}
+          setChoferAuxilioId={setChoferAuxilioId}
+          puntoTrasbordo={puntoTrasbordo}
+          setPuntoTrasbordo={setPuntoTrasbordo}
+          kmChoferInicial={kmChoferInicial}
+          setKmChoferInicial={setKmChoferInicial}
+          savingAuxilio={savingAuxilio}
+          handleGuardarAuxilio={handleGuardarAuxilio}
+          isModalSiniestroOpen={isModalSiniestroOpen}
+          setIsModalSiniestroOpen={setIsModalSiniestroOpen}
+          viajeParaSiniestro={viajeParaSiniestro}
+          tipoAccionSiniestro={tipoAccionSiniestro}
+          setTipoAccionSiniestro={setTipoAccionSiniestro}
+          nuevoNumeroSiniestro={nuevoNumeroSiniestro}
+          setNuevoNumeroSiniestro={setNuevoNumeroSiniestro}
+          motivoSiniestro={motivoSiniestro}
+          setMotivoSiniestro={setMotivoSiniestro}
+          savingSiniestro={savingSiniestro}
+          handleGuardarSiniestro={handleGuardarSiniestro}
+          isModalCoordinacionOpen={isModalCoordinacionOpen}
+          setIsModalCoordinacionOpen={setIsModalCoordinacionOpen}
+          viajeParaCoordinacion={viajeParaCoordinacion}
+          estadoCoordinacionSeleccionado={estadoCoordinacionSeleccionado}
+          setEstadoCoordinacionSeleccionado={setEstadoCoordinacionSeleccionado}
+          motivoRechazoPaciente={motivoRechazoPaciente}
+          setMotivoRechazoPaciente={setMotivoRechazoPaciente}
+          observacionesCoordinacion={observacionesCoordinacion}
+          setObservacionesCoordinacion={setObservacionesCoordinacion}
+          savingCoordinacion={savingCoordinacion}
+          handleGuardarCoordinacion={handleGuardarCoordinacion}
+          isModalPeajesOpen={isModalPeajesOpen}
+          setIsModalPeajesOpen={setIsModalPeajesOpen}
+          viajeParaPeajes={viajeParaPeajes}
+          montoPeajesInput={montoPeajesInput}
+          setMontoPeajesInput={setMontoPeajesInput}
+          observacionesPeajeInput={observacionesPeajeInput}
+          setObservacionesPeajeInput={setObservacionesPeajeInput}
+          savingPeajes={savingPeajes}
+          handleGuardarPeajes={handleGuardarPeajes}
+        />
       )}
 
-      {/* ============================================================== */}
-      {/* MODAL 1: REASIGNAR CHOFER ANTES DE SALIR (Punto 1)            */}
-      {/* ============================================================== */}
-      {isModalReasignarOpen && viajeParaReasignar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700">
-                  <Car className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Reasignar Chofer (Antes de Salir)</h3>
-                  <p className="text-xs text-slate-500">Avería o indisponibilidad previa a la salida</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalReasignarOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Resumen del Viaje */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Pasajero / Paciente:</span>
-                <span className="font-semibold text-slate-800">{viajeParaReasignar.clienteNombre || viajeParaReasignar.nombrePasajero || 'Sin especificar'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">ART:</span>
-                <span className="font-semibold text-primary-700">{viajeParaReasignar.artEmpresa?.nombre || 'ART'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Trayecto:</span>
-                <span className="font-medium text-slate-700 break-words flex-1 min-w-0 text-right">{viajeParaReasignar.origen} &rarr; {viajeParaReasignar.destino}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Chofer asignado actual:</span>
-                <span className="font-semibold text-amber-800">
-                  {viajeParaReasignar.chofer ? `${viajeParaReasignar.chofer.nombre} ${viajeParaReasignar.chofer.apellido}` : 'Sin chofer'}
-                </span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarReasignar} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Nuevo Chofer a Asignar <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={nuevoChoferId}
-                  onChange={(e) => setNuevoChoferId(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="">-- Seleccionar chofer disponible --</option>
-                  {choferesList
-                    .filter((c: any) => c.id !== viajeParaReasignar.choferId)
-                    .map((c: any) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nombre} {c.apellido} ({c.autoModelo || 'Vehículo'} {c.autoPatente ? `- ${c.autoPatente}` : ''})
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Motivo de la reasignación
-                </label>
-                <input
-                  type="text"
-                  value={motivoReasignacion}
-                  onChange={(e) => setMotivoReasignacion(e.target.value)}
-                  placeholder="Ej: Vehículo averiado, pinchadura de neumático, imprevisto..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-amber-800 leading-relaxed">
-                  El chofer anterior será desvinculado de este viaje y el nuevo chofer recibirá la notificación inmediata en su celular para iniciar el recorrido.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalReasignarOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingReasignacion || !nuevoChoferId}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingReasignacion ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Reasignando...
-                    </>
-                  ) : (
-                    'Confirmar Reasignación'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {(isModalGenerarCierreOpen ||
+        (isModalRegistrarFacturaOpen && cierreParaFactura) ||
+        (isModalMarcarCobradoOpen && cierreParaCobrado)) && (
+        <ArtCierreModals
+          artList={artList}
+          isModalGenerarCierreOpen={isModalGenerarCierreOpen}
+          setIsModalGenerarCierreOpen={setIsModalGenerarCierreOpen}
+          artCierreId={artCierreId}
+          setArtCierreId={setArtCierreId}
+          fechaDesdeCierre={fechaDesdeCierre}
+          setFechaDesdeCierre={setFechaDesdeCierre}
+          fechaHastaCierre={fechaHastaCierre}
+          setFechaHastaCierre={setFechaHastaCierre}
+          observacionesCierre={observacionesCierre}
+          setObservacionesCierre={setObservacionesCierre}
+          savingGenerarCierre={savingGenerarCierre}
+          handleGenerarCierre={handleGenerarCierre}
+          isModalRegistrarFacturaOpen={isModalRegistrarFacturaOpen}
+          setIsModalRegistrarFacturaOpen={setIsModalRegistrarFacturaOpen}
+          cierreParaFactura={cierreParaFactura}
+          numeroFacturaInput={numeroFacturaInput}
+          setNumeroFacturaInput={setNumeroFacturaInput}
+          fechaEmisionInput={fechaEmisionInput}
+          setFechaEmisionInput={setFechaEmisionInput}
+          fechaEnvioFacturaInput={fechaEnvioFacturaInput}
+          setFechaEnvioFacturaInput={setFechaEnvioFacturaInput}
+          observacionesFacturaInput={observacionesFacturaInput}
+          setObservacionesFacturaInput={setObservacionesFacturaInput}
+          savingFactura={savingFactura}
+          handleGuardarFacturaCierre={handleGuardarFacturaCierre}
+          isModalMarcarCobradoOpen={isModalMarcarCobradoOpen}
+          setIsModalMarcarCobradoOpen={setIsModalMarcarCobradoOpen}
+          cierreParaCobrado={cierreParaCobrado}
+          fechaCobroInput={fechaCobroInput}
+          setFechaCobroInput={setFechaCobroInput}
+          metodoCobroInput={metodoCobroInput}
+          setMetodoCobroInput={setMetodoCobroInput}
+          comprobanteCobroInput={comprobanteCobroInput}
+          setComprobanteCobroInput={setComprobanteCobroInput}
+          observacionesCobroInput={observacionesCobroInput}
+          setObservacionesCobroInput={setObservacionesCobroInput}
+          savingCobro={savingCobro}
+          handleGuardarCobroCierre={handleGuardarCobroCierre}
+        />
       )}
 
-      {/* ============================================================== */}
-      {/* MODAL 2: AUXILIO MECÁNICO / TRASBORDO EN VIAJE (Punto 2)       */}
-      {/* ============================================================== */}
-      {isModalAuxilioOpen && viajeParaAuxilio && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center text-red-600">
-                  <Wrench className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Auxilio Mecánico en Viaje</h3>
-                  <p className="text-xs text-slate-500">Enviar móvil de relevo y registrar trasbordo</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalAuxilioOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Resumen del Viaje */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Paciente a bordo:</span>
-                <span className="font-semibold text-slate-800">{viajeParaAuxilio.clienteNombre || viajeParaAuxilio.nombrePasajero}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Chofer averiado:</span>
-                <span className="font-semibold text-red-700">
-                  {viajeParaAuxilio.chofer ? `${viajeParaAuxilio.chofer.nombre} ${viajeParaAuxilio.chofer.apellido}` : 'Sin chofer'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Trayecto planificado:</span>
-                <span className="font-medium text-slate-700 break-words flex-1 min-w-0 text-right">{viajeParaAuxilio.origen} &rarr; {viajeParaAuxilio.destino}</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarAuxilio} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Móvil / Chofer que acude al auxilio <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={choferAuxilioId}
-                  onChange={(e) => setChoferAuxilioId(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="">-- Seleccionar chofer de relevo --</option>
-                  {choferesList
-                    .filter((c: any) => c.id !== viajeParaAuxilio.choferId)
-                    .map((c: any) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nombre} {c.apellido} ({c.autoModelo || 'Vehículo'} {c.autoPatente ? `- ${c.autoPatente}` : ''})
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Punto de encuentro / Trasbordo
-                </label>
-                <input
-                  type="text"
-                  value={puntoTrasbordo}
-                  onChange={(e) => setPuntoTrasbordo(e.target.value)}
-                  placeholder="Ej: Autopista La Plata Km 24 / Estación YPF Mitre y Av. Belgrano"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Km recorridos por el 1° chofer antes de la falla (aprox.)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={kmChoferInicial}
-                  onChange={(e) => setKmChoferInicial(e.target.value)}
-                  placeholder="Ej: 14.2"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  Sirve para liquidar los kilómetros proporcionales a cada móvil según el tramo realizado.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalAuxilioOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingAuxilio || !choferAuxilioId}
-                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingAuxilio ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Activando Auxilio...
-                    </>
-                  ) : (
-                    'Confirmar Trasbordo'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL 3: MODIFICAR / ANULAR SINIESTRO (Punto 3)                */}
-      {/* ============================================================== */}
-      {isModalSiniestroOpen && viajeParaSiniestro && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${tipoAccionSiniestro === 'MODIFICAR' ? 'bg-indigo-100 text-indigo-600' : 'bg-rose-100 text-rose-600'}`}>
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {tipoAccionSiniestro === 'MODIFICAR' ? 'Corregir N° de Siniestro' : 'Anular Siniestro / Emiten Nuevo'}
-                  </h3>
-                  <p className="text-xs text-slate-500">Gestión de inconsistencias enviadas por la ART</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalSiniestroOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Selector de modo: Modificar vs Anular */}
-            <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setTipoAccionSiniestro('MODIFICAR')}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                  tipoAccionSiniestro === 'MODIFICAR'
-                    ? 'bg-white text-indigo-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Corregir Tipeo
-              </button>
-              <button
-                type="button"
-                onClick={() => setTipoAccionSiniestro('ANULAR')}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                  tipoAccionSiniestro === 'ANULAR'
-                    ? 'bg-white text-rose-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Anular Siniestro
-              </button>
-            </div>
-
-            {/* Ficha Resumen */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Siniestro actual:</span>
-                <span className="font-bold text-slate-900 font-mono">{viajeParaSiniestro.numeroSiniestro || 'Sin registrar'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">ART:</span>
-                <span className="font-semibold text-primary-700">{viajeParaSiniestro.artEmpresa?.nombre || 'ART'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Paciente:</span>
-                <span className="font-semibold text-slate-800">{viajeParaSiniestro.clienteNombre || viajeParaSiniestro.nombrePasajero}</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarSiniestro} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {tipoAccionSiniestro === 'MODIFICAR' ? 'Nuevo Número de Siniestro *' : 'Nuevo Siniestro emitido de reemplazo (opcional)'}
-                </label>
-                <input
-                  type="text"
-                  value={nuevoNumeroSiniestro}
-                  onChange={(e) => setNuevoNumeroSiniestro(e.target.value)}
-                  placeholder="Ej: ART-2025-88421"
-                  required={tipoAccionSiniestro === 'MODIFICAR'}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Motivo o justificación de la ART
-                </label>
-                <input
-                  type="text"
-                  value={motivoSiniestro}
-                  onChange={(e) => setMotivoSiniestro(e.target.value)}
-                  placeholder={tipoAccionSiniestro === 'MODIFICAR' ? "Ej: Error de tipeo en dígito verificador" : "Ej: Anulado por ART por cambio de prestador o error de emisión"}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalSiniestroOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingSiniestro}
-                  className={`px-4 py-2 rounded-xl text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm ${
-                    tipoAccionSiniestro === 'MODIFICAR' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-rose-600 hover:bg-rose-700'
-                  }`}
-                >
-                  {savingSiniestro ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Procesando...
-                    </>
-                  ) : (
-                    tipoAccionSiniestro === 'MODIFICAR' ? 'Guardar Corrección' : 'Anular Siniestro'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL 4: COORDINACIÓN CON PASAJERO (Punto 4)                   */}
-      {/* ============================================================== */}
-      {isModalCoordinacionOpen && viajeParaCoordinacion && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
-                  <Phone className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Coordinación con el Pasajero</h3>
-                  <p className="text-xs text-slate-500">Llamada previa de confirmación o rechazo del paciente</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalCoordinacionOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Resumen */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Paciente:</span>
-                <span className="font-semibold text-slate-800">{viajeParaCoordinacion.clienteNombre || viajeParaCoordinacion.nombrePasajero}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Teléfono:</span>
-                <span className="font-mono font-semibold text-primary-700">{viajeParaCoordinacion.telefonoPasajero || viajeParaCoordinacion.telefonoCliente || 'No registrado'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Recorrido:</span>
-                <span className="font-medium text-slate-700 break-words flex-1 min-w-0 text-right">{viajeParaCoordinacion.origen} &rarr; {viajeParaCoordinacion.destino}</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarCoordinacion} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Resultado del Contacto <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={estadoCoordinacionSeleccionado}
-                  onChange={(e) => setEstadoCoordinacionSeleccionado(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="PENDIENTE_CONTACTO">🟡 Pendiente de contacto (Aún no se llamó)</option>
-                  <option value="CONFIRMADO">🟢 Confirmado (El paciente acepta y espera el móvil)</option>
-                  <option value="NO_RESPONDE">🟠 No responde al llamado telefónico</option>
-                  <option value="RECHAZADO_POR_PACIENTE">🔴 Rechazado por el paciente (No quiere viajar)</option>
-                </select>
-              </div>
-
-              {estadoCoordinacionSeleccionado === 'RECHAZADO_POR_PACIENTE' && (
-                <div className="space-y-2 p-3 bg-red-50 rounded-xl border border-red-200 animate-in fade-in duration-200">
-                  <label className="block text-xs font-semibold text-red-800">
-                    Motivo por el cual no desea viajar <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={motivoRechazoPaciente}
-                    onChange={(e) => setMotivoRechazoPaciente(e.target.value)}
-                    placeholder="Ej: Fue por sus propios medios / Se siente indispuesto / Canceló turno médico"
-                    className="w-full px-3 py-2 bg-white border border-red-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-red-400"
-                    required
-                  />
-                  <p className="text-[11px] text-red-700 leading-tight">
-                    El viaje pasará a estado <strong>CANCELADO</strong> con causa justificada para que la remisería pueda facturar el intento si corresponde según el convenio con la ART.
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Observaciones / Notas de la llamada
-                </label>
-                <textarea
-                  value={observacionesCoordinacion}
-                  onChange={(e) => setObservacionesCoordinacion(e.target.value)}
-                  rows={2}
-                  placeholder="Detalles hablados con el paciente o familiar..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalCoordinacionOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingCoordinacion}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingCoordinacion ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Guardando...
-                    </>
-                  ) : (
-                    'Guardar Coordinación'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL 5: PEAJES DEL VIAJE (Punto 6)                            */}
-      {/* ============================================================== */}
-      {isModalPeajesOpen && viajeParaPeajes && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700">
-                  <DollarSign className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Peajes Pagados por Chofer</h3>
-                  <p className="text-xs text-slate-500">Reembolso al móvil y cargo a la ART</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalPeajesOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Resumen */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Chofer:</span>
-                <span className="font-semibold text-slate-800">
-                  {viajeParaPeajes.chofer ? `${viajeParaPeajes.chofer.nombre} ${viajeParaPeajes.chofer.apellido}` : 'Sin chofer'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Paciente:</span>
-                <span className="font-semibold text-slate-800">{viajeParaPeajes.clienteNombre || viajeParaPeajes.nombrePasajero}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">ART:</span>
-                <span className="font-semibold text-primary-700">{viajeParaPeajes.artEmpresa?.nombre || 'ART'}</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarPeajes} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Monto Total de Peajes ($) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={montoPeajesInput}
-                    onChange={(e) => setMontoPeajesInput(e.target.value)}
-                    placeholder="0"
-                    required
-                    className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Detalle de cabinas / Comprobante
-                </label>
-                <input
-                  type="text"
-                  value={observacionesPeajeInput}
-                  onChange={(e) => setObservacionesPeajeInput(e.target.value)}
-                  placeholder="Ej: Peaje Dock Sud + Hudson ida y vuelta"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-blue-800 leading-relaxed">
-                  Este importe se sumará automáticamente a la <strong>liquidación a pagar al chofer</strong> y a la <strong>facturación final remitida a la ART</strong>.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalPeajesOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingPeajes}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingPeajes ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Guardando...
-                    </>
-                  ) : (
-                    'Guardar Peajes'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL 6: GENERAR CIERRE DE FACTURACIÓN (Punto 7)               */}
-      {/* ============================================================== */}
-      {isModalGenerarCierreOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-primary-100 flex items-center justify-center text-primary-600">
-                  <Calendar className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Generar Cierre de Facturación</h3>
-                  <p className="text-xs text-slate-500">Consolidar viajes del periodo para facturar a la ART</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalGenerarCierreOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleGenerarCierre} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ART / Aseguradora <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={artCierreId}
-                  onChange={(e) => setArtCierreId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white"
-                  required
-                >
-                  <option value="">-- Seleccionar ART --</option>
-                  {artList.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.nombre} (Corte: {a.periodoFacturacion || 'MENSUAL'})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Fecha Desde <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaDesdeCierre}
-                    onChange={(e) => setFechaDesdeCierre(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Fecha Hasta <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaHastaCierre}
-                    onChange={(e) => setFechaHastaCierre(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Observaciones internas del periodo
-                </label>
-                <textarea
-                  value={observacionesCierre}
-                  onChange={(e) => setObservacionesCierre(e.target.value)}
-                  rows={2}
-                  placeholder="Ej: Cierre 1ra quincena de mes. Se incluyen viajes de traslado con peajes..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="p-3 bg-primary-50 rounded-xl border border-primary-100 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-primary-600 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-primary-800 leading-relaxed">
-                  El sistema calculará automáticamente el monto facturado a la ART, las liquidaciones a los choferes y los peajes, generando el registro oficial de cierre pendiente de cobro.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalGenerarCierreOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingGenerarCierre || !artCierreId || !fechaDesdeCierre || !fechaHastaCierre}
-                  className="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingGenerarCierre ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Generando Cierre...
-                    </>
-                  ) : (
-                    'Generar Cierre Ahora'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL 7: REGISTRAR FACTURA EMITIDA (Punto 7)                   */}
-      {/* ============================================================== */}
-      {isModalRegistrarFacturaOpen && cierreParaFactura && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Registrar Factura Emitida</h3>
-                  <p className="text-xs text-slate-500">Control de envío y vencimiento con la ART</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalRegistrarFacturaOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Resumen Cierre */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Cierre:</span>
-                <span className="font-bold text-slate-900 font-mono">#{cierreParaFactura.id.slice(0, 8)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">ART:</span>
-                <span className="font-semibold text-primary-700">{cierreParaFactura.artEmpresa?.nombre || 'ART'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Total a Facturar:</span>
-                <span className="font-bold text-emerald-700 text-sm">
-                  ${Number(cierreParaFactura.totalFacturadoArt || 0).toLocaleString('es-AR')}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Cantidad de Viajes:</span>
-                <span className="font-semibold text-slate-800">{cierreParaFactura.totalViajes} servicios</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarFacturaCierre} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Número de Factura Emitida <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={numeroFacturaInput}
-                  onChange={(e) => setNumeroFacturaInput(e.target.value)}
-                  placeholder="Ej: A-0001-00045231 o FACT-88192"
-                  required
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Fecha de Emisión
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaEmisionInput}
-                    onChange={(e) => setFechaEmisionInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Fecha de Envío a la ART
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaEnvioFacturaInput}
-                    onChange={(e) => setFechaEnvioFacturaInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Observaciones / Notas de facturación
-                </label>
-                <textarea
-                  value={observacionesFacturaInput}
-                  onChange={(e) => setObservacionesFacturaInput(e.target.value)}
-                  rows={2}
-                  placeholder="Ej: Enviada por portal de proveedores / Enviada a facturacion@art.com..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalRegistrarFacturaOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingFactura || !numeroFacturaInput.trim()}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingFactura ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Registrando...
-                    </>
-                  ) : (
-                    'Agendar y Guardar Factura'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL 8: REGISTRAR COBRO DEL CIERRE (Punto 7)                  */}
-      {/* ============================================================== */}
-      {isModalMarcarCobradoOpen && cierreParaCobrado && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Registrar Cobranza de la ART</h3>
-                  <p className="text-xs text-slate-500">Marcar cierre como cobrado e ingresar datos bancarios</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalMarcarCobradoOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Ficha Resumen Cierre */}
-            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/70 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Factura / Cierre:</span>
-                <span className="font-bold text-slate-900 font-mono">{cierreParaCobrado.numeroFactura || '#' + cierreParaCobrado.id.slice(0, 8)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">ART:</span>
-                <span className="font-semibold text-primary-700">{cierreParaCobrado.artEmpresa?.nombre || 'ART'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Monto Cobrado:</span>
-                <span className="font-bold text-emerald-700 text-sm">
-                  ${Number(cierreParaCobrado.totalFacturadoArt || 0).toLocaleString('es-AR')}
-                </span>
-              </div>
-            </div>
-
-            <form onSubmit={handleGuardarCobroCierre} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Fecha de Cobro / Acreditación <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaCobroInput}
-                    onChange={(e) => setFechaCobroInput(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Método de Pago <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={metodoCobroInput}
-                    onChange={(e) => setMetodoCobroInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white"
-                  >
-                    <option value="TRANSFERENCIA">Transferencia Bancaria</option>
-                    <option value="ECHEQ">E-Cheq</option>
-                    <option value="CHEQUE">Cheque Físico</option>
-                    <option value="DEBITO_AUTOMATICO">Débito Automático</option>
-                    <option value="EFECTIVO">Efectivo</option>
-                    <option value="OTRO">Otro Medio</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  N° Comprobante / Orden de Pago (OP)
-                </label>
-                <input
-                  type="text"
-                  value={comprobanteCobroInput}
-                  onChange={(e) => setComprobanteCobroInput(e.target.value)}
-                  placeholder="Ej: OP-992384 o Ref. Transferencia 10293847"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Observaciones de Cobro
-                </label>
-                <textarea
-                  value={observacionesCobroInput}
-                  onChange={(e) => setObservacionesCobroInput(e.target.value)}
-                  rows={2}
-                  placeholder="Detalles sobre retenciones impositivas, cuenta de acreditación, etc."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalMarcarCobradoOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingCobro || !fechaCobroInput}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                >
-                  {savingCobro ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Registrando Cobro...
-                    </>
-                  ) : (
-                    'Confirmar Cobro'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL: CREAR Y ASIGNAR NUEVO VIAJE ART (WIZARD 3 PASOS)        */}
-      {/* ============================================================== */}
       {isModalNuevoViajeArtOpen && (
-        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[92vh] overflow-y-auto">
-            <div className="sticky top-0 z-10 bg-white px-6 py-4 border-b border-slate-100 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700">
-                    <Car className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900">Crear y Asignar Viaje ART</h3>
-                    <p className="text-xs text-slate-500">Paso {pasoNuevoViajeArt} de 3</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsModalNuevoViajeArtOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Stepper visual */}
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  { n: 1 as const, label: '1. ART y Pasajero' },
-                  { n: 2 as const, label: '2. Recorrido y Horario' },
-                  { n: 3 as const, label: '3. Tarifa y Confirmar' }
-                ]).map((step) => (
-                  <button
-                    key={step.n}
-                    type="button"
-                    onClick={() => {
-                      if (step.n < pasoNuevoViajeArt) setPasoNuevoViajeArt(step.n);
-                    }}
-                    className={`py-2 px-2 rounded-xl text-[11px] font-bold text-center border transition-all ${
-                      pasoNuevoViajeArt === step.n
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                        : pasoNuevoViajeArt > step.n
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer'
-                        : 'bg-slate-50 text-slate-400 border-slate-200 cursor-default'
-                    }`}
-                  >
-                    {step.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <form onSubmit={handleCrearViajeArtSubmit} className="p-6 space-y-5">
-              {/* PASO 1: ART, Chofer y Pasajero */}
-              {pasoNuevoViajeArt === 1 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">ART *</label>
-                      <select
-                        required
-                        value={nuevoViajeArtForm.artEmpresaId}
-                        onChange={(e) => {
-                          const artId = e.target.value;
-                          const precios = calcularPreciosLocalArt(artId, nuevoViajeArtForm.esViajeLocal, nuevoViajeArtForm.distanciaKm);
-                          setNuevoViajeArtForm((prev) => ({
-                            ...prev,
-                            artEmpresaId: artId,
-                            precioArt: precios.precioArt,
-                            precio: precios.precioChofer
-                          }));
-                        }}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-emerald-500"
-                      >
-                        <option value="">-- Seleccionar ART --</option>
-                        {artList.filter((a) => a.activo).map((art) => (
-                          <option key={art.id} value={art.id}>
-                            {art.nombre} (Local: ${art.precioTramo} | Km: ${art.valorKm})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Chofer Asignado *</label>
-                      <select
-                        required
-                        value={nuevoViajeArtForm.choferId}
-                        onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, choferId: e.target.value }))}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-emerald-500"
-                      >
-                        <option value="">-- Seleccionar Chofer --</option>
-                        {choferesList.map((c: any) => (
-                          <option key={c.id} value={c.id}>
-                            {c.nombre} {c.apellido} (#{c.numeroChofer}) {c.vehiculo?.patente ? `• ${c.vehiculo.patente}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="relative">
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Pasajero / Paciente *</label>
-                      <input
-                        type="text"
-                        required
-                        autoComplete="off"
-                        placeholder="Nombre y Apellido"
-                        value={nuevoViajeArtForm.clienteNombre}
-                        onChange={(e) => {
-                          setPasajeroSeleccionadoArt(null);
-                          setNuevoViajeArtForm((prev) => ({ ...prev, clienteNombre: e.target.value }));
-                        }}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800"
-                      />
-                      {pasajeroSuggestionsArt.length > 0 && (
-                        <div className="absolute z-30 left-0 right-0 sm:w-80 mt-1 bg-white border border-emerald-200 rounded-xl shadow-lg max-h-52 overflow-y-auto divide-y divide-slate-100">
-                          <div className="px-3 py-1.5 bg-emerald-50 text-[10px] font-bold text-emerald-800 uppercase">
-                            Pasajeros frecuentes encontrados
-                          </div>
-                          {pasajeroSuggestionsArt.map((c: any) => (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => handleSeleccionarPasajeroArt(c)}
-                              className="w-full text-left px-3 py-2 hover:bg-emerald-50/70 transition-colors"
-                            >
-                              <div className="text-xs font-bold text-slate-900">
-                                {c.nombre} {c.apellido}
-                                {c.telefono && !String(c.telefono).startsWith('S/T-') && (
-                                  <span className="font-normal text-slate-500 ml-1.5">• {c.telefono}</span>
-                                )}
-                              </div>
-                              {(c.origenesHabituales?.[0] || c.destinosHabituales?.[0]) && (
-                                <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                                  {c.origenesHabituales?.[0] || c.direccion || 'Sin origen'} → {c.destinosHabituales?.[0] || 'Sin destino'}
-                                </div>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono</label>
-                      <input
-                        type="text"
-                        placeholder="Ej: 2346..."
-                        value={nuevoViajeArtForm.clienteTelefono}
-                        onChange={(e) => {
-                          setPasajeroSeleccionadoArt(null);
-                          setNuevoViajeArtForm((prev) => ({ ...prev, clienteTelefono: e.target.value }));
-                        }}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">N° Siniestro / Bono</label>
-                      <input
-                        type="text"
-                        placeholder="Opcional"
-                        value={nuevoViajeArtForm.numeroSiniestro}
-                        onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, numeroSiniestro: e.target.value }))}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* PASO 2: Recorrido y Horarios */}
-              {pasoNuevoViajeArt === 2 && (
-                <div className="space-y-4">
-                  {/* Chips rápidos de direcciones habituales del pasajero */}
-                  {pasajeroSeleccionadoArt && (pasajeroSeleccionadoArt.origenesHabituales?.length > 0 || pasajeroSeleccionadoArt.destinosHabituales?.length > 0) && (
-                    <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-2">
-                      <span className="text-[10px] font-bold text-emerald-800 uppercase block">
-                        Direcciones habituales de {pasajeroSeleccionadoArt.nombre}
-                      </span>
-                      {pasajeroSeleccionadoArt.origenesHabituales?.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[10px] font-semibold text-slate-500">Orígenes:</span>
-                          {pasajeroSeleccionadoArt.origenesHabituales.slice(0, 3).map((dir: string, i: number) => (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => {
-                                setNuevoViajeArtForm((prev) => ({ ...prev, origen: dir }));
-                                setIsArtOrigenSelected(true);
-                                setArtOrigenCoords(null);
-                              }}
-                              className="px-2 py-0.5 rounded-lg bg-white border border-emerald-200 hover:bg-emerald-100 text-[10px] font-semibold text-slate-700 truncate max-w-[200px]"
-                              title={dir}
-                            >
-                              {dir}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {pasajeroSeleccionadoArt.destinosHabituales?.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[10px] font-semibold text-slate-500">Destinos:</span>
-                          {pasajeroSeleccionadoArt.destinosHabituales.slice(0, 3).map((dir: string, i: number) => (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => {
-                                setNuevoViajeArtForm((prev) => ({ ...prev, destino: dir }));
-                                setIsArtDestinoSelected(true);
-                                setArtDestinoCoords(null);
-                              }}
-                              className="px-2 py-0.5 rounded-lg bg-white border border-indigo-200 hover:bg-indigo-100 text-[10px] font-semibold text-slate-700 truncate max-w-[200px]"
-                              title={dir}
-                            >
-                              {dir}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="relative">
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Origen *</label>
-                      <input
-                        type="text"
-                        required
-                        autoComplete="off"
-                        placeholder="Escribí dirección y localidad de origen..."
-                        value={nuevoViajeArtForm.origen}
-                        onChange={(e) => {
-                          setIsArtOrigenSelected(false);
-                          setArtOrigenCoords(null);
-                          setNuevoViajeArtForm((prev) => ({ ...prev, origen: e.target.value }));
-                        }}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-emerald-500"
-                      />
-                      {buscandoArtOrigen && (
-                        <span className="text-[10px] text-slate-400 mt-1 block">Buscando direcciones...</span>
-                      )}
-                      {artOrigenSuggestions.length > 0 && (
-                        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
-                          {artOrigenSuggestions.map((sug, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => {
-                                setNuevoViajeArtForm((prev) => ({ ...prev, origen: sug.display_name || sug.label || prev.origen }));
-                                setIsArtOrigenSelected(true);
-                                setArtOrigenSuggestions([]);
-                                if (sug.lat && sug.lon) {
-                                  setArtOrigenCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
-                                }
-                              }}
-                              className="w-full text-left px-3 py-2 hover:bg-emerald-50 text-[11px] text-slate-700 flex items-start gap-2 transition-colors"
-                            >
-                              <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                              <span className="line-clamp-2">{sug.display_name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="relative">
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Destino *</label>
-                      <input
-                        type="text"
-                        required
-                        autoComplete="off"
-                        placeholder="Escribí dirección y localidad de destino..."
-                        value={nuevoViajeArtForm.destino}
-                        onChange={(e) => {
-                          setIsArtDestinoSelected(false);
-                          setArtDestinoCoords(null);
-                          setNuevoViajeArtForm((prev) => ({ ...prev, destino: e.target.value }));
-                        }}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-emerald-500"
-                      />
-                      {buscandoArtDestino && (
-                        <span className="text-[10px] text-slate-400 mt-1 block">Buscando direcciones...</span>
-                      )}
-                      {artDestinoSuggestions.length > 0 && (
-                        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
-                          {artDestinoSuggestions.map((sug, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => {
-                                setNuevoViajeArtForm((prev) => ({ ...prev, destino: sug.display_name || sug.label || prev.destino }));
-                                setIsArtDestinoSelected(true);
-                                setArtDestinoSuggestions([]);
-                                if (sug.lat && sug.lon) {
-                                  setArtDestinoCoords({ lat: parseFloat(sug.lat), lon: parseFloat(sug.lon) });
-                                }
-                              }}
-                              className="w-full text-left px-3 py-2 hover:bg-emerald-50 text-[11px] text-slate-700 flex items-start gap-2 transition-colors"
-                            >
-                              <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
-                              <span className="line-clamp-2">{sug.display_name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Fecha *</label>
-                      <input
-                        type="date"
-                        required
-                        value={nuevoViajeArtForm.fecha}
-                        onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, fecha: e.target.value }))}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Hora Salida Chofer *</label>
-                      <input
-                        type="time"
-                        required
-                        value={nuevoViajeArtForm.horaSalidaChofer}
-                        onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, horaSalidaChofer: e.target.value }))}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Hora Turno Médico</label>
-                      <input
-                        type="time"
-                        value={nuevoViajeArtForm.horaTurno}
-                        onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, horaTurno: e.target.value }))}
-                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs text-slate-800"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* PASO 3: Tarifa, Observaciones y Confirmación */}
-              {pasoNuevoViajeArt === 3 && (
-                <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-slate-700 uppercase">Tipo de Viaje y Tarifa</span>
-                      <button
-                        type="button"
-                        disabled={calculandoRutaArt || !nuevoViajeArtForm.origen.trim() || !nuevoViajeArtForm.destino.trim()}
-                        onClick={() => handleCalcularRutaNuevoViajeArt()}
-                        className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all"
-                      >
-                        <Navigation className="w-3.5 h-3.5" />
-                        {calculandoRutaArt ? 'Calculando...' : 'Calcular distancia y precios'}
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const precios = calcularPreciosLocalArt(nuevoViajeArtForm.artEmpresaId, true, nuevoViajeArtForm.distanciaKm);
-                          setNuevoViajeArtForm((prev) => ({
-                            ...prev,
-                            esViajeLocal: true,
-                            cobrarDesdeBase: false,
-                            precioArt: precios.precioArt,
-                            precio: precios.precioChofer
-                          }));
-                        }}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
-                          nuevoViajeArtForm.esViajeLocal
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                        }`}
-                      >
-                        Viaje Local (Tarifa fija)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const precios = calcularPreciosLocalArt(nuevoViajeArtForm.artEmpresaId, false, nuevoViajeArtForm.distanciaKm);
-                          setNuevoViajeArtForm((prev) => ({
-                            ...prev,
-                            esViajeLocal: false,
-                            precioArt: precios.precioArt,
-                            precio: precios.precioChofer
-                          }));
-                        }}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
-                          !nuevoViajeArtForm.esViajeLocal
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                        }`}
-                      >
-                        Por Km (No local)
-                      </button>
-                    </div>
-
-                    {!nuevoViajeArtForm.esViajeLocal && (
-                      <label className="flex items-start gap-2 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={nuevoViajeArtForm.cobrarDesdeBase}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setNuevoViajeArtForm((prev) => ({ ...prev, cobrarDesdeBase: checked }));
-                            if (nuevoViajeArtForm.origen.trim() && nuevoViajeArtForm.destino.trim()) {
-                              handleCalcularRutaNuevoViajeArt({ cobrarDesdeBase: checked, esViajeLocal: false });
-                            }
-                          }}
-                          className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[11px] text-slate-700 leading-tight">
-                          <strong className="text-slate-900">Cobrar desde la base hasta el destino</strong>
-                          <span className="block text-[10px] text-slate-500">
-                            Para cuando el móvil debe salir a buscar al pasajero a otra localidad.
-                          </span>
-                        </span>
-                      </label>
-                    )}
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Distancia (km)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          placeholder="0"
-                          value={nuevoViajeArtForm.distanciaKm || ''}
-                          onChange={(e) => {
-                            const km = parseFloat(e.target.value) || 0;
-                            const precios = calcularPreciosLocalArt(nuevoViajeArtForm.artEmpresaId, nuevoViajeArtForm.esViajeLocal, km);
-                            setNuevoViajeArtForm((prev) => ({
-                              ...prev,
-                              distanciaKm: km,
-                              precioArt: precios.precioArt,
-                              precio: precios.precioChofer
-                            }));
-                          }}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-emerald-700 mb-1">Factura a ART ($)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          placeholder="0"
-                          value={nuevoViajeArtForm.precioArt || ''}
-                          onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, precioArt: parseFloat(e.target.value) || 0 }))}
-                          className="w-full px-3 py-2 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-800 bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-blue-700 mb-1">Pago al Chofer ($)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          placeholder="0"
-                          value={nuevoViajeArtForm.precio || ''}
-                          onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, precio: parseFloat(e.target.value) || 0 }))}
-                          className="w-full px-3 py-2 border border-blue-300 rounded-xl text-xs font-bold text-blue-800 bg-white"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Observaciones</label>
-                    <textarea
-                      rows={2}
-                      placeholder="Indicaciones para el chofer, piso/consultorio, espera, etc."
-                      value={nuevoViajeArtForm.observaciones}
-                      onChange={(e) => setNuevoViajeArtForm((prev) => ({ ...prev, observaciones: e.target.value }))}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Footer de navegación por pasos */}
-              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (pasoNuevoViajeArt === 1) {
-                      setIsModalNuevoViajeArtOpen(false);
-                    } else {
-                      setPasoNuevoViajeArt((prev) => (prev === 3 ? 2 : 1));
-                    }
-                  }}
-                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  {pasoNuevoViajeArt === 1 ? 'Cancelar' : '← Anterior'}
-                </button>
-
-                {pasoNuevoViajeArt < 3 ? (
-                  <button
-                    type="button"
-                    onClick={handleSiguientePasoViajeArt}
-                    className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                  >
-                    Siguiente →
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={creandoViajeArt}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    {creandoViajeArt ? 'Creando viaje...' : 'Crear y Asignar al Chofer'}
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-        </div>
+        <ArtNuevoViajeModal
+          artList={artList}
+          choferesList={choferesList}
+          isModalNuevoViajeArtOpen={isModalNuevoViajeArtOpen}
+          setIsModalNuevoViajeArtOpen={setIsModalNuevoViajeArtOpen}
+          pasoNuevoViajeArt={pasoNuevoViajeArt}
+          setPasoNuevoViajeArt={setPasoNuevoViajeArt}
+          creandoViajeArt={creandoViajeArt}
+          calculandoRutaArt={calculandoRutaArt}
+          artOrigenSuggestions={artOrigenSuggestions}
+          setArtOrigenSuggestions={setArtOrigenSuggestions}
+          artDestinoSuggestions={artDestinoSuggestions}
+          setArtDestinoSuggestions={setArtDestinoSuggestions}
+          setIsArtOrigenSelected={setIsArtOrigenSelected}
+          setIsArtDestinoSelected={setIsArtDestinoSelected}
+          buscandoArtOrigen={buscandoArtOrigen}
+          buscandoArtDestino={buscandoArtDestino}
+          setArtOrigenCoords={setArtOrigenCoords}
+          setArtDestinoCoords={setArtDestinoCoords}
+          pasajeroSuggestionsArt={pasajeroSuggestionsArt}
+          pasajeroSeleccionadoArt={pasajeroSeleccionadoArt}
+          setPasajeroSeleccionadoArt={setPasajeroSeleccionadoArt}
+          nuevoViajeArtForm={nuevoViajeArtForm}
+          setNuevoViajeArtForm={setNuevoViajeArtForm}
+          calcularPreciosLocalArt={calcularPreciosLocalArt}
+          handleSeleccionarPasajeroArt={handleSeleccionarPasajeroArt}
+          handleSiguientePasoViajeArt={handleSiguientePasoViajeArt}
+          handleCalcularRutaNuevoViajeArt={handleCalcularRutaNuevoViajeArt}
+          handleCrearViajeArtSubmit={handleCrearViajeArtSubmit}
+        />
       )}
 
-      {/* ============================================================== */}
-      {/* MODAL: SINCRONIZACIÓN AUTOMÁTICA CON PORTAL FELEVAL            */}
-      {/* ============================================================== */}
-      {portalModalArt && (
-        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-700">
-                  <RefreshCw className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Sincronización Portal {portalConfigForm.portalExternoTipo === 'SIMAR2' ? 'SIMAR2' : 'Feleval'}
-                  </h3>
-                  <p className="text-xs text-slate-500">{portalModalArt.nombre} • Automática diaria a las 23:59 hs</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPortalModalArt(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleGuardarPortalConfig} className="p-6 space-y-4">
-              {portalModalArt.portalExternoUltimoEstado && (
-                <div
-                  className={`p-3 rounded-xl border text-xs ${
-                    portalModalArt.portalExternoUltimoEstado === 'OK'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-red-50 border-red-200 text-red-800'
-                  }`}
-                >
-                  <div className="font-bold">
-                    {portalModalArt.portalExternoUltimoEstado === 'OK'
-                      ? 'Última sincronización exitosa'
-                      : portalModalArt.portalExternoUltimoEstado === 'ERROR_CLAVE'
-                      ? '⚠️ Clave vencida o incorrecta (alerta enviada por email)'
-                      : 'Error de conexión'}
-                  </div>
-                  {portalModalArt.portalExternoUltimoMensaje && (
-                    <p className="text-[11px] mt-0.5">{portalModalArt.portalExternoUltimoMensaje}</p>
-                  )}
-                  {portalModalArt.portalExternoUltimaSync && (
-                    <p className="text-[10px] opacity-75 mt-1">
-                      {new Date(portalModalArt.portalExternoUltimaSync).toLocaleString('es-AR')}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <label className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
-                <div>
-                  <span className="text-xs font-bold text-slate-900 block">Activar sincronización diaria (23:59 hs)</span>
-                  <span className="text-[11px] text-slate-500">Importa los viajes pendientes sin duplicarlos.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={portalConfigForm.portalExternoActivo}
-                  onChange={(e) =>
-                    setPortalConfigForm((prev) => ({ ...prev, portalExternoActivo: e.target.checked }))
-                  }
-                  className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-              </label>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Sistema / Portal externo</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPortalConfigForm((prev) => ({
-                        ...prev,
-                        portalExternoTipo: 'FELEVAL',
-                        portalExternoUrl: 'https://app.feleval.com.ar'
-                      }))
-                    }
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
-                      portalConfigForm.portalExternoTipo === 'FELEVAL'
-                        ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Feleval
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPortalConfigForm((prev) => ({
-                        ...prev,
-                        portalExternoTipo: 'SIMAR2',
-                        portalExternoUrl: 'https://simar2.com.ar/nacion/prestadores'
-                      }))
-                    }
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
-                      portalConfigForm.portalExternoTipo === 'SIMAR2'
-                        ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    SIMAR2 (Central Nación)
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {portalConfigForm.portalExternoTipo === 'SIMAR2'
-                    ? 'Usuario / CUIT de acceso a SIMAR2'
-                    : 'Email de acceso a Feleval'}
-                </label>
-                <input
-                  type={portalConfigForm.portalExternoTipo === 'SIMAR2' ? 'text' : 'email'}
-                  required
-                  placeholder={
-                    portalConfigForm.portalExternoTipo === 'SIMAR2'
-                      ? '20369969464'
-                      : 'usuario@ejemplo.com'
-                  }
-                  value={portalConfigForm.portalExternoEmail}
-                  onChange={(e) =>
-                    setPortalConfigForm((prev) => ({ ...prev, portalExternoEmail: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Contraseña del portal
-                </label>
-                <input
-                  type="password"
-                  placeholder="Dejar vacío para mantener la contraseña guardada"
-                  value={portalConfigForm.portalExternoPassword}
-                  onChange={(e) =>
-                    setPortalConfigForm((prev) => ({ ...prev, portalExternoPassword: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Se guarda cifrada en el servidor. Si cambia la clave del portal, actualizala acá.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Email de alerta si vence la contraseña
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="rizzofs@gmail.com"
-                  value={portalConfigForm.portalExternoEmailAlerta}
-                  onChange={(e) =>
-                    setPortalConfigForm((prev) => ({ ...prev, portalExternoEmailAlerta: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  disabled={sincronizandoPortal || savingPortalConfig}
-                  onClick={handleSincronizarPortalAhora}
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${sincronizandoPortal ? 'animate-spin' : ''}`} />
-                  {sincronizandoPortal ? 'Sincronizando...' : 'Sincronizar ahora'}
-                </button>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPortalModalArt(null)}
-                    className="px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                  >
-                    Cerrar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingPortalConfig}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs"
-                  >
-                    {savingPortalConfig ? 'Guardando...' : 'Guardar Config'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
+      {(portalModalArt || viajeDetalleModal) && (
+        <ArtPortalDetailModals
+          artList={artList}
+          portalModalArt={portalModalArt}
+          setPortalModalArt={setPortalModalArt}
+          portalConfigForm={portalConfigForm}
+          setPortalConfigForm={setPortalConfigForm}
+          savingPortalConfig={savingPortalConfig}
+          sincronizandoPortal={sincronizandoPortal}
+          handleGuardarPortalConfig={handleGuardarPortalConfig}
+          handleSincronizarPortalAhora={handleSincronizarPortalAhora}
+          viajeDetalleModal={viajeDetalleModal}
+          setViajeDetalleModal={setViajeDetalleModal}
+        />
       )}
-
-      {/* ============================================================== */}
-      {/* MODAL: DETALLE COMPLETO DE VIAJE ART (IMPORTES Y DATOS)        */}
-      {/* ============================================================== */}
-      {viajeDetalleModal && (() => {
-        const v = viajeDetalleModal;
-        const artObj = v.artEmpresa || artList.find((a) => a.id === v.artEmpresaId);
-        const artColors = getArtColorClasses(artObj?.nombre, v.artEmpresaId);
-        const peajes = Number(v.montoPeajes || 0);
-        const esperaMin = Math.round(Number(v.tiempoEsperaSegundos || 0) / 60);
-        const km = Number(v.distanciaKmConPasajero || 0);
-        const precioArtBase = Number(v.precioFacturaArt ?? v.precioArt ?? 0);
-        const precioChoferBase = Number(v.pagaChofer ?? v.precio ?? 0);
-        const totalFacturaArt = precioArtBase + peajes;
-        const totalPagaChofer = precioChoferBase + peajes;
-        const gananciaNeta =
-          v.gananciaNeta !== undefined && v.gananciaNeta !== null
-            ? Number(v.gananciaNeta)
-            : Math.max(0, totalFacturaArt - totalPagaChofer);
-        const obsStr = String(v.observaciones || '');
-        const esLocal = obsStr.includes('[LOCAL]');
-        const desdeBase = obsStr.includes('DESDE BASE');
-        const origenSistema = v.externoId?.startsWith('FELEVAL:')
-          ? 'Importado de Feleval'
-          : v.externoId?.startsWith('SIMAR2:')
-          ? 'Importado de SIMAR2'
-          : 'Carga manual';
-        const pasajeroNombre =
-          v.clienteNombre ||
-          `${v.cliente?.nombre || ''} ${v.cliente?.apellido || ''}`.trim() ||
-          'Sin nombre';
-        const pasajeroTel = v.clienteTelefono || v.cliente?.telefono || '';
-        const choferNombre = v.chofer
-          ? `${v.chofer.nombre || ''} ${v.chofer.apellido || ''}`.trim() +
-            (v.chofer.numeroChofer ? ` (#${v.chofer.numeroChofer})` : '')
-          : '';
-
-        return (
-          <div
-            className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto"
-            onClick={() => setViajeDetalleModal(null)}
-          >
-            <div
-              className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden max-h-[92vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 bg-slate-50/70">
-                <div className="min-w-0 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border font-bold text-xs ${artColors.badge}`}>
-                      <span className={`w-2 h-2 rounded-full ${artColors.dot}`} />
-                      ART - {artObj?.nombre || 'Sin asignar'}
-                    </span>
-                    {v.numeroSiniestro && (
-                      <span className={`px-2 py-0.5 rounded-md border text-xs font-mono font-bold ${artColors.siniestro}`}>
-                        Sin: {v.numeroSiniestro}
-                      </span>
-                    )}
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                      v.estado === 'COMPLETADO' || v.estado === 'FINALIZADO'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : v.estado === 'CANCELADO'
-                        ? 'bg-rose-100 text-rose-800'
-                        : v.estado === 'ACEPTADO' || v.estado === 'EN_CAMINO' || v.estado === 'EN_CURSO'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}>
-                      {v.estado || 'PENDIENTE'}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-semibold">
-                      {origenSistema}
-                    </span>
-                  </div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
-                    Detalle del Viaje ART
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setViajeDetalleModal(null)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 shrink-0"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Contenido scrollable */}
-              <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-xs sm:text-sm">
-                {/* Fecha, Turno, Salida y Modalidad */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Fecha</span>
-                    <span className="font-bold text-slate-900 mt-0.5 block">
-                      {v.fecha ? new Date(v.fecha).toLocaleDateString('es-AR') : '-'}
-                    </span>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Hora Turno</span>
-                    <span className="font-bold text-indigo-700 mt-0.5 block">
-                      {v.horaTurno || (v.fecha ? new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '-')} hs
-                    </span>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Hora Salida</span>
-                    <span className="font-bold text-amber-700 mt-0.5 block">
-                      {v.horaSalidaChofer ? `${v.horaSalidaChofer} hs` : 'Sin definir'}
-                    </span>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Modalidad / Km</span>
-                    <span className="font-bold text-slate-900 mt-0.5 block">
-                      {esLocal ? 'Local (Fijo)' : desdeBase ? 'Por Km (Base)' : 'Por Km'}
-                      {km > 0 ? ` • ${km} km` : ''}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Desglose de Importes */}
-                <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
-                      <DollarSign className="w-4 h-4" /> Importes Cargados
-                    </span>
-                    {artObj && (
-                      <span className="text-[11px] text-emerald-700 font-medium">
-                        Tarifa {artObj.nombre}: ${Number(artObj.valorKm || 0).toLocaleString('es-AR')}/km • Local ${Number(artObj.precioTramo || 0).toLocaleString('es-AR')}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <div className="p-3 rounded-xl bg-white border border-emerald-200/70">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Facturar a ART</span>
-                      <span className="text-lg font-black text-emerald-700 block mt-0.5">
-                        {totalFacturaArt > 0 ? `$${totalFacturaArt.toLocaleString('es-AR')}` : 'A calcular'}
-                      </span>
-                      {peajes > 0 && (
-                        <span className="text-[10px] text-slate-500">Incluye ${peajes.toLocaleString('es-AR')} de peajes</span>
-                      )}
-                    </div>
-                    <div className="p-3 rounded-xl bg-white border border-slate-200/70">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Paga al Chofer</span>
-                      <span className="text-lg font-black text-slate-900 block mt-0.5">
-                        {totalPagaChofer > 0 ? `$${totalPagaChofer.toLocaleString('es-AR')}` : 'A calcular'}
-                      </span>
-                      {esperaMin > 0 && (
-                        <span className="text-[10px] text-slate-500">Espera registrada: {esperaMin} min</span>
-                      )}
-                    </div>
-                    <div className="p-3 rounded-xl bg-white border border-slate-200/70">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Ganancia Agencia</span>
-                      <span className="text-lg font-black text-indigo-700 block mt-0.5">
-                        {totalFacturaArt > 0 ? `$${gananciaNeta.toLocaleString('es-AR')}` : '-'}
-                      </span>
-                      {totalFacturaArt === 0 && (
-                        <span className="text-[10px] text-amber-700">Se calcula al cargar/finalizar km</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Pasajero y Chofer */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                      <User className="w-3.5 h-3.5" /> Pasajero
-                    </span>
-                    <p className="font-bold text-slate-900">{pasajeroNombre}</p>
-                    {pasajeroTel ? (
-                      <a
-                        href={`tel:${pasajeroTel}`}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:underline"
-                      >
-                        <Phone className="w-3.5 h-3.5" /> {pasajeroTel}
-                      </a>
-                    ) : (
-                      <p className="text-xs text-slate-400">Sin teléfono registrado</p>
-                    )}
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                      <Car className="w-3.5 h-3.5" /> Chofer Asignado
-                    </span>
-                    {choferNombre ? (
-                      <>
-                        <p className="font-bold text-slate-900">{choferNombre}</p>
-                        {v.vehiculo && (
-                          <p className="text-xs text-slate-500">
-                            {v.vehiculo.patente} • {v.vehiculo.marca} {v.vehiculo.modelo}
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <p className="text-xs font-semibold text-amber-700">Sin chofer asignado todavía</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Recorrido completo */}
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-2.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5" /> Recorrido
-                  </span>
-                  <div className="space-y-1.5 text-xs sm:text-sm">
-                    <div className="break-words">
-                      <span className="font-bold text-emerald-700">Origen: </span>
-                      <span className="text-slate-800">{v.origen || 'A confirmar'}</span>
-                    </div>
-                    <div className="break-words">
-                      <span className="font-bold text-indigo-700">Destino: </span>
-                      <span className="text-slate-800">{v.destino || 'A confirmar'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Observaciones / Metadata del Portal */}
-                {obsStr && (
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
-                      <FileText className="w-3.5 h-3.5" /> Observaciones y Datos del Portal
-                    </span>
-                    <p className="text-xs text-slate-700 whitespace-pre-wrap break-words leading-relaxed">
-                      {obsStr}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="px-5 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/70 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setViajeDetalleModal(null)}
-                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }

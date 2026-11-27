@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { coordinadorDashboardService, vehiculoService, choferService } from '@/lib/api';
 import { Chofer, LiquidacionPendienteResumen } from '@/types';
 import {
@@ -29,15 +30,30 @@ import toast from 'react-hot-toast';
 export default function HistorialLiquidacionesPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource, invalidate } = useDuenioData();
 
   // Pestaña activa: 'choferes' | 'propietarios' | 'cierre'
   const [activeTab, setActiveTab] = useState<'choferes' | 'propietarios' | 'cierre'>('choferes');
 
-  // Datos generales
-  const [liquidaciones, setLiquidaciones] = useState<any[]>([]);
-  const [vehiculos, setVehiculos] = useState<any[]>([]);
-  const [choferesList, setChoferesList] = useState<Chofer[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Datos generales (hidratados desde caché si existen)
+  const [liquidaciones, setLiquidaciones] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.LIQUIDACIONES_HISTORIAL, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [vehiculos, setVehiculos] = useState<any[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [choferesList, setChoferesList] = useState<Chofer[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    return c?.data?.success && c.data.data
+      ? c.data.data.filter((ch: Chofer) => ch.estado !== 'DADO_DE_BAJA')
+      : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.LIQUIDACIONES_HISTORIAL, 60_000);
+    return !c?.data?.success;
+  });
 
   // Estado para pestaña "Realizar Cierre de Caja" (Dueño)
   const [cierreChoferId, setCierreChoferId] = useState<string>('');
@@ -70,26 +86,47 @@ export default function HistorialLiquidacionesPage() {
   const [periodoPropietario, setPeriodoPropietario] = useState<'hoy' | 'semana' | 'mes' | 'todos'>('mes');
   const [showPdfModal, setShowPdfModal] = useState(false);
 
-  useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-    loadData();
-  }, [user]);
+  const loadData = useCallback(async (force = false) => {
+    const cLiq = getCached<any>(DUENIO_CACHE_KEYS.LIQUIDACIONES_HISTORIAL, 60_000);
+    const cVeh = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    const cChof = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    const hasWarm = Boolean(cLiq?.data?.success);
 
-  const loadData = async () => {
+    if (hasWarm && !force) {
+      setLiquidaciones(cLiq!.data.data || []);
+      if (cVeh?.data?.success && cVeh.data.data) setVehiculos(cVeh.data.data);
+      if (cChof?.data?.success && cChof.data.data) {
+        setChoferesList(cChof.data.data.filter((c: Chofer) => c.estado !== 'DADO_DE_BAJA'));
+      }
+      setLoading(false);
+      if (!cLiq!.isStale && cVeh && !cVeh.isStale && cChof && !cChof.isStale) {
+        return;
+      }
+    }
+
     try {
-      setLoading(true);
+      if (!hasWarm && !force) setLoading(true);
       const [liqRes, vehRes, chofRes] = await Promise.all([
-        coordinadorDashboardService.getHistorialDuenio(),
-        vehiculoService.getAll(),
-        choferService.getAll()
+        fetchResource(
+          DUENIO_CACHE_KEYS.LIQUIDACIONES_HISTORIAL,
+          () => coordinadorDashboardService.getHistorialDuenio(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.VEHICULOS,
+          () => vehiculoService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.CHOFERES,
+          () => choferService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
       ]);
 
       if (liqRes.success && liqRes.data) {
         setLiquidaciones(liqRes.data);
-      } else {
+      } else if (!hasWarm) {
         toast.error('Error al cargar historial de liquidaciones');
       }
 
@@ -102,11 +139,19 @@ export default function HistorialLiquidacionesPage() {
       }
     } catch (error) {
       console.error('Error loading data:', error);
-      toast.error('Error al sincronizar datos');
+      if (!hasWarm) toast.error('Error al sincronizar datos');
     } finally {
       setLoading(false);
     }
-  };
+  }, [getCached, fetchResource]);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    loadData(false);
+  }, [user, router, loadData]);
 
   // Propietarios únicos de vehículos cargados
   const listaPropietarios = useMemo(() => {
@@ -474,7 +519,8 @@ export default function HistorialLiquidacionesPage() {
         setCierreChoferId('');
         setCierrePendingData(null);
         resetCierreForm();
-        await loadData();
+        invalidate(['liquidaciones:', 'reportes:']);
+        await loadData(true);
         setActiveTab('choferes');
       } else {
         toast.error(res.message || 'Error al registrar cierre de caja');
@@ -1085,6 +1131,7 @@ export default function HistorialLiquidacionesPage() {
         notasRecepcion: recibido ? notasRecepcion : undefined
       });
       if (res.success) {
+        invalidate(['liquidaciones:']);
         toast.success(recibido ? 'Operación confirmada' : 'Liquidación marcada como pendiente');
         setLiquidaciones((prev) =>
           prev.map((item) =>
@@ -1201,7 +1248,7 @@ export default function HistorialLiquidacionesPage() {
           </p>
         </div>
         <button
-          onClick={loadData}
+          onClick={() => loadData(true)}
           disabled={loading}
           className="btn btn-outline border-slate-200 hover:bg-slate-50 text-slate-700 flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-xl active:scale-95 transition-all"
         >

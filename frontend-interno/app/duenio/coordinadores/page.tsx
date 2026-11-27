@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { coordinadorService, remiseriaService } from '@/lib/api';
 import { Coordinador, CreateCoordinadorData, Remiseria } from '@/types';
 import { Users, Plus, Edit, Trash2, Eye, EyeOff, Search, Filter, ArrowLeft } from 'lucide-react';
@@ -11,9 +12,20 @@ import toast from 'react-hot-toast';
 export default function CoordinadoresPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [coordinadores, setCoordinadores] = useState<Coordinador[]>([]);
-  const [remiserias, setRemiserias] = useState<Remiseria[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, fetchResource, invalidate } = useDuenioData();
+
+  const [coordinadores, setCoordinadores] = useState<Coordinador[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.COORDINADORES, 90_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [remiserias, setRemiserias] = useState<Remiseria[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.COORDINADORES, 90_000);
+    return !c?.data?.success;
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedCoordinador, setSelectedCoordinador] = useState<Coordinador | null>(null);
@@ -26,52 +38,82 @@ export default function CoordinadoresPage() {
     nombre: '',
     email: '',
     password: '',
-    remiseriaId: ''
+    remiseriaId: (() => {
+      const c = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+      return c?.data?.success && c.data.data?.[0]?.id ? c.data.data[0].id : '';
+    })()
   });
 
-  useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
+  const loadCoordinadores = useCallback(async (force = false) => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.COORDINADORES, 90_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setCoordinadores(cached!.data.data || []);
+      setLoading(false);
+      if (!cached!.isStale) return;
     }
-    loadCoordinadores();
-    loadRemiserias();
-  }, [user]);
 
-  const loadCoordinadores = async () => {
     try {
-      setLoading(true);
-      const response = await coordinadorService.getAll();
+      if (!hasWarm && !force) setLoading(true);
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.COORDINADORES,
+        () => coordinadorService.getAll(),
+        { staleTimeMs: 90_000, force }
+      );
       if (response.success) {
         setCoordinadores(response.data || []);
-      } else {
+      } else if (!hasWarm) {
         toast.error('Error al cargar coordinadores');
       }
     } catch (error) {
       console.error('Error loading coordinadores:', error);
-      toast.error('Error al cargar coordinadores');
+      if (!hasWarm) toast.error('Error al cargar coordinadores');
     } finally {
       setLoading(false);
     }
-  };
+  }, [getCached, fetchResource]);
 
-  const loadRemiserias = async () => {
+  const loadRemiserias = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm) {
+      const list = cached!.data.data || [];
+      setRemiserias(list);
+      if (list[0]?.id) {
+        setFormData((prev) => (prev.remiseriaId ? prev : { ...prev, remiseriaId: list[0].id }));
+      }
+      if (!cached!.isStale) return;
+    }
+
     try {
-      const response = await remiseriaService.getAll();
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+        () => remiseriaService.getAll({ lite: true }),
+        { staleTimeMs: 120_000 }
+      );
       if (response.success) {
         const list = response.data || [];
         setRemiserias(list);
         if (list[0]?.id) {
           setFormData((prev) => (prev.remiseriaId ? prev : { ...prev, remiseriaId: list[0].id }));
         }
-      } else {
+      } else if (!hasWarm) {
         toast.error('Error al cargar remiserías');
       }
     } catch (error) {
       console.error('Error loading remiserias:', error);
-      toast.error('Error al cargar remiserías');
+      if (!hasWarm) toast.error('Error al cargar remiserías');
     }
-  };
+  }, [getCached, fetchResource]);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    loadCoordinadores(false);
+    loadRemiserias();
+  }, [user, router, loadCoordinadores, loadRemiserias]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,10 +126,11 @@ export default function CoordinadoresPage() {
       };
       const response = await coordinadorService.create(payload);
       if (response.success) {
+        invalidate(['coordinadores:', 'remiserias:']);
         toast.success('Coordinador creado exitosamente');
         setShowCreateModal(false);
         setFormData({ nombre: '', email: '', password: '', remiseriaId: remiserias[0]?.id || '' });
-        loadCoordinadores();
+        loadCoordinadores(true);
       } else {
         toast.error(response.message || 'Error al crear coordinador');
       }
@@ -110,11 +153,12 @@ export default function CoordinadoresPage() {
 
       const response = await coordinadorService.update(selectedCoordinador.id, updateData);
       if (response.success) {
+        invalidate(['coordinadores:', 'remiserias:']);
         toast.success('Coordinador actualizado exitosamente');
         setShowEditModal(false);
         setSelectedCoordinador(null);
         setFormData({ nombre: '', email: '', password: '', remiseriaId: '' });
-        loadCoordinadores();
+        loadCoordinadores(true);
       } else {
         toast.error(response.message || 'Error al actualizar coordinador');
       }
@@ -130,8 +174,9 @@ export default function CoordinadoresPage() {
     try {
       const response = await coordinadorService.delete(id);
       if (response.success) {
+        invalidate(['coordinadores:', 'remiserias:']);
         toast.success('Coordinador eliminado exitosamente');
-        loadCoordinadores();
+        loadCoordinadores(true);
       } else {
         toast.error(response.message || 'Error al eliminar coordinador');
       }
@@ -145,8 +190,9 @@ export default function CoordinadoresPage() {
     try {
       const response = await coordinadorService.toggleStatus(id);
       if (response.success) {
+        invalidate(['coordinadores:', 'remiserias:']);
         toast.success(response.data?.activo ? 'Coordinador activado' : 'Coordinador desactivado');
-        loadCoordinadores();
+        loadCoordinadores(true);
       } else {
         toast.error(response.message || 'Error al cambiar estado');
       }

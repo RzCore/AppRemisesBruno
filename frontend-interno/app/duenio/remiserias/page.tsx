@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { remiseriaService } from '@/lib/api';
 import { Remiseria } from '@/types';
 import { 
@@ -15,8 +16,53 @@ import Link from 'next/link';
 export default function MiRemiseriaPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [remiseria, setRemiseria] = useState<Remiseria | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { getCached, fetchResource } = useDuenioData();
+
+  const pickMiRemiseria = useCallback((list: Remiseria[] | undefined | null): Remiseria | null => {
+    if (!list || list.length === 0) return null;
+    return (
+      list.find((r) => r.duenios?.some((d) => d.duenioId === user?.duenio?.id)) || list[0]
+    );
+  }, [user?.duenio?.id]);
+
+  const [remiseria, setRemiseria] = useState<Remiseria | null>(() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return cached?.data?.success ? pickMiRemiseria(cached.data.data) : null;
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return !(cached?.data?.success && cached.data.data?.length > 0);
+  });
+
+  const loadRemiseria = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const hasWarm = Boolean(cached?.data?.success && cached.data.data?.length > 0);
+    if (hasWarm) {
+      setRemiseria(pickMiRemiseria(cached!.data.data));
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      if (!hasWarm) setLoading(true);
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+        () => remiseriaService.getAll({ lite: true }),
+        { staleTimeMs: 120_000 }
+      );
+
+      if (response.success && response.data && response.data.length > 0) {
+        setRemiseria(pickMiRemiseria(response.data));
+      } else if (!hasWarm) {
+        toast.error('No se encontró una remisería asociada a tu cuenta');
+      }
+    } catch (error) {
+      console.error('Error loading remiseria:', error);
+      if (!hasWarm) toast.error('Error al cargar la información de la remisería');
+    } finally {
+      setLoading(false);
+    }
+  }, [getCached, fetchResource, pickMiRemiseria]);
 
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
@@ -24,30 +70,7 @@ export default function MiRemiseriaPage() {
       return;
     }
     loadRemiseria();
-  }, [user, router]);
-
-  const loadRemiseria = async () => {
-    try {
-      setLoading(true);
-      const response = await remiseriaService.getAll();
-      
-      if (response.success && response.data && response.data.length > 0) {
-        // Encontrar la remisería asignada a la cuenta de este dueño
-        const miRemiseria = response.data.find(r => 
-          r.duenios?.some(d => d.duenioId === user?.duenio?.id)
-        ) || response.data[0];
-
-        setRemiseria(miRemiseria);
-      } else {
-        toast.error('No se encontró una remisería asociada a tu cuenta');
-      }
-    } catch (error) {
-      console.error('Error loading remiseria:', error);
-      toast.error('Error al cargar la información de la remisería');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [user, router, loadRemiseria]);
 
   if (loading) {
     return (
@@ -138,15 +161,15 @@ export default function MiRemiseriaPage() {
 
           <div className="pt-4 border-t border-slate-100 grid grid-cols-3 gap-3 text-center">
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-              <p className="text-xl font-bold text-indigo-600">{remiseria.coordinadores?.length || 0}</p>
+              <p className="text-xl font-bold text-indigo-600">{(remiseria as any)._count?.coordinadores ?? remiseria.coordinadores?.length ?? 0}</p>
               <p className="text-xs text-slate-500">Coordinadores</p>
             </div>
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-              <p className="text-xl font-bold text-emerald-600">{remiseria.choferes?.length || 0}</p>
+              <p className="text-xl font-bold text-emerald-600">{(remiseria as any)._count?.choferes ?? remiseria.choferes?.length ?? 0}</p>
               <p className="text-xs text-slate-500">Choferes</p>
             </div>
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-              <p className="text-xl font-bold text-amber-600">{remiseria.vehiculos?.length || 0}</p>
+              <p className="text-xl font-bold text-amber-600">{(remiseria as any)._count?.vehiculos ?? remiseria.vehiculos?.length ?? 0}</p>
               <p className="text-xs text-slate-500">Vehículos</p>
             </div>
           </div>

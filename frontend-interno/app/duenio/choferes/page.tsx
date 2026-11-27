@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { choferService, remiseriaService, vehiculoService } from '@/lib/api';
 import { Chofer, CreateChoferData, Remiseria, Vehiculo } from '@/types';
 import { Truck, Car, Plus, Edit, Trash2, Eye, EyeOff, Search, Filter, ArrowLeft, User, Calendar, Phone, Mail, MapPin, FileText, CheckCircle, XCircle, Clock, ChevronRight, ChevronLeft, ChevronDown, Check, Sparkles, ShieldCheck, ShieldAlert, Bell } from 'lucide-react';
@@ -12,10 +13,24 @@ import { evaluarDocumentacionClient, getDocumentoBadgeClasses } from '@/lib/docu
 export default function ChoferesPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [choferes, setChoferes] = useState<Chofer[]>([]);
-  const [remiserias, setRemiserias] = useState<Remiseria[]>([]);
-  const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, fetchResource, invalidate } = useDuenioData();
+
+  const [choferes, setChoferes] = useState<Chofer[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [remiserias, setRemiserias] = useState<Remiseria[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [vehiculos, setVehiculos] = useState<Vehiculo[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    return !c?.data?.success;
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createStep, setCreateStep] = useState<number>(1);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -85,60 +100,94 @@ export default function ChoferesPage() {
     comisionPorcentaje: 30
   });
 
+  const loadChoferes = useCallback(async (force = false) => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setChoferes(cached!.data.data || []);
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      if (!hasWarm && !force) setLoading(true);
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.CHOFERES,
+        () => choferService.getAll(),
+        { staleTimeMs: 60_000, force }
+      );
+      if (response.success) {
+        setChoferes(response.data || []);
+      } else if (!hasWarm) {
+        toast.error('Error al cargar choferes');
+      }
+    } catch (error) {
+      console.error('Error loading choferes:', error);
+      if (!hasWarm) toast.error('Error al cargar choferes');
+    } finally {
+      setLoading(false);
+    }
+  }, [getCached, fetchResource]);
+
+  const loadRemiserias = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm) {
+      setRemiserias(cached!.data.data || []);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+        () => remiseriaService.getAll({ lite: true }),
+        { staleTimeMs: 120_000 }
+      );
+      if (response.success) {
+        setRemiserias(response.data || []);
+      } else if (!hasWarm) {
+        toast.error('Error al cargar remiserías');
+      }
+    } catch (error) {
+      console.error('Error loading remiserias:', error);
+      if (!hasWarm) toast.error('Error al cargar remiserías');
+    }
+  }, [getCached, fetchResource]);
+
+  const loadVehiculos = useCallback(async (force = false) => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setVehiculos(cached!.data.data || []);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.VEHICULOS,
+        () => vehiculoService.getAll(),
+        { staleTimeMs: 60_000, force }
+      );
+      if (response.success) {
+        setVehiculos(response.data || []);
+      } else if (!hasWarm) {
+        toast.error('Error al cargar vehículos');
+      }
+    } catch (error) {
+      console.error('Error loading vehiculos:', error);
+      if (!hasWarm) toast.error('Error al cargar vehículos');
+    }
+  }, [getCached, fetchResource]);
+
   useEffect(() => {
     if (!user) {
       router.push('/login');
       return;
     }
-    loadChoferes();
+    loadChoferes(false);
     loadRemiserias();
-    loadVehiculos();
-  }, [user]);
-
-  const loadChoferes = async () => {
-    try {
-      setLoading(true);
-      const response = await choferService.getAll();
-      if (response.success) {
-        setChoferes(response.data || []);
-      } else {
-        toast.error('Error al cargar choferes');
-      }
-    } catch (error) {
-      console.error('Error loading choferes:', error);
-      toast.error('Error al cargar choferes');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadRemiserias = async () => {
-    try {
-      const response = await remiseriaService.getAll();
-      if (response.success) {
-        setRemiserias(response.data || []);
-      } else {
-        toast.error('Error al cargar remiserías');
-      }
-    } catch (error) {
-      console.error('Error loading remiserias:', error);
-      toast.error('Error al cargar remiserías');
-    }
-  };
-
-  const loadVehiculos = async () => {
-    try {
-      const response = await vehiculoService.getAll();
-      if (response.success) {
-        setVehiculos(response.data || []);
-      } else {
-        toast.error('Error al cargar vehículos');
-      }
-    } catch (error) {
-      console.error('Error loading vehiculos:', error);
-      toast.error('Error al cargar vehículos');
-    }
-  };
+    loadVehiculos(false);
+  }, [user, router, loadChoferes, loadRemiserias, loadVehiculos]);
 
   const resetNuevoVehiculo = (esPropietario = false) => {
     setVehiculoMode('existente');
@@ -246,8 +295,9 @@ export default function ChoferesPage() {
           esPropietario: false,
           esFranquero: false
         });
-        loadChoferes();
-        loadVehiculos();
+        invalidate(['choferes:', 'vehiculos:', 'remiserias:', 'reportes:choferes:']);
+        loadChoferes(true);
+        loadVehiculos(true);
       } else {
         toast.error(response.message || 'Error al crear chofer');
       }
@@ -347,8 +397,9 @@ export default function ChoferesPage() {
           esPropietario: false,
           esFranquero: false
         });
-        loadChoferes();
-        loadVehiculos();
+        invalidate(['choferes:', 'vehiculos:', 'remiserias:', 'reportes:choferes:']);
+        loadChoferes(true);
+        loadVehiculos(true);
       } else {
         toast.error(response.message || 'Error al actualizar chofer');
       }
@@ -428,8 +479,9 @@ export default function ChoferesPage() {
             : `Auto quitado de ${choferParaAuto.nombre}`
         );
         setChoferParaAuto(null);
-        loadChoferes();
-        loadVehiculos();
+        invalidate(['choferes:', 'vehiculos:', 'remiserias:', 'reportes:choferes:']);
+        loadChoferes(true);
+        loadVehiculos(true);
       } else {
         toast.error(res.message || 'Error al asignar vehículo');
       }
@@ -447,8 +499,9 @@ export default function ChoferesPage() {
     try {
       const response = await choferService.delete(id);
       if (response.success) {
+        invalidate(['choferes:', 'vehiculos:', 'remiserias:', 'reportes:choferes:']);
         toast.success('Chofer eliminado exitosamente');
-        loadChoferes();
+        loadChoferes(true);
       } else {
         toast.error(response.message || 'Error al eliminar chofer');
       }
@@ -462,8 +515,9 @@ export default function ChoferesPage() {
     try {
       const response = await choferService.toggleStatus(id);
       if (response.success) {
+        invalidate(['choferes:', 'remiserias:']);
         toast.success(response.message || 'Estado cambiado exitosamente');
-        loadChoferes();
+        loadChoferes(true);
       } else {
         toast.error(response.message || 'Error al cambiar estado');
       }
@@ -596,8 +650,9 @@ export default function ChoferesPage() {
         } else {
           toast.success(res.message || 'Chofer aprobado exitosamente');
         }
+        invalidate(['choferes:', 'vehiculos:', 'remiserias:']);
         setChoferParaAprobar(null);
-        await loadChoferes();
+        await loadChoferes(true);
       } else {
         toast.error(res.message || 'Error al aprobar chofer');
       }
@@ -616,9 +671,10 @@ export default function ChoferesPage() {
       const res = await choferService.rechazar(choferParaRechazar.id, motivoRechazoInput);
       if (res.success) {
         toast.success('Solicitud rechazada');
+        invalidate(['choferes:', 'remiserias:']);
         setChoferParaRechazar(null);
         setMotivoRechazoInput('');
-        await loadChoferes();
+        await loadChoferes(true);
       } else {
         toast.error(res.message || 'Error al rechazar chofer');
       }

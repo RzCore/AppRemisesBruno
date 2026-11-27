@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { vehiculoService, remiseriaService, choferService } from '@/lib/api';
 import { Vehiculo, CreateVehiculoData, UpdateVehiculoData, Remiseria, Chofer } from '@/types';
 import { toast } from 'react-hot-toast';
@@ -34,10 +35,24 @@ import {
 export default function VehiculosPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
-  const [remiserias, setRemiserias] = useState<Remiseria[]>([]);
-  const [choferes, setChoferes] = useState<Chofer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, fetchResource, invalidate } = useDuenioData();
+
+  const [vehiculos, setVehiculos] = useState<Vehiculo[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [remiserias, setRemiserias] = useState<Remiseria[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [choferes, setChoferes] = useState<Chofer[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    return !c?.data?.success;
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'ACTIVO' | 'MANTENIMIENTO' | 'INACTIVO'>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -64,50 +79,85 @@ export default function VehiculosPage() {
     remiseriaId: ''
   });
 
-  useEffect(() => {
-    if (user?.rol !== 'DUENIO') {
-      router.push('/login');
-      return;
+  const loadChoferes = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.CHOFERES, 60_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm) {
+      setChoferes(cached!.data.data || []);
+      if (!cached!.isStale) return;
     }
-    loadVehiculos();
-    loadRemiserias();
-    loadChoferes();
-  }, [user, router]);
 
-  const loadChoferes = async () => {
     try {
-      const response = await choferService.getAll();
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.CHOFERES,
+        () => choferService.getAll(),
+        { staleTimeMs: 60_000 }
+      );
       if (response.success && response.data) {
         setChoferes(response.data);
       }
     } catch (error) {
       console.error('Error loading choferes:', error);
     }
-  };
+  }, [getCached, fetchResource]);
 
-  const loadVehiculos = async () => {
+  const loadVehiculos = useCallback(async (force = false) => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.VEHICULOS, 60_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setVehiculos(cached!.data.data || []);
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
     try {
-      const response = await vehiculoService.getAll();
+      if (!hasWarm && !force) setLoading(true);
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.VEHICULOS,
+        () => vehiculoService.getAll(),
+        { staleTimeMs: 60_000, force }
+      );
       if (response.success) {
         setVehiculos(response.data || []);
       }
     } catch (error) {
-      toast.error('Error al cargar vehículos');
+      if (!hasWarm) toast.error('Error al cargar vehículos');
     } finally {
       setLoading(false);
     }
-  };
+  }, [getCached, fetchResource]);
 
-  const loadRemiserias = async () => {
+  const loadRemiserias = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm) {
+      setRemiserias(cached!.data.data || []);
+      if (!cached!.isStale) return;
+    }
+
     try {
-      const response = await remiseriaService.getAll();
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+        () => remiseriaService.getAll({ lite: true }),
+        { staleTimeMs: 120_000 }
+      );
       if (response.success) {
         setRemiserias(response.data || []);
       }
     } catch (error) {
       console.error('Error loading remiserias:', error);
     }
-  };
+  }, [getCached, fetchResource]);
+
+  useEffect(() => {
+    if (user?.rol !== 'DUENIO') {
+      router.push('/login');
+      return;
+    }
+    loadVehiculos(false);
+    loadRemiserias();
+    loadChoferes();
+  }, [user, router, loadVehiculos, loadRemiserias, loadChoferes]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,9 +173,10 @@ export default function VehiculosPage() {
         } else {
           toast.success('Vehículo creado exitosamente');
         }
+        invalidate(['vehiculos:', 'choferes:', 'remiserias:']);
         setShowCreateModal(false);
         resetForm();
-        loadVehiculos();
+        loadVehiculos(true);
       } else {
         toast.error(response.message || 'Error al crear vehículo');
       }
@@ -159,11 +210,12 @@ export default function VehiculosPage() {
 
       const response = await vehiculoService.update(editingVehiculo.id, updateData);
       if (response.success) {
+        invalidate(['vehiculos:', 'choferes:', 'remiserias:']);
         toast.success('Vehículo actualizado exitosamente');
         setShowEditModal(false);
         setEditingVehiculo(null);
         resetForm();
-        loadVehiculos();
+        loadVehiculos(true);
       } else {
         toast.error(response.message || 'Error al actualizar vehículo');
       }
@@ -178,8 +230,9 @@ export default function VehiculosPage() {
     try {
       const response = await vehiculoService.delete(id);
       if (response.success) {
+        invalidate(['vehiculos:', 'choferes:', 'remiserias:']);
         toast.success('Vehículo eliminado exitosamente');
-        loadVehiculos();
+        loadVehiculos(true);
       } else {
         toast.error(response.message || 'Error al eliminar vehículo');
       }
@@ -211,8 +264,9 @@ export default function VehiculosPage() {
 
       const response = await vehiculoService.update(vehiculo.id, updateData);
       if (response.success) {
+        invalidate(['vehiculos:', 'remiserias:']);
         toast.success(`Vehículo ${newEstado.toLowerCase()}`);
-        loadVehiculos();
+        loadVehiculos(true);
       } else {
         toast.error(response.message || 'Error al cambiar estado');
       }

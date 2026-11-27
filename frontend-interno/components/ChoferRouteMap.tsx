@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import '../styles/leaflet.css';
 import { MAP_CONFIG } from '@/lib/mapConfig';
 import { coordinadorDashboardService } from '@/lib/api';
 import { Navigation, Clock, Compass, ExternalLink } from 'lucide-react';

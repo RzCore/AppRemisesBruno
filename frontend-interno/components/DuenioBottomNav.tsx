@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { duenioCache } from '@/lib/duenioCache';
 import {
   LayoutDashboard,
   Truck,
@@ -29,6 +30,30 @@ export default function DuenioBottomNav() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Prefetch de rutas secundarias del menú "Más" aunque el drawer esté cerrado
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const routes = [
+        '/duenio/remiserias',
+        '/duenio/coordinadores',
+        '/duenio/vehiculos',
+        '/duenio/gastos',
+        '/duenio/art',
+        '/duenio/informes/diario',
+        '/duenio/informes/mensual',
+        '/duenio/configuracion',
+      ];
+      routes.forEach((href) => {
+        try {
+          router.prefetch(href);
+        } catch {
+          // Ignorar
+        }
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [router]);
 
   const mainTabs = [
     {
@@ -84,6 +109,7 @@ export default function DuenioBottomNav() {
   ];
 
   const handleLogout = () => {
+    duenioCache.clearAll();
     setSheetOpen(false);
     logout();
     router.push('/login');

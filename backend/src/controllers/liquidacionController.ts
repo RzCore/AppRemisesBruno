@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
 import { redondearPrecioMultiplo100 } from '../lib/pricingUtils';
+import { getDuenioRemiseriasInfo } from '../lib/duenioLookupCache';
 
 const UMBRAL_LARGA_DISTANCIA_KM = 20;
 const COMISION_AGENCIA_CORTA_PCT = 20;
@@ -735,19 +736,45 @@ export const liquidacionController = {
     try {
       const { id: userId } = req.user!;
 
-      const duenio = await prisma.duenio.findUnique({
-        where: { userId },
-        include: { remiserias: { select: { remiseriaId: true } } }
-      });
-
-      if (!duenio) {
+      const duenioInfo = await getDuenioRemiseriasInfo(userId);
+      if (!duenioInfo) {
         return res.status(404).json({
           success: false,
           message: 'Dueño no encontrado'
         });
       }
 
-      const remiseriaIds = duenio.remiserias.map(r => r.remiseriaId);
+      const remiseriaIds = duenioInfo.remiseriaIds;
+      const isSummary = req.query.summary === 'true';
+      const limitParam = req.query.limit ? Number(req.query.limit) : undefined;
+      const take = limitParam && Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : undefined;
+
+      if (isSummary) {
+        const pendientes = await prisma.liquidacion.findMany({
+          where: {
+            chofer: {
+              remiseriaId: { in: remiseriaIds }
+            },
+            OR: [
+              { dineroRecibido: false },
+              { quienPagaSaldoAFavor: 'PENDIENTE_DUENIO' }
+            ]
+          },
+          select: {
+            id: true,
+            dineroRecibido: true,
+            quienPagaSaldoAFavor: true
+          },
+          orderBy: {
+            fecha: 'desc'
+          }
+        });
+
+        return res.json({
+          success: true,
+          data: pendientes
+        });
+      }
 
       const liquidaciones = await prisma.liquidacion.findMany({
         where: {
@@ -755,6 +782,7 @@ export const liquidacionController = {
             remiseriaId: { in: remiseriaIds }
           }
         },
+        ...(take ? { take } : {}),
         include: {
           chofer: {
             select: {

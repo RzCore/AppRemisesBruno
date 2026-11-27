@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { gastoRemiseriaService, coordinadorService } from '@/lib/api';
 import {
   GastoRemiseria,
@@ -318,12 +319,23 @@ function formatMoney(n: number): string {
 export default function GastosRemiseriaPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource, invalidate } = useDuenioData();
+
+  const defaultGastosKey = DUENIO_CACHE_KEYS.GASTOS(JSON.stringify({ periodoMes: getMesActualStr() }));
+  const initialGastos = getCached<any>(defaultGastosKey, 60_000);
 
   // Datos
-  const [loading, setLoading] = useState(true);
-  const [gastos, setGastos] = useState<GastoRemiseria[]>([]);
-  const [resumen, setResumen] = useState<GastoRemiseriaResumen | null>(null);
-  const [coordinadores, setCoordinadores] = useState<Coordinador[]>([]);
+  const [loading, setLoading] = useState<boolean>(() => !initialGastos?.data?.success);
+  const [gastos, setGastos] = useState<GastoRemiseria[]>(() =>
+    initialGastos?.data?.success && initialGastos.data.data ? initialGastos.data.data.gastos || [] : []
+  );
+  const [resumen, setResumen] = useState<GastoRemiseriaResumen | null>(() =>
+    initialGastos?.data?.success && initialGastos.data.data ? initialGastos.data.data.resumen || null : null
+  );
+  const [coordinadores, setCoordinadores] = useState<Coordinador[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.COORDINADORES, 90_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
 
   // Filtros
   const [modoPeriodo, setModoPeriodo] = useState<'mes' | 'rango'>('mes');
@@ -362,35 +374,49 @@ export default function GastosRemiseriaPage() {
     observaciones: ''
   });
 
-  const cargarGastos = useCallback(async () => {
-    try {
-      setLoading(true);
-      const params: any = {};
-      if (modoPeriodo === 'mes' && periodoMes) {
-        params.periodoMes = periodoMes;
-      } else {
-        if (fechaDesde) params.desde = fechaDesde;
-        if (fechaHasta) params.hasta = fechaHasta;
-      }
-      if (filtroCategoria !== 'TODAS') params.categoria = filtroCategoria;
-      if (filtroEstado !== 'TODOS') params.estado = filtroEstado;
-      if (filtroMetodo !== 'TODOS') params.metodoPago = filtroMetodo;
-      if (filtroRecurrente === 'FIJOS') params.esRecurrente = 'true';
-      if (filtroRecurrente === 'EVENTUALES') params.esRecurrente = 'false';
+  const cargarGastos = useCallback(async (force = false) => {
+    const params: any = {};
+    if (modoPeriodo === 'mes' && periodoMes) {
+      params.periodoMes = periodoMes;
+    } else {
+      if (fechaDesde) params.desde = fechaDesde;
+      if (fechaHasta) params.hasta = fechaHasta;
+    }
+    if (filtroCategoria !== 'TODAS') params.categoria = filtroCategoria;
+    if (filtroEstado !== 'TODOS') params.estado = filtroEstado;
+    if (filtroMetodo !== 'TODOS') params.metodoPago = filtroMetodo;
+    if (filtroRecurrente === 'FIJOS') params.esRecurrente = 'true';
+    if (filtroRecurrente === 'EVENTUALES') params.esRecurrente = 'false';
 
-      const res = await gastoRemiseriaService.getAll(params);
+    const cacheKey = DUENIO_CACHE_KEYS.GASTOS(JSON.stringify(params));
+    const cached = getCached<any>(cacheKey, 60_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setGastos(cached!.data.data.gastos || []);
+      setResumen(cached!.data.data.resumen || null);
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      if (!hasWarm && !force) setLoading(true);
+      const res = await fetchResource(
+        cacheKey,
+        () => gastoRemiseriaService.getAll(params),
+        { staleTimeMs: 60_000, force }
+      );
       if (res.success && res.data) {
         setGastos(res.data.gastos || []);
         setResumen(res.data.resumen || null);
-      } else {
+      } else if (!hasWarm) {
         toast.error(res.message || 'No se pudieron cargar los gastos');
       }
     } catch {
-      toast.error('Error de red al cargar los gastos');
+      if (!hasWarm) toast.error('Error de red al cargar los gastos');
     } finally {
       setLoading(false);
     }
-  }, [modoPeriodo, periodoMes, fechaDesde, fechaHasta, filtroCategoria, filtroEstado, filtroMetodo, filtroRecurrente]);
+  }, [modoPeriodo, periodoMes, fechaDesde, fechaHasta, filtroCategoria, filtroEstado, filtroMetodo, filtroRecurrente, getCached, fetchResource]);
 
   useEffect(() => {
     if (!user) return;
@@ -398,17 +424,25 @@ export default function GastosRemiseriaPage() {
       router.push('/login');
       return;
     }
-    coordinadorService
-      .getAll()
+    const cachedCoords = getCached<any>(DUENIO_CACHE_KEYS.COORDINADORES, 90_000);
+    if (cachedCoords?.data?.success) {
+      setCoordinadores(cachedCoords.data.data || []);
+      if (!cachedCoords.isStale) return;
+    }
+    fetchResource(
+      DUENIO_CACHE_KEYS.COORDINADORES,
+      () => coordinadorService.getAll(),
+      { staleTimeMs: 90_000 }
+    )
       .then((res) => {
         if (res.success && res.data) setCoordinadores(res.data);
       })
       .catch(() => {});
-  }, [user, router]);
+  }, [user, router, getCached, fetchResource]);
 
   useEffect(() => {
     if (!user || (user.rol !== 'DUENIO' && user.rol !== 'ADMIN')) return;
-    cargarGastos();
+    cargarGastos(false);
   }, [user, cargarGastos]);
 
   // Filtro de búsqueda en cliente (instantáneo)
@@ -528,9 +562,10 @@ export default function GastosRemiseriaPage() {
         : await gastoRemiseriaService.create(payload);
 
       if (res.success) {
+        invalidate(['gastos:']);
         toast.success(editingGasto ? 'Gasto actualizado' : 'Gasto registrado correctamente');
         setIsModalOpen(false);
-        cargarGastos();
+        cargarGastos(true);
       } else {
         toast.error(res.message || 'No se pudo guardar el gasto');
       }
@@ -547,8 +582,9 @@ export default function GastosRemiseriaPage() {
       const nuevoEstado: EstadoGastoRemiseria = g.estado === 'PAGADO' ? 'PENDIENTE' : 'PAGADO';
       const res = await gastoRemiseriaService.cambiarEstado(g.id, { estado: nuevoEstado });
       if (res.success) {
+        invalidate(['gastos:']);
         toast.success(nuevoEstado === 'PAGADO' ? 'Marcado como pagado' : 'Marcado como pendiente');
-        cargarGastos();
+        cargarGastos(true);
       } else {
         toast.error(res.message || 'No se pudo actualizar el estado');
       }
@@ -565,8 +601,9 @@ export default function GastosRemiseriaPage() {
       setDeletingId(g.id);
       const res = await gastoRemiseriaService.delete(g.id);
       if (res.success) {
+        invalidate(['gastos:']);
         toast.success('Gasto eliminado');
-        cargarGastos();
+        cargarGastos(true);
       } else {
         toast.error(res.message || 'No se pudo eliminar el gasto');
       }
@@ -583,10 +620,11 @@ export default function GastosRemiseriaPage() {
       setGenerandoRecurrentes(true);
       const res = await gastoRemiseriaService.generarRecurrentes(mesObj);
       if (res.success) {
+        invalidate(['gastos:']);
         toast.success(res.message || 'Gastos fijos generados');
         setModoPeriodo('mes');
         setPeriodoMes(mesObj);
-        cargarGastos();
+        cargarGastos(true);
       } else {
         toast.error(res.message || 'No se pudieron generar los gastos fijos');
       }
@@ -706,7 +744,7 @@ export default function GastosRemiseriaPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={cargarGastos}
+            onClick={() => cargarGastos(true)}
             className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
             title="Refrescar"
           >

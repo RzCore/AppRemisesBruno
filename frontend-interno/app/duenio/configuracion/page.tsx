@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { remiseriaService } from '@/lib/api';
 import { Remiseria, UpdateRemiseriaData } from '@/types';
 import { 
@@ -17,8 +18,23 @@ import { toast } from 'react-hot-toast';
 export default function ConfiguracionPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [remiseria, setRemiseria] = useState<Remiseria | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { getCached, fetchResource, invalidate } = useDuenioData();
+
+  const pickMiRemiseria = useCallback((list: Remiseria[] | undefined | null): Remiseria | null => {
+    if (!list || list.length === 0) return null;
+    return (
+      list.find((r) => r.duenios?.some((d) => d.duenioId === user?.duenio?.id)) || list[0]
+    );
+  }, [user?.duenio?.id]);
+
+  const [remiseria, setRemiseria] = useState<Remiseria | null>(() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return cached?.data?.success ? pickMiRemiseria(cached.data.data) : null;
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return !(cached?.data?.success && cached.data.data?.length > 0);
+  });
   const [saving, setSaving] = useState(false);
 
   const {
@@ -36,50 +52,62 @@ export default function ConfiguracionPage() {
   const watchedComision = watch('comisionPorcentaje', 30);
   const watchedAgenciaAbierta = watch('agenciaAbierta', true);
 
+  const applyConfigForm = useCallback((miRemiseria: Remiseria) => {
+    setRemiseria(miRemiseria);
+    reset({
+      nombreFantasia: miRemiseria.nombreFantasia || 'Remises Bruno',
+      razonSocial: miRemiseria.razonSocial || 'Remises Bruno S.R.L.',
+      cuit: miRemiseria.cuit || '',
+      direccion: miRemiseria.direccion || '',
+      telefono: miRemiseria.telefono || '',
+      bajadaBandera: miRemiseria.bajadaBandera || 3500,
+      valorKm: miRemiseria.valorKm || 1200,
+      valorHoraEspera: miRemiseria.valorHoraEspera || 10000,
+      comisionPorcentaje: miRemiseria.comisionPorcentaje || 30.0,
+      comisionDuenioAuto: miRemiseria.comisionDuenioAuto || 20.0,
+      agenciaAbierta: miRemiseria.agenciaAbierta !== false,
+      mensajeCierre: miRemiseria.mensajeCierre || 'La agencia permanecerá cerrada por festividades desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!',
+      cierreAutomaticoFiestas: miRemiseria.cierreAutomaticoFiestas !== false,
+    });
+  }, [reset]);
+
+  const loadConfig = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const warmRem = cached?.data?.success ? pickMiRemiseria(cached.data.data) : null;
+    if (warmRem) {
+      applyConfigForm(warmRem);
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      if (!warmRem) setLoading(true);
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+        () => remiseriaService.getAll({ lite: true }),
+        { staleTimeMs: 120_000 }
+      );
+      if (response.success && response.data && response.data.length > 0) {
+        const miRemiseria = pickMiRemiseria(response.data);
+        if (miRemiseria) applyConfigForm(miRemiseria);
+      } else if (!warmRem) {
+        toast.error('No se encontró una remisería asociada a tu cuenta');
+      }
+    } catch (error) {
+      console.error('Error loading config:', error);
+      if (!warmRem) toast.error('Error al cargar la configuración');
+    } finally {
+      setLoading(false);
+    }
+  }, [getCached, fetchResource, pickMiRemiseria, applyConfigForm]);
+
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
       router.push('/login');
       return;
     }
     loadConfig();
-  }, [user, router]);
-
-  const loadConfig = async () => {
-    try {
-      setLoading(true);
-      const response = await remiseriaService.getAll();
-      if (response.success && response.data && response.data.length > 0) {
-        // Encontrar la remisería asignada al dueño actual
-        const miRemiseria = response.data.find(r => 
-          r.duenios?.some(d => d.duenioId === user?.duenio?.id)
-        ) || response.data[0];
-
-        setRemiseria(miRemiseria);
-        reset({
-          nombreFantasia: miRemiseria.nombreFantasia || 'Remises Bruno',
-          razonSocial: miRemiseria.razonSocial || 'Remises Bruno S.R.L.',
-          cuit: miRemiseria.cuit || '',
-          direccion: miRemiseria.direccion || '',
-          telefono: miRemiseria.telefono || '',
-          bajadaBandera: miRemiseria.bajadaBandera || 3500,
-          valorKm: miRemiseria.valorKm || 1200,
-          valorHoraEspera: miRemiseria.valorHoraEspera || 10000,
-          comisionPorcentaje: miRemiseria.comisionPorcentaje || 30.0,
-          comisionDuenioAuto: miRemiseria.comisionDuenioAuto || 20.0,
-          agenciaAbierta: miRemiseria.agenciaAbierta !== false,
-          mensajeCierre: miRemiseria.mensajeCierre || 'La agencia permanecerá cerrada por festividades desde el 24/12 a las 18:00 hs hasta el 25/12 a las 19:00 hs. ¡Felices Fiestas!',
-          cierreAutomaticoFiestas: miRemiseria.cierreAutomaticoFiestas !== false,
-        });
-      } else {
-        toast.error('No se encontró una remisería asociada a tu cuenta');
-      }
-    } catch (error) {
-      console.error('Error loading config:', error);
-      toast.error('Error al cargar la configuración');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [user, router, loadConfig]);
 
   const onSubmit = async (data: UpdateRemiseriaData) => {
     if (!remiseria) return;
@@ -104,6 +132,7 @@ export default function ConfiguracionPage() {
 
       const response = await remiseriaService.update(remiseria.id, payload);
       if (response.success && response.data) {
+        invalidate(['remiserias:']);
         setRemiseria(response.data);
         reset(payload);
         toast.success('¡Configuración y precios actualizados exitosamente!', {

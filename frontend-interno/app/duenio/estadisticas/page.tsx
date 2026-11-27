@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { remiseriaService } from '@/lib/api';
 import { Remiseria } from '@/types';
 import { BarChart3, ArrowLeft, Building, TrendingUp, Users, Calendar } from 'lucide-react';
@@ -11,8 +12,53 @@ import { toast } from 'react-hot-toast';
 export default function EstadisticasPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [remiserias, setRemiserias] = useState<Remiseria[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, fetchResource } = useDuenioData();
+
+  const filterUserRems = useCallback((list: Remiseria[] | undefined | null) => {
+    if (!list) return [];
+    return list.filter(remiseria =>
+      !remiseria.duenios?.length || remiseria.duenios.some(duenio => duenio.duenioId === user?.duenio?.id)
+    );
+  }, [user?.duenio?.id]);
+
+  const [remiserias, setRemiserias] = useState<Remiseria[]>(() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return cached?.data?.success ? filterUserRems(cached.data.data) : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    return !cached?.data?.success;
+  });
+
+  const loadRemiserias = useCallback(async () => {
+    const cached = getCached<any>(DUENIO_CACHE_KEYS.REMISERIAS_LITE, 120_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm) {
+      setRemiserias(filterUserRems(cached!.data.data));
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      if (!hasWarm) setLoading(true);
+      const response = await fetchResource(
+        DUENIO_CACHE_KEYS.REMISERIAS_LITE,
+        () => remiseriaService.getAll({ lite: true }),
+        { staleTimeMs: 120_000 }
+      );
+      
+      if (response.success && response.data) {
+        setRemiserias(filterUserRems(response.data));
+      } else if (!hasWarm) {
+        toast.error('Error al cargar remiserías');
+      }
+    } catch (error) {
+      console.error('Error loading remiserias:', error);
+      if (!hasWarm) toast.error('Error al cargar remiserías');
+    } finally {
+      setLoading(false);
+    }
+  }, [getCached, fetchResource, filterUserRems]);
 
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
@@ -21,29 +67,7 @@ export default function EstadisticasPage() {
     }
 
     loadRemiserias();
-  }, [user, router]);
-
-  const loadRemiserias = async () => {
-    try {
-      setLoading(true);
-      const response = await remiseriaService.getAll();
-      
-      if (response.success && response.data) {
-                // Filtrar solo las remiserías del dueño actual
-        const userRemiserias = response.data.filter(remiseria =>
-          remiseria.duenios?.some(duenio => duenio.duenioId === user?.duenio?.id)
-        );
-        setRemiserias(userRemiserias);
-      } else {
-        toast.error('Error al cargar remiserías');
-      }
-    } catch (error) {
-      console.error('Error loading remiserias:', error);
-      toast.error('Error al cargar remiserías');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [user, router, loadRemiserias]);
 
   const activeRemiserias = remiserias.filter(r => r.estado).length;
   const totalRemiserias = remiserias.length;
@@ -118,7 +142,9 @@ export default function EstadisticasPage() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Miembro desde</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {new Date(user?.duenio?.createdAt || '').getFullYear()}
+                  {user?.duenio?.createdAt
+                    ? new Date(user.duenio.createdAt).getFullYear()
+                    : new Date().getFullYear()}
                 </p>
               </div>
             </div>

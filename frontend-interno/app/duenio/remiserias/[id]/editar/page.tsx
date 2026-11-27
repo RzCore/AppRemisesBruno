@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { remiseriaService } from '@/lib/api';
 import { Remiseria, UpdateRemiseriaData } from '@/types';
 import { Building, ArrowLeft, Save } from 'lucide-react';
@@ -14,9 +15,17 @@ export default function EditarRemiseriaPage() {
   const router = useRouter();
   const params = useParams();
   const remiseriaId = params.id as string;
+  const { getCached, fetchResource, invalidate } = useDuenioData();
+  const cacheKey = DUENIO_CACHE_KEYS.REMISERIA_BY_ID(remiseriaId);
   
-  const [remiseria, setRemiseria] = useState<Remiseria | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [remiseria, setRemiseria] = useState<Remiseria | null>(() => {
+    const cached = getCached<any>(cacheKey, 120_000);
+    return cached?.data?.success ? cached.data.data : null;
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const cached = getCached<any>(cacheKey, 120_000);
+    return !cached?.data?.success;
+  });
   const [isSaving, setIsSaving] = useState(false);
 
   const {
@@ -26,19 +35,37 @@ export default function EditarRemiseriaPage() {
     reset,
   } = useForm<UpdateRemiseriaData>();
 
-  useEffect(() => {
-    if (!user || user.rol !== 'DUENIO') {
-      router.push('/login');
-      return;
+  const applyRemiseriaForm = useCallback((rem: Remiseria) => {
+    setRemiseria(rem);
+    reset({
+      nombreFantasia: rem.nombreFantasia,
+      razonSocial: rem.razonSocial,
+      direccion: rem.direccion,
+      telefono: rem.telefono,
+    });
+  }, [reset]);
+
+  const loadRemiseria = useCallback(async () => {
+    const cached = getCached<any>(cacheKey, 120_000);
+    const hasWarm = Boolean(cached?.data?.success && cached.data.data);
+    if (hasWarm) {
+      const hasAccess = cached!.data.data.duenios?.some(
+        (duenio: any) => duenio.duenioId === user?.duenio?.id
+      );
+      if (hasAccess) {
+        applyRemiseriaForm(cached!.data.data);
+        setLoading(false);
+        if (!cached!.isStale) return;
+      }
     }
 
-    loadRemiseria();
-  }, [user, router, remiseriaId]);
-
-  const loadRemiseria = async () => {
     try {
-      setLoading(true);
-      const response = await remiseriaService.getById(remiseriaId);
+      if (!hasWarm) setLoading(true);
+      const response = await fetchResource(
+        cacheKey,
+        () => remiseriaService.getById(remiseriaId),
+        { staleTimeMs: 120_000 }
+      );
       
       if (response.success && response.data) {
         // Verificar que el dueño tenga acceso a esta remisería
@@ -52,26 +79,30 @@ export default function EditarRemiseriaPage() {
           return;
         }
         
-        setRemiseria(response.data);
-        // Prellenar el formulario
-        reset({
-          nombreFantasia: response.data.nombreFantasia,
-          razonSocial: response.data.razonSocial,
-          direccion: response.data.direccion,
-          telefono: response.data.telefono,
-        });
-      } else {
+        applyRemiseriaForm(response.data);
+      } else if (!hasWarm) {
         toast.error('Error al cargar remisería');
         router.push('/duenio/dashboard');
       }
     } catch (error) {
       console.error('Error loading remiseria:', error);
-      toast.error('Error al cargar remisería');
-      router.push('/duenio/dashboard');
+      if (!hasWarm) {
+        toast.error('Error al cargar remisería');
+        router.push('/duenio/dashboard');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [cacheKey, getCached, fetchResource, remiseriaId, user?.duenio?.id, router, applyRemiseriaForm]);
+
+  useEffect(() => {
+    if (!user || user.rol !== 'DUENIO') {
+      router.push('/login');
+      return;
+    }
+
+    loadRemiseria();
+  }, [user, router, loadRemiseria]);
 
   const onSubmit = async (data: UpdateRemiseriaData) => {
     setIsSaving(true);
@@ -79,6 +110,7 @@ export default function EditarRemiseriaPage() {
       const response = await remiseriaService.update(remiseriaId, data);
       
       if (response.success && response.data) {
+        invalidate(['remiserias:']);
         toast.success('Remisería actualizada exitosamente');
         router.push(`/duenio/remiserias/${remiseriaId}`);
       } else {

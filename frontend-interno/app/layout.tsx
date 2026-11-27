@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import 'leaflet/dist/leaflet.css'
-import '../styles/leaflet.css'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { Toaster } from 'react-hot-toast'
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister'

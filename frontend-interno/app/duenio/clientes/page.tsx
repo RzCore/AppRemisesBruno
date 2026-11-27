@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { duenioClienteService, coordinadorDashboardService } from '@/lib/api';
 import { Cliente, Viaje, PagoCuentaCorriente } from '@/types';
 import {
@@ -34,9 +35,16 @@ import { toast } from 'react-hot-toast';
 export default function DuenioClientesPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource, invalidate } = useDuenioData();
 
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [clientes, setClientes] = useState<Cliente[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CLIENTES('todas::'), 60_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.CLIENTES('todas::'), 60_000);
+    return !c?.data?.success;
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [filtroCC, setFiltroCC] = useState<'todas' | 'habilitadas' | 'con_deuda'>('todas');
 
@@ -136,7 +144,8 @@ export default function DuenioClientesPage() {
         });
         setSugerenciasDireccionEmpresa([]);
         setDireccionEmpresaSeleccionada(false);
-        cargarClientes();
+        invalidate(['clientes:']);
+        cargarClientes(true);
       } else {
         toast.error(res.message || 'No se pudo crear la empresa');
       }
@@ -179,34 +188,48 @@ export default function DuenioClientesPage() {
   });
   const [guardandoConfigCC, setGuardandoConfigCC] = useState(false);
 
+  const cargarClientes = useCallback(async (force = false) => {
+    const cacheKey = DUENIO_CACHE_KEYS.CLIENTES(`${filtroCC}::${searchTerm.trim()}`);
+    const cached = getCached<any>(cacheKey, 60_000);
+    const hasWarm = Boolean(cached?.data?.success);
+    if (hasWarm && !force) {
+      setClientes(cached!.data.data || []);
+      setLoading(false);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      if (!hasWarm && !force) setLoading(true);
+      const res = await fetchResource(
+        cacheKey,
+        () =>
+          duenioClienteService.getClientes({
+            q: searchTerm || undefined,
+            filtroCC: filtroCC !== 'todas' ? filtroCC : undefined,
+          }),
+        { staleTimeMs: 60_000, force }
+      );
+
+      if (res.success && res.data) {
+        setClientes(res.data);
+      } else if (!hasWarm) {
+        toast.error(res.message || 'Error al cargar clientes');
+      }
+    } catch (error) {
+      console.error('Error cargando clientes:', error);
+      if (!hasWarm) toast.error('Error de red al cargar clientes');
+    } finally {
+      setLoading(false);
+    }
+  }, [filtroCC, searchTerm, getCached, fetchResource]);
+
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
       router.push('/login');
       return;
     }
-    cargarClientes();
-  }, [user, router, filtroCC]);
-
-  const cargarClientes = async () => {
-    try {
-      setLoading(true);
-      const res = await duenioClienteService.getClientes({
-        q: searchTerm || undefined,
-        filtroCC: filtroCC !== 'todas' ? filtroCC : undefined,
-      });
-
-      if (res.success && res.data) {
-        setClientes(res.data);
-      } else {
-        toast.error(res.message || 'Error al cargar clientes');
-      }
-    } catch (error) {
-      console.error('Error cargando clientes:', error);
-      toast.error('Error de red al cargar clientes');
-    } finally {
-      setLoading(false);
-    }
-  };
+    cargarClientes(false);
+  }, [user, router, filtroCC, cargarClientes]);
 
   const handleToggleCC = async (cliente: Cliente) => {
     // Si la va a activar, abrir directamente el modal para fijar tarifa y límite
@@ -225,8 +248,9 @@ export default function DuenioClientesPage() {
       });
 
       if (res.success) {
+        invalidate(['clientes:']);
         toast.success(`Cuenta corriente desactivada para ${cliente.nombre}`);
-        cargarClientes();
+        cargarClientes(true);
       } else {
         toast.error(res.message || 'Error al desactivar cuenta corriente');
       }
@@ -291,9 +315,10 @@ export default function DuenioClientesPage() {
       });
 
       if (res.success) {
+        invalidate(['clientes:']);
         toast.success(res.message || 'Abono registrado con éxito');
         setModalPagoOpen(false);
-        cargarClientes();
+        cargarClientes(true);
         if (modalViajesOpen) {
           abrirModalViajes(clienteSeleccionado);
         }
@@ -343,9 +368,10 @@ export default function DuenioClientesPage() {
       });
 
       if (res.success) {
+        invalidate(['clientes:']);
         toast.success(res.message || 'Configuración guardada exitosamente');
         setModalConfigCCOpen(false);
-        cargarClientes();
+        cargarClientes(true);
       } else {
         toast.error(res.message || 'Error al actualizar cuenta corriente');
       }
@@ -432,7 +458,7 @@ export default function DuenioClientesPage() {
             <span>🏢 + Nueva Empresa / Institución</span>
           </button>
           <button
-            onClick={cargarClientes}
+            onClick={() => cargarClientes(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-sm transition-colors"
           >
             <RefreshCw className="w-4 h-4" />

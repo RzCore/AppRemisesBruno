@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import { duenioReportesService } from '@/lib/api';
 import { 
@@ -28,21 +29,67 @@ interface SemanaDesglose {
 export default function InformeMensualPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { getCached, fetchResource } = useDuenioData();
   useAppTracking('DUENIO_INFORME_MENSUAL');
 
-  const [remiserias, setRemiserias] = useState<{ id: string; nombre: string }[]>([]);
+  const initialRep = getCached<any>(DUENIO_CACHE_KEYS.INFORME_MENSUAL('todas'), 45_000);
+  const initialData = initialRep?.data?.success ? initialRep.data.data : null;
+
+  const [remiserias, setRemiserias] = useState<{ id: string; nombre: string }[]>(() => {
+    const c = getCached<any>(DUENIO_CACHE_KEYS.MIS_REMISERIAS, 120_000);
+    return c?.data?.success && c.data.data ? c.data.data : [];
+  });
   const [selectedRemiseria, setSelectedRemiseria] = useState<string>('todas');
   
-  const [totalMes, setTotalMes] = useState<number>(0);
-  const [totalMesAnterior, setTotalMesAnterior] = useState<number>(0);
-  const [variacion, setVariacion] = useState<number>(0);
-  const [viajesCompletados, setViajesCompletados] = useState<number>(0);
-  const [ticketPromedio, setTicketPromedio] = useState<number>(0);
-  const [desgloseSemanas, setDesgloseSemanas] = useState<SemanaDesglose[]>([]);
-  const [choferDestacado, setChoferDestacado] = useState<{ nombre: string; total: number } | null>(null);
+  const [totalMes, setTotalMes] = useState<number>(() => initialData?.totalMes ?? 0);
+  const [totalMesAnterior, setTotalMesAnterior] = useState<number>(() => initialData?.totalMesAnterior ?? 0);
+  const [variacion, setVariacion] = useState<number>(() => initialData?.variacion ?? 0);
+  const [viajesCompletados, setViajesCompletados] = useState<number>(() => initialData?.viajesCompletados ?? 0);
+  const [ticketPromedio, setTicketPromedio] = useState<number>(() => initialData?.ticketPromedio ?? 0);
+  const [desgloseSemanas, setDesgloseSemanas] = useState<SemanaDesglose[]>(() => initialData?.desgloseSemanas ?? []);
+  const [choferDestacado, setChoferDestacado] = useState<{ nombre: string; total: number } | null>(() => initialData?.choferDestacado ?? null);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !initialData);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  const applyData = useCallback((d: any) => {
+    setTotalMes(d.totalMes);
+    setTotalMesAnterior(d.totalMesAnterior);
+    setVariacion(d.variacion);
+    setViajesCompletados(d.viajesCompletados);
+    setTicketPromedio(d.ticketPromedio);
+    setDesgloseSemanas(d.desgloseSemanas || []);
+    setChoferDestacado(d.choferDestacado);
+  }, []);
+
+  const fetchReportData = useCallback(async (remId: string, force = false) => {
+    const cacheKey = DUENIO_CACHE_KEYS.INFORME_MENSUAL(remId);
+    const cached = getCached<any>(cacheKey, 45_000);
+    const hasWarm = Boolean(cached?.data?.success && cached.data.data);
+    if (hasWarm && !force) {
+      applyData(cached!.data.data);
+      if (!cached!.isStale) return;
+    }
+
+    try {
+      setLoadingReport(true);
+      const response = await fetchResource(
+        cacheKey,
+        () => duenioReportesService.getInformeMensual(remId === 'todas' ? undefined : remId),
+        { staleTimeMs: 45_000, force }
+      );
+      if (response.success && response.data) {
+        applyData(response.data);
+      } else if (!hasWarm) {
+        toast.error(response.message || 'Error al obtener informe mensual');
+      }
+    } catch (error) {
+      console.error('Error al obtener informe mensual:', error);
+      if (!hasWarm) toast.error('Error al conectar con el servidor');
+    } finally {
+      setLoadingReport(false);
+    }
+  }, [getCached, fetchResource, applyData]);
 
   useEffect(() => {
     if (!user || user.rol !== 'DUENIO') {
@@ -51,55 +98,51 @@ export default function InformeMensualPage() {
     }
 
     const initData = async () => {
+      const cachedRems = getCached<any>(DUENIO_CACHE_KEYS.MIS_REMISERIAS, 120_000);
+      const cachedRep = getCached<any>(DUENIO_CACHE_KEYS.INFORME_MENSUAL('todas'), 45_000);
+      const hasWarmRep = Boolean(cachedRep?.data?.success && cachedRep.data.data);
+
+      if (cachedRems?.data?.success && cachedRems.data.data) {
+        setRemiserias(cachedRems.data.data);
+      }
+      if (hasWarmRep) {
+        applyData(cachedRep!.data.data);
+        setLoading(false);
+        if (!cachedRep!.isStale && cachedRems && !cachedRems.isStale) return;
+      }
+
       try {
-        setLoading(true);
-        const resRem = await duenioReportesService.getMisRemiserias();
+        if (!hasWarmRep) setLoading(true);
+        const [resRem] = await Promise.all([
+          fetchResource(
+            DUENIO_CACHE_KEYS.MIS_REMISERIAS,
+            () => duenioReportesService.getMisRemiserias(),
+            { staleTimeMs: 120_000 }
+          ),
+          fetchReportData('todas', false),
+        ]);
         if (resRem.success && resRem.data) {
           setRemiserias(resRem.data);
         }
-        await fetchReportData('todas');
       } catch (error) {
         console.error('Error inicializando informe mensual:', error);
-        toast.error('Error al cargar datos iniciales');
+        if (!hasWarmRep) toast.error('Error al cargar datos iniciales');
       } finally {
         setLoading(false);
       }
     };
 
     initData();
-  }, [user, router]);
-
-  const fetchReportData = async (remId: string) => {
-    try {
-      setLoadingReport(true);
-      const response = await duenioReportesService.getInformeMensual(remId === 'todas' ? undefined : remId);
-      if (response.success && response.data) {
-        setTotalMes(response.data.totalMes);
-        setTotalMesAnterior(response.data.totalMesAnterior);
-        setVariacion(response.data.variacion);
-        setViajesCompletados(response.data.viajesCompletados);
-        setTicketPromedio(response.data.ticketPromedio);
-        setDesgloseSemanas(response.data.desgloseSemanas);
-        setChoferDestacado(response.data.choferDestacado);
-      } else {
-        toast.error(response.message || 'Error al obtener informe mensual');
-      }
-    } catch (error) {
-      console.error('Error al obtener informe mensual:', error);
-      toast.error('Error al conectar con el servidor');
-    } finally {
-      setLoadingReport(false);
-    }
-  };
+  }, [user, router, getCached, fetchResource, fetchReportData, applyData]);
 
   const handleRemiseriaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setSelectedRemiseria(value);
-    fetchReportData(value);
+    fetchReportData(value, false);
   };
 
   const handleRefresh = () => {
-    fetchReportData(selectedRemiseria);
+    fetchReportData(selectedRemiseria, true);
     toast.success('Auditoría mensual recalculada');
   };
 

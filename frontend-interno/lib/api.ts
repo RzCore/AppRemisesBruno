@@ -360,9 +360,11 @@ export const remiseriaService = {
       };
     }
   },
-  getAll: async (): Promise<ApiResponse<Remiseria[]>> => {
+  getAll: async (params?: { lite?: boolean }): Promise<ApiResponse<Remiseria[]>> => {
     try {
-      const response = await api.get('/remiserias');
+      const response = await api.get('/remiserias', {
+        params: params?.lite ? { lite: 'true' } : undefined,
+      });
       return handleApiResponse<Remiseria[]>(response);
     } catch (error: any) {
       return {
@@ -1775,9 +1777,16 @@ export const coordinadorDashboardService = {
     }
   },
 
-  getHistorialDuenio: async (): Promise<ApiResponse<any[]>> => {
+  getHistorialDuenio: async (params?: { summary?: boolean; limit?: number }): Promise<ApiResponse<any[]>> => {
     try {
-      const response = await api.get('/coordinator-dashboard/liquidaciones/duenio/historial');
+      const response = await api.get('/coordinator-dashboard/liquidaciones/duenio/historial', {
+        params: params
+          ? {
+              ...(params.summary ? { summary: 'true' } : {}),
+              ...(params.limit ? { limit: params.limit } : {}),
+            }
+          : undefined,
+      });
       return handleApiResponse<any[]>(response);
     } catch (error: any) {
       return {

@@ -21,6 +21,7 @@ import {
   coordinadorDashboardService,
 } from '@/lib/api';
 import { evaluarDocumentacionClient } from '@/lib/documentacionUtils';
+import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 
 type NotificationSeverity = 'critical' | 'warning' | 'info';
 
@@ -35,13 +36,14 @@ interface OwnerNotification {
 }
 
 export default function DuenioNotifications() {
+  const { fetchResource } = useDuenioData();
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notifications, setNotifications] = useState<OwnerNotification[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const loadNotifications = useCallback(async (silent = true) => {
+  const loadNotifications = useCallback(async (silent = true, force = false) => {
     if (!silent) setLoading(true);
     try {
       const [
@@ -51,11 +53,31 @@ export default function DuenioNotifications() {
         vehiculosRes,
         liquidacionesRes,
       ] = await Promise.allSettled([
-        artEmpresaService.getAll(),
-        artEmpresaService.getViajesProgramados({ estado: 'PENDIENTE' }),
-        choferService.getAll(),
-        vehiculoService.getAll(),
-        coordinadorDashboardService.getHistorialDuenio(),
+        fetchResource(
+          DUENIO_CACHE_KEYS.ART_EMPRESAS,
+          () => artEmpresaService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.ART_VIAJES_PROGRAMADOS,
+          () => artEmpresaService.getViajesProgramados(),
+          { staleTimeMs: 45_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.CHOFERES,
+          () => choferService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.VEHICULOS,
+          () => vehiculoService.getAll(),
+          { staleTimeMs: 60_000, force }
+        ),
+        fetchResource(
+          DUENIO_CACHE_KEYS.LIQUIDACIONES_SUMMARY,
+          () => coordinadorDashboardService.getHistorialDuenio({ summary: true }),
+          { staleTimeMs: 45_000, force }
+        ),
       ]);
 
       const items: OwnerNotification[] = [];
@@ -284,11 +306,11 @@ export default function DuenioNotifications() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchResource]);
 
   useEffect(() => {
-    loadNotifications(true);
-    const interval = setInterval(() => loadNotifications(true), 90_000);
+    loadNotifications(true, false);
+    const interval = setInterval(() => loadNotifications(true, true), 90_000);
     return () => clearInterval(interval);
   }, [loadNotifications]);
 
@@ -314,7 +336,7 @@ export default function DuenioNotifications() {
     const next = !isOpen;
     setIsOpen(next);
     if (next) {
-      loadNotifications(false);
+      loadNotifications(false, false);
     }
   };
 
@@ -405,7 +427,7 @@ export default function DuenioNotifications() {
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => loadNotifications(false)}
+                onClick={() => loadNotifications(false, true)}
                 disabled={loading}
                 className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
                 title="Actualizar notificaciones"

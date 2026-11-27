@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthenticatedRequest } from '../types';
+import { getDuenioRemiseriasInfo } from '../lib/duenioLookupCache';
 
 export const reportesController = {
   // Obtener remiserías asociadas al dueño para selectores
@@ -11,32 +12,12 @@ export const reportesController = {
         return res.status(401).json({ success: false, message: 'No autorizado' });
       }
 
-      const duenio = await prisma.duenio.findFirst({
-        where: { userId: duenioUserId },
-        include: {
-          remiserias: {
-            include: {
-              remiseria: {
-                select: {
-                  id: true,
-                  nombreFantasia: true
-                }
-              }
-            }
-          }
-        }
-      });
-
-      if (!duenio) {
+      const duenioInfo = await getDuenioRemiseriasInfo(duenioUserId);
+      if (!duenioInfo) {
         return res.status(404).json({ success: false, message: 'Dueño no encontrado' });
       }
 
-      const listado = duenio.remiserias.map(rd => ({
-        id: rd.remiseria.id,
-        nombre: rd.remiseria.nombreFantasia
-      }));
-
-      res.json({ success: true, data: listado });
+      res.json({ success: true, data: duenioInfo.remiseriasBasic });
     } catch (error) {
       console.error('Error al obtener remiserías del dueño:', error);
       res.status(500).json({ success: false, message: 'Error interno del servidor' });
@@ -53,17 +34,12 @@ export const reportesController = {
         return res.status(401).json({ success: false, message: 'No autorizado' });
       }
 
-      // Validar dueño y sus remiserías
-      const duenio = await prisma.duenio.findFirst({
-        where: { userId: duenioUserId },
-        include: { remiserias: true }
-      });
-
-      if (!duenio) {
+      const duenioInfo = await getDuenioRemiseriasInfo(duenioUserId);
+      if (!duenioInfo) {
         return res.status(404).json({ success: false, message: 'Dueño no encontrado' });
       }
 
-      const misRemiseriaIds = duenio.remiserias.map(rd => rd.remiseriaId);
+      const misRemiseriaIds = duenioInfo.remiseriaIds;
 
       // Multi-tenant check
       let targetRemiseriaIds = misRemiseriaIds;
@@ -160,16 +136,12 @@ export const reportesController = {
         return res.status(401).json({ success: false, message: 'No autorizado' });
       }
 
-      const duenio = await prisma.duenio.findFirst({
-        where: { userId: duenioUserId },
-        include: { remiserias: true }
-      });
-
-      if (!duenio) {
+      const duenioInfo = await getDuenioRemiseriasInfo(duenioUserId);
+      if (!duenioInfo) {
         return res.status(404).json({ success: false, message: 'Dueño no encontrado' });
       }
 
-      const misRemiseriaIds = duenio.remiserias.map(rd => rd.remiseriaId);
+      const misRemiseriaIds = duenioInfo.remiseriaIds;
 
       let targetRemiseriaIds = misRemiseriaIds;
       if (remiseriaId && typeof remiseriaId === 'string' && remiseriaId !== 'todas') {
@@ -179,26 +151,45 @@ export const reportesController = {
         targetRemiseriaIds = [remiseriaId];
       }
 
-      // Obtener rango de la semana actual (últimos 7 días para gráfico continuo)
+      // Obtener rango de la semana actual (últimos 7 días para gráfico continuo) y semana anterior
       const hoy = new Date();
       const hace7Dias = new Date();
       hace7Dias.setDate(hoy.getDate() - 6);
       hace7Dias.setHours(0, 0, 0, 0);
 
-      const viajes = await prisma.viaje.findMany({
-        where: {
-          remiseriaId: { in: targetRemiseriaIds },
-          estado: 'COMPLETADO',
-          fecha: {
-            gte: hace7Dias,
-            lte: hoy
+      const hace14Dias = new Date();
+      hace14Dias.setDate(hoy.getDate() - 13);
+      hace14Dias.setHours(0, 0, 0, 0);
+
+      const [viajes, aggSemanaPasada] = await Promise.all([
+        prisma.viaje.findMany({
+          where: {
+            remiseriaId: { in: targetRemiseriaIds },
+            estado: 'COMPLETADO',
+            fecha: {
+              gte: hace7Dias,
+              lte: hoy
+            }
+          },
+          select: {
+            precio: true,
+            fecha: true
           }
-        },
-        select: {
-          precio: true,
-          fecha: true
-        }
-      });
+        }),
+        prisma.viaje.aggregate({
+          where: {
+            remiseriaId: { in: targetRemiseriaIds },
+            estado: 'COMPLETADO',
+            fecha: {
+              gte: hace14Dias,
+              lt: hace7Dias
+            }
+          },
+          _sum: {
+            precio: true
+          }
+        })
+      ]);
 
       // Estructurar distribución de los últimos 7 días
       const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -226,27 +217,8 @@ export const reportesController = {
         });
       }
 
-      // Calcular comparación con la semana anterior
-      const hace14Dias = new Date();
-      hace14Dias.setDate(hoy.getDate() - 13);
-      hace14Dias.setHours(0, 0, 0, 0);
-
-      const viajesSemanaPasada = await prisma.viaje.findMany({
-        where: {
-          remiseriaId: { in: targetRemiseriaIds },
-          estado: 'COMPLETADO',
-          fecha: {
-            gte: hace14Dias,
-            lt: hace7Dias
-          }
-        },
-        select: {
-          precio: true
-        }
-      });
-
       const totalEstaSemana = viajes.reduce((sum, v) => sum + Number(v.precio), 0);
-      const totalSemanaPasada = viajesSemanaPasada.reduce((sum, v) => sum + Number(v.precio), 0);
+      const totalSemanaPasada = Number(aggSemanaPasada._sum.precio || 0);
       
       let variacionPorcentual = 0;
       if (totalSemanaPasada > 0) {
@@ -283,16 +255,12 @@ export const reportesController = {
         return res.status(401).json({ success: false, message: 'No autorizado' });
       }
 
-      const duenio = await prisma.duenio.findFirst({
-        where: { userId: duenioUserId },
-        include: { remiserias: true }
-      });
-
-      if (!duenio) {
+      const duenioInfo = await getDuenioRemiseriasInfo(duenioUserId);
+      if (!duenioInfo) {
         return res.status(404).json({ success: false, message: 'Dueño no encontrado' });
       }
 
-      const misRemiseriaIds = duenio.remiserias.map(rd => rd.remiseriaId);
+      const misRemiseriaIds = duenioInfo.remiseriaIds;
 
       let targetRemiseriaIds = misRemiseriaIds;
       if (remiseriaId && typeof remiseriaId === 'string' && remiseriaId !== 'todas') {
@@ -302,32 +270,48 @@ export const reportesController = {
         targetRemiseriaIds = [remiseriaId];
       }
 
-      // Rango del mes actual
+      // Rango del mes actual y mes anterior
       const hoy = new Date();
       const startOfMonth = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
       const endOfMonth = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59, 999);
+      const startOfLastMonth = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+      const endOfLastMonth = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59, 999);
 
-      // Viajes completados este mes
-      const viajes = await prisma.viaje.findMany({
-        where: {
-          remiseriaId: { in: targetRemiseriaIds },
-          estado: 'COMPLETADO',
-          fecha: {
-            gte: startOfMonth,
-            lte: endOfMonth
-          }
-        },
-        select: {
-          precio: true,
-          fecha: true,
-          chofer: {
-            select: {
-              nombre: true,
-              apellido: true
+      const [viajes, aggMesAnterior] = await Promise.all([
+        prisma.viaje.findMany({
+          where: {
+            remiseriaId: { in: targetRemiseriaIds },
+            estado: 'COMPLETADO',
+            fecha: {
+              gte: startOfMonth,
+              lte: endOfMonth
+            }
+          },
+          select: {
+            precio: true,
+            fecha: true,
+            chofer: {
+              select: {
+                nombre: true,
+                apellido: true
+              }
             }
           }
-        }
-      });
+        }),
+        prisma.viaje.aggregate({
+          where: {
+            remiseriaId: { in: targetRemiseriaIds },
+            estado: 'COMPLETADO',
+            fecha: {
+              gte: startOfLastMonth,
+              lte: endOfLastMonth
+            }
+          },
+          _sum: {
+            precio: true
+          }
+        })
+      ]);
 
       // Agrupar ingresos por semanas del mes
       const semanasDesglose: { semana: string; total: number }[] = [];
@@ -350,25 +334,7 @@ export const reportesController = {
         });
       }
 
-      // Comparación con el mes anterior
-      const startOfLastMonth = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-      const endOfLastMonth = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59, 999);
-
-      const viajesMesAnterior = await prisma.viaje.findMany({
-        where: {
-          remiseriaId: { in: targetRemiseriaIds },
-          estado: 'COMPLETADO',
-          fecha: {
-            gte: startOfLastMonth,
-            lte: endOfLastMonth
-          }
-        },
-        select: {
-          precio: true
-        }
-      });
-
-      const totalMesAnterior = viajesMesAnterior.reduce((sum, v) => sum + Number(v.precio), 0);
+      const totalMesAnterior = Number(aggMesAnterior._sum.precio || 0);
       let variacionMes = 0;
       if (totalMesAnterior > 0) {
         variacionMes = ((totalMes - totalMesAnterior) / totalMesAnterior) * 100;
@@ -420,16 +386,12 @@ export const reportesController = {
         return res.status(401).json({ success: false, message: 'No autorizado' });
       }
 
-      const duenio = await prisma.duenio.findFirst({
-        where: { userId: duenioUserId },
-        include: { remiserias: true }
-      });
-
-      if (!duenio) {
+      const duenioInfo = await getDuenioRemiseriasInfo(duenioUserId);
+      if (!duenioInfo) {
         return res.status(404).json({ success: false, message: 'Dueño no encontrado' });
       }
 
-      const misRemiseriaIds = duenio.remiserias.map(rd => rd.remiseriaId);
+      const misRemiseriaIds = duenioInfo.remiseriaIds;
 
       let targetRemiseriaIds = misRemiseriaIds;
       if (remiseriaId && typeof remiseriaId === 'string' && remiseriaId !== 'todas') {
@@ -439,50 +401,82 @@ export const reportesController = {
         targetRemiseriaIds = [remiseriaId];
       }
 
-      // Obtener todos los choferes de estas remiserías
-      const choferes = await prisma.chofer.findMany({
-        where: {
-          remiseriaId: { in: targetRemiseriaIds }
-        },
-        include: {
-          remiseria: {
-            select: {
-              nombreFantasia: true,
-              comisionPorcentaje: true
-            }
+      // Obtener choferes y agregaciones SQL en paralelo (sin transferir historial completo de viajes)
+      const [choferes, aggLargaDist, aggCortaDist] = await Promise.all([
+        prisma.chofer.findMany({
+          where: {
+            remiseriaId: { in: targetRemiseriaIds }
           },
-          viajes: {
-            where: {
-              estado: 'COMPLETADO'
-            },
-            select: {
-              precio: true,
-              distanciaKmConPasajero: true
+          select: {
+            id: true,
+            numeroChofer: true,
+            nombre: true,
+            apellido: true,
+            dni: true,
+            telefono: true,
+            esPropietario: true,
+            remiseria: {
+              select: {
+                nombreFantasia: true,
+                comisionPorcentaje: true
+              }
             }
           }
+        }),
+        prisma.viaje.groupBy({
+          by: ['choferId'],
+          where: {
+            remiseriaId: { in: targetRemiseriaIds },
+            estado: 'COMPLETADO',
+            choferId: { not: null },
+            distanciaKmConPasajero: { gte: 20 }
+          },
+          _count: { _all: true },
+          _sum: { precio: true }
+        }),
+        prisma.viaje.groupBy({
+          by: ['choferId'],
+          where: {
+            remiseriaId: { in: targetRemiseriaIds },
+            estado: 'COMPLETADO',
+            choferId: { not: null },
+            OR: [
+              { distanciaKmConPasajero: { lt: 20 } },
+              { distanciaKmConPasajero: null }
+            ]
+          },
+          _count: { _all: true },
+          _sum: { precio: true }
+        })
+      ]);
+
+      const largaMap = new Map<string, { count: number; sum: number }>();
+      for (const row of aggLargaDist) {
+        if (row.choferId) {
+          largaMap.set(row.choferId, { count: row._count._all, sum: Number(row._sum.precio || 0) });
         }
-      });
+      }
+
+      const cortaMap = new Map<string, { count: number; sum: number }>();
+      for (const row of aggCortaDist) {
+        if (row.choferId) {
+          cortaMap.set(row.choferId, { count: row._count._all, sum: Number(row._sum.precio || 0) });
+        }
+      }
 
       const liquidaciones = choferes.map(chofer => {
-        const viajesCompletados = chofer.viajes.length;
-        const facturacionBruta = chofer.viajes.reduce((sum, v) => sum + Number(v.precio), 0);
+        const larga = largaMap.get(chofer.id) || { count: 0, sum: 0 };
+        const corta = cortaMap.get(chofer.id) || { count: 0, sum: 0 };
+        const viajesCompletados = larga.count + corta.count;
+        const facturacionBruta = larga.sum + corta.sum;
 
         // Regla diferenciada por distancia: >= 20 km -> 15% agencia | < 20 km -> 20% agencia
-        let saldoAgencia = 0;
-        let comisionChofer = 0;
-
-        for (const v of chofer.viajes) {
-          const precio = Number(v.precio) || 0;
-          const km = Number(v.distanciaKmConPasajero) || 0;
-          const agenciaPct = km >= 20 ? 15 : 20;
-          const ag = (precio * agenciaPct) / 100;
-          saldoAgencia += ag;
-          if (chofer.esPropietario) {
-            comisionChofer += precio - ag;
-          } else {
-            comisionChofer += (precio * 30) / 100;
-          }
-        }
+        const saldoAgenciaLarga = (larga.sum * 15) / 100;
+        const saldoAgenciaCorta = (corta.sum * 20) / 100;
+        const saldoAgencia = saldoAgenciaLarga + saldoAgenciaCorta;
+        const comisionChofer = chofer.esPropietario
+          ? facturacionBruta - saldoAgencia
+          : (facturacionBruta * 30) / 100;
 
         const comisionAgenciaPct = facturacionBruta > 0
           ? Math.round((saldoAgencia / facturacionBruta) * 1000) / 10

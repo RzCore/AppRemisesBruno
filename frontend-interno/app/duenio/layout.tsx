@@ -27,6 +27,28 @@ import DuenioNotifications from '@/components/DuenioNotifications';
 import ThemeToggle from '@/components/ThemeToggle';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { ThemeModuleProvider } from '@/contexts/ThemeContext';
+import { DuenioDataProvider } from '@/contexts/DuenioDataContext';
+import { duenioCache } from '@/lib/duenioCache';
+
+const DUENIO_ROLES = ['DUENIO'];
+const PRIMARY_DUENIO_ROUTES = [
+  '/duenio/dashboard',
+  '/duenio/remiserias',
+  '/duenio/art',
+  '/duenio/clientes',
+  '/duenio/coordinadores',
+  '/duenio/choferes',
+  '/duenio/vehiculos',
+  '/duenio/liquidaciones',
+  '/duenio/gastos',
+  '/duenio/informes/mensual',
+  '/duenio/informes/diario',
+  '/duenio/informes/semanal',
+  '/duenio/informes/choferes',
+  '/duenio/configuracion',
+  '/duenio/estadisticas',
+  '/duenio/perfil',
+];
 
 export default function DuenioLayout({
   children,
@@ -74,6 +96,21 @@ export default function DuenioLayout({
     }
   }, [pathname]);
 
+  // Pre-cargar rutas principales del módulo del dueño en segundo plano
+  useEffect(() => {
+    if (!user || user.rol !== 'DUENIO') return;
+    const timer = setTimeout(() => {
+      PRIMARY_DUENIO_ROUTES.forEach((href) => {
+        try {
+          router.prefetch(href);
+        } catch {
+          // Ignorar errores de prefetch en dev
+        }
+      });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [user, router]);
+
   const navigation = [
     { name: 'Dashboard', href: '/duenio/dashboard', icon: LayoutDashboard },
     { name: 'Mi Remisería', href: '/duenio/remiserias', icon: Building2 },
@@ -89,14 +126,16 @@ export default function DuenioLayout({
   ];
 
   const handleLogout = () => {
+    duenioCache.clearAll();
     logout();
     router.push('/login');
     toast.success('Sesión cerrada correctamente');
   };
 
   return (
-    <ProtectedRoute allowedRoles={['DUENIO']}>
+    <ProtectedRoute allowedRoles={DUENIO_ROLES}>
       <ThemeModuleProvider>
+        <DuenioDataProvider>
         <div className="duenio-module h-screen h-[100dvh] bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-colors duration-200">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
@@ -233,6 +272,7 @@ export default function DuenioLayout({
           <DuenioBottomNav />
         </div>
       </div>
+      </DuenioDataProvider>
       </ThemeModuleProvider>
     </ProtectedRoute>
   );
