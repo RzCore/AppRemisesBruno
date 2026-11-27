@@ -32,7 +32,10 @@ import {
   CreateArtEmpresaData,
   UpdateArtEmpresaData,
   FacturacionArtResponse,
-  CrearViajeArtData
+  CrearViajeArtData,
+  GastoRemiseria,
+  CreateGastoRemiseriaData,
+  GastosRemiseriaResponse
 } from '@/types';
 
 export const getApiBaseUrl = (): string => {
@@ -2784,6 +2787,94 @@ export const pushService = {
       return {
         success: false,
         message: error.response?.data?.message || 'Error al enviar prueba push',
+      };
+    }
+  },
+};
+
+// Servicio de Gastos Operativos y Fijos de la Remisería (Panel del Dueño)
+export const gastoRemiseriaService = {
+  getAll: async (params?: {
+    desde?: string;
+    hasta?: string;
+    periodoMes?: string;
+    categoria?: string;
+    estado?: string;
+    metodoPago?: string;
+    esRecurrente?: string;
+    coordinadorId?: string;
+    q?: string;
+  }): Promise<ApiResponse<GastosRemiseriaResponse>> => {
+    try {
+      const response = await api.get('/gastos-remiseria', { params });
+      return handleApiResponse<GastosRemiseriaResponse>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al obtener gastos de la remisería',
+      };
+    }
+  },
+
+  create: async (data: CreateGastoRemiseriaData): Promise<ApiResponse<GastoRemiseria>> => {
+    try {
+      const response = await api.post('/gastos-remiseria', data);
+      return handleApiResponse<GastoRemiseria>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al registrar gasto',
+      };
+    }
+  },
+
+  update: async (id: string, data: Partial<CreateGastoRemiseriaData>): Promise<ApiResponse<GastoRemiseria>> => {
+    try {
+      const response = await api.put(`/gastos-remiseria/${id}`, data);
+      return handleApiResponse<GastoRemiseria>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al actualizar gasto',
+      };
+    }
+  },
+
+  cambiarEstado: async (
+    id: string,
+    data?: { estado?: 'PAGADO' | 'PENDIENTE'; metodoPago?: string; numeroComprobante?: string; fecha?: string }
+  ): Promise<ApiResponse<GastoRemiseria>> => {
+    try {
+      const response = await api.patch(`/gastos-remiseria/${id}/estado`, data || {});
+      return handleApiResponse<GastoRemiseria>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al cambiar estado del gasto',
+      };
+    }
+  },
+
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    try {
+      const response = await api.delete(`/gastos-remiseria/${id}`);
+      return handleApiResponse<void>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al eliminar gasto',
+      };
+    }
+  },
+
+  generarRecurrentes: async (mes: string): Promise<ApiResponse<{ creados: GastoRemiseria[]; cantidad: number }>> => {
+    try {
+      const response = await api.post('/gastos-remiseria/generar-recurrentes', { mes });
+      return handleApiResponse<{ creados: GastoRemiseria[]; cantidad: number }>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Error al generar gastos fijos del mes',
       };
     }
   },

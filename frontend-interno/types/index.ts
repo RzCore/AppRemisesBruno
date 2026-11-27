@@ -948,4 +948,114 @@ export interface CrearViajeArtData {
   precioArt: number;
   observaciones?: string;
 }
+
+// Gastos Operativos y Fijos de la Remisería (Panel del Dueño)
+export type CategoriaGastoRemiseria =
+  | 'SUELDO_COORDINADOR'
+  | 'SUELDO_OTRO'
+  | 'ALQUILER'
+  | 'LUZ'
+  | 'AGUA'
+  | 'GAS'
+  | 'INTERNET'
+  | 'TELEFONO'
+  | 'WHATSAPP'
+  | 'SISTEMA'
+  | 'IMPUESTOS'
+  | 'CONTADOR'
+  | 'SEGURO'
+  | 'MANTENIMIENTO_LOCAL'
+  | 'PUBLICIDAD'
+  | 'COMISIONES_BANCARIAS'
+  | 'INSUMOS_OFICINA'
+  | 'FLOTA_PROPIA'
+  | 'OTRO';
+
+export type MetodoPagoGasto =
+  | 'EFECTIVO'
+  | 'TRANSFERENCIA'
+  | 'DEBITO'
+  | 'CREDITO'
+  | 'MERCADOPAGO'
+  | 'CHEQUE'
+  | 'OTRO';
+
+export type EstadoGastoRemiseria = 'PAGADO' | 'PENDIENTE';
+
+export interface GastoRemiseria {
+  id: string;
+  remiseriaId: string;
+  coordinadorId?: string | null;
+  coordinador?: {
+    id: string;
+    nombre: string;
+    email: string;
+  } | null;
+  categoria: CategoriaGastoRemiseria | string;
+  concepto: string;
+  proveedor?: string | null;
+  monto: number;
+  fecha: string;
+  fechaVencimiento?: string | null;
+  estado: EstadoGastoRemiseria;
+  metodoPago: MetodoPagoGasto | string;
+  numeroComprobante?: string | null;
+  esRecurrente: boolean;
+  diaVencimientoMensual?: number | null;
+  periodoMes?: string | null;
+  observaciones?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateGastoRemiseriaData {
+  categoria: CategoriaGastoRemiseria | string;
+  concepto: string;
+  proveedor?: string;
+  monto: number;
+  fecha?: string;
+  fechaVencimiento?: string | null;
+  estado?: EstadoGastoRemiseria;
+  metodoPago?: MetodoPagoGasto | string;
+  numeroComprobante?: string;
+  esRecurrente?: boolean;
+  diaVencimientoMensual?: number | null;
+  periodoMes?: string;
+  coordinadorId?: string | null;
+  observaciones?: string;
+}
+
+export interface GastoRemiseriaResumen {
+  totalGeneral: number;
+  totalPagado: number;
+  totalPendiente: number;
+  totalVencido: number;
+  totalRecurrente: number;
+  cantidadGastos: number;
+  cantidadPendientes: number;
+  cantidadVencidos: number;
+  porCategoria: Array<{
+    categoria: string;
+    total: number;
+    cantidad: number;
+    porcentaje: number;
+  }>;
+  porMetodoPago: Array<{
+    metodoPago: string;
+    total: number;
+    cantidad: number;
+  }>;
+  porCoordinador: Array<{
+    coordinadorId: string;
+    nombre: string;
+    total: number;
+    cantidad: number;
+  }>;
+}
+
+export interface GastosRemiseriaResponse {
+  gastos: GastoRemiseria[];
+  resumen: GastoRemiseriaResumen;
+}
+
  

@@ -20,6 +20,7 @@ import {
   EyeOff,
   Phone,
   Briefcase,
+  Receipt,
   UserCheck,
   Settings,
   ChevronRight,
@@ -638,6 +639,18 @@ export default function DuenioDashboard() {
             </div>
             <span className="text-xs font-bold text-slate-800 leading-tight">ART</span>
             <span className="text-[10px] text-slate-400">Convenios</span>
+          </Link>
+
+          {/* Gastos de la Remisería */}
+          <Link
+            href="/duenio/gastos"
+            className="flex flex-col items-center justify-center p-3 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-rose-300 hover:shadow-sm active:scale-95 transition-all text-center group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mb-1.5 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+              <Receipt className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-slate-800 leading-tight">Gastos</span>
+            <span className="text-[10px] text-slate-400">Costos fijos</span>
           </Link>
 
           {/* Tarifas */}

@@ -16,7 +16,10 @@ import {
   LogOut,
   DollarSign,
   Briefcase,
-  UserCheck
+  UserCheck,
+  Receipt,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import DuenioBottomNav from '@/components/DuenioBottomNav';
@@ -34,7 +37,26 @@ export default function DuenioLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+
+  // Recordar preferencia de sidebar oculto/visible en escritorio
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem('duenio_sidebar_collapsed');
+      if (saved === 'true') setSidebarCollapsed(true);
+    }
+  }, []);
+
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('duenio_sidebar_collapsed', String(next));
+      }
+      return next;
+    });
+  };
 
   // Evitar saltos de scroll indeseados al entrar o navegar entre secciones
   useEffect(() => {
@@ -61,6 +83,7 @@ export default function DuenioLayout({
     { name: 'Choferes', href: '/duenio/choferes', icon: Truck },
     { name: 'Vehículos', href: '/duenio/vehiculos', icon: Car },
     { name: 'Liquidaciones', href: '/duenio/liquidaciones', icon: DollarSign },
+    { name: 'Gastos', href: '/duenio/gastos', icon: Receipt },
     { name: 'Reportes', href: '/duenio/informes/mensual', icon: BarChart3 },
     { name: 'Configuración', href: '/duenio/configuracion', icon: Settings },
   ];
@@ -84,11 +107,12 @@ export default function DuenioLayout({
         )}
 
         {/* Sidebar */}
-        <div className={`
-          fixed inset-y-0 left-0 z-50 w-72 h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:flex-shrink-0
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        <aside className={`
+          fixed inset-y-0 left-0 z-50 h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transform transition-all duration-300 ease-in-out lg:static lg:flex-shrink-0 overflow-hidden
+          ${sidebarOpen ? 'translate-x-0 w-72' : '-translate-x-full w-72'}
+          ${sidebarCollapsed ? 'lg:w-0 lg:border-r-0 lg:opacity-0 lg:pointer-events-none' : 'lg:translate-x-0 lg:w-72 lg:opacity-100'}
         `}>
-          <div className="h-full flex flex-col">
+          <div className="h-full w-72 flex flex-col">
             {/* Sidebar Header */}
             <div className="h-20 flex items-center px-6 border-b border-slate-100 dark:border-slate-800 shrink-0">
               <Link href="/duenio/dashboard" className="flex items-center gap-3">
@@ -148,7 +172,7 @@ export default function DuenioLayout({
               </button>
             </div>
           </div>
-        </div>
+        </aside>
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
@@ -164,8 +188,21 @@ export default function DuenioLayout({
                 </div>
               </div>
 
-              {/* Desktop Section Title */}
-              <div className="hidden lg:block">
+              {/* Desktop Sidebar Toggle & Section Title */}
+              <div className="hidden lg:flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={toggleSidebarCollapsed}
+                  className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white transition-colors"
+                  title={sidebarCollapsed ? 'Mostrar menú lateral' : 'Ocultar menú lateral'}
+                  aria-label={sidebarCollapsed ? 'Mostrar menú lateral' : 'Ocultar menú lateral'}
+                >
+                  {sidebarCollapsed ? (
+                    <PanelLeftOpen className="w-5 h-5" />
+                  ) : (
+                    <PanelLeftClose className="w-5 h-5" />
+                  )}
+                </button>
                 <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                   {navigation.find(n => pathname.startsWith(n.href))?.name || 'Dashboard'}
                 </h1>
@@ -187,7 +224,7 @@ export default function DuenioLayout({
 
           {/* Page Content with bottom padding for mobile bar */}
           <main ref={mainRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50/50 dark:bg-slate-950 pb-24 lg:pb-8 transition-colors">
-            <div className="max-w-7xl mx-auto p-3 sm:p-6 lg:p-8 min-w-0 w-full">
+            <div className={`${sidebarCollapsed ? 'max-w-full' : 'max-w-7xl'} mx-auto p-3 sm:p-6 lg:p-8 min-w-0 w-full transition-all duration-300`}>
               {children}
             </div>
           </main>

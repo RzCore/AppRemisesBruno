@@ -17,6 +17,7 @@ import {
   BarChart3,
   Settings,
   Briefcase,
+  Receipt,
   LogOut,
   ChevronRight
 } from 'lucide-react';
@@ -68,6 +69,7 @@ export default function DuenioBottomNav() {
     {
       category: 'Finanzas & ART',
       items: [
+        { name: 'Gastos de la Remisería', href: '/duenio/gastos', icon: Receipt, desc: 'Sueldos, alquiler, luz, sistema y más' },
         { name: 'ART', href: '/duenio/art', icon: Briefcase, desc: 'Convenios y facturación' },
         { name: 'Reporte Diario', href: '/duenio/informes/diario', icon: BarChart3, desc: 'Cierre del día' },
         { name: 'Reporte Mensual', href: '/duenio/informes/mensual', icon: BarChart3, desc: 'Balance acumulado' },
@@ -93,6 +95,7 @@ export default function DuenioBottomNav() {
     pathname.startsWith('/duenio/coordinadores') ||
     pathname.startsWith('/duenio/vehiculos') ||
     pathname.startsWith('/duenio/art') ||
+    pathname.startsWith('/duenio/gastos') ||
     pathname.startsWith('/duenio/configuracion') ||
     (pathname.startsWith('/duenio/informes') && !pathname.includes('diario'));
 

@@ -115,6 +115,9 @@ model Remiseria {
   // Relación 1:N con Deudas por Cancelación / Pasajero Ausente
   deudasCancelacion DeudaCancelacion[]
 
+  // Relación 1:N con Gastos de la Remisería (Operativos, Fijos, Sueldos)
+  gastosRemiseria GastoRemiseria[]
+
   @@map("remiserias")
 }
 
@@ -149,6 +152,9 @@ model Coordinador {
   // Relación 1:1 con User
   userId String? @unique
   user   User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relación 1:N con Gastos de la Remisería (pagos/sueldos al coordinador)
+  gastosRemiseria GastoRemiseria[]
 
   @@map("coordinadores")
 }
@@ -886,4 +892,41 @@ model DeudaCancelacion {
   @@index([clienteTelefono, estado])
   @@map("deudas_cancelacion")
 }
+
+// ==============================================================================
+// GASTOS OPERATIVOS Y FIJOS DE LA REMISERÍA (PANEL DEL DUEÑO)
+// ==============================================================================
+model GastoRemiseria {
+  id                    String       @id @default(cuid())
+  remiseriaId           String
+  remiseria             Remiseria    @relation(fields: [remiseriaId], references: [id], onDelete: Cascade)
+
+  // Opcional: vincular a un coordinador cuando el gasto es pago/sueldo a coordinador
+  coordinadorId         String?
+  coordinador           Coordinador? @relation(fields: [coordinadorId], references: [id], onDelete: SetNull)
+
+  categoria             String       // SUELDO_COORDINADOR, SUELDO_OTRO, ALQUILER, LUZ, AGUA, GAS, INTERNET, TELEFONO, WHATSAPP, SISTEMA, IMPUESTOS, CONTADOR, SEGURO, MANTENIMIENTO_LOCAL, PUBLICIDAD, COMISIONES_BANCARIAS, INSUMOS_OFICINA, FLOTA_PROPIA, OTRO
+  concepto              String
+  proveedor             String?
+  monto                 Float
+  fecha                 DateTime     @default(now())
+  fechaVencimiento      DateTime?
+  estado                String       @default("PAGADO") // PAGADO | PENDIENTE
+  metodoPago            String       @default("EFECTIVO") // EFECTIVO | TRANSFERENCIA | DEBITO | CREDITO | MERCADOPAGO | CHEQUE | OTRO
+  numeroComprobante     String?
+  esRecurrente          Boolean      @default(false)
+  diaVencimientoMensual Int?
+  periodoMes            String?      // "YYYY-MM"
+  observaciones         String?
+
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@index([remiseriaId, fecha])
+  @@index([remiseriaId, categoria])
+  @@index([remiseriaId, estado])
+  @@index([remiseriaId, periodoMes])
+  @@map("gastos_remiseria")
+}
+
  

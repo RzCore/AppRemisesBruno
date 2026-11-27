@@ -28,6 +28,7 @@ import reportesRoutes from './routes/reportes';
 import artEmpresasRoutes from './routes/artEmpresas';
 import pushRoutes from './routes/push';
 import whatsappRoutes from './routes/whatsapp';
+import gastosRemiseriaRoutes from './routes/gastosRemiseria';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -146,6 +147,7 @@ app.use('/api/push', pushRoutes);
 app.use('/api/webhook/whatsapp', whatsappRoutes);
 app.use('/api/whatsapp/webhook', whatsappRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/gastos-remiseria', gastosRemiseriaRoutes);
 
 // Ruta de salud con chequeo real de PostgreSQL y métricas básicas de proceso
 app.get('/api/health', async (req, res) => {
