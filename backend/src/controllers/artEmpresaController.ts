@@ -134,7 +134,7 @@ export const artEmpresaController = {
       return res.json({
         success: true,
         data,
-        message: 'ART y Empresas obtenidas exitosamente'
+        message: 'ARTs obtenidas exitosamente'
       });
     } catch (error) {
       console.error('Error al obtener ART y Empresas:', error);
@@ -173,7 +173,7 @@ export const artEmpresaController = {
       if (!art) {
         return res.status(404).json({
           success: false,
-          message: 'ART o Empresa no encontrada'
+          message: 'ART no encontrada'
         });
       }
 
@@ -224,7 +224,7 @@ export const artEmpresaController = {
       if (!nombre || !nombre.trim()) {
         return res.status(400).json({
           success: false,
-          message: 'El nombre de la ART o Empresa es obligatorio'
+          message: 'El nombre de la ART es obligatorio'
         });
       }
 
@@ -307,7 +307,7 @@ export const artEmpresaController = {
       if (!artExistente) {
         return res.status(404).json({
           success: false,
-          message: 'ART o Empresa no encontrada'
+          message: 'ART no encontrada'
         });
       }
 
@@ -746,7 +746,7 @@ export const artEmpresaController = {
       } = req.body;
 
       if (!artEmpresaId) {
-        return res.status(400).json({ success: false, message: 'La ART o Empresa es requerida' });
+        return res.status(400).json({ success: false, message: 'La ART es requerida' });
       }
       if (!choferId) {
         return res.status(400).json({ success: false, message: 'Debe seleccionar un chofer para el viaje' });
@@ -767,7 +767,7 @@ export const artEmpresaController = {
       // Validar existencia de ART
       const art = await prisma.artEmpresa.findUnique({ where: { id: artEmpresaId } });
       if (!art) {
-        return res.status(404).json({ success: false, message: 'ART o Empresa no encontrada' });
+        return res.status(404).json({ success: false, message: 'ART no encontrada' });
       }
 
       // Validar chofer
@@ -1757,7 +1757,7 @@ export const artEmpresaController = {
 
       const art = await prisma.artEmpresa.findUnique({ where: { id } });
       if (!art || (remiseriaId && art.remiseriaId !== remiseriaId)) {
-        return res.status(404).json({ success: false, message: 'ART / Empresa no encontrada' });
+        return res.status(404).json({ success: false, message: 'ART no encontrada' });
       }
 
       const {
@@ -1822,7 +1822,7 @@ export const artEmpresaController = {
 
       const art = await prisma.artEmpresa.findUnique({ where: { id } });
       if (!art || (remiseriaId && art.remiseriaId !== remiseriaId)) {
-        return res.status(404).json({ success: false, message: 'ART / Empresa no encontrada' });
+        return res.status(404).json({ success: false, message: 'ART no encontrada' });
       }
 
       const result = await sincronizarPortalArt(id, { enviarAlertaSiempre: true });

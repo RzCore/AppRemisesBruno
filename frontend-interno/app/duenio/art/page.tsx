@@ -399,7 +399,7 @@ export default function ArtPage() {
   const handleSiguientePasoViajeArt = () => {
     if (pasoNuevoViajeArt === 1) {
       if (!nuevoViajeArtForm.artEmpresaId) {
-        toast.error('Seleccioná una ART o Empresa');
+        toast.error('Seleccioná una ART');
         return;
       }
       if (!nuevoViajeArtForm.choferId) {
@@ -484,7 +484,7 @@ export default function ArtPage() {
   const handleCrearViajeArtSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevoViajeArtForm.artEmpresaId) {
-      toast.error('Seleccioná una ART o Empresa');
+      toast.error('Seleccioná una ART');
       return;
     }
     if (!nuevoViajeArtForm.choferId) {
@@ -1264,7 +1264,7 @@ export default function ArtPage() {
     const headers = [
       'Fecha',
       'Hora',
-      'ART / Empresa',
+      'ART',
       'N° Siniestro / Bono',
       'Pasajero / Paciente',
       'Teléfono',
@@ -1372,13 +1372,13 @@ export default function ArtPage() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-slate-900">Módulo ART y Empresas</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Módulo ART</h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Corporativo
+                Aseguradoras
               </span>
             </div>
             <p className="text-sm text-slate-500 mt-1">
-              Administrá tarifas por kilómetro, tramos locales y horas de espera acordadas con ARTs y empresas para facturar por separado.
+              Administrá tarifas por kilómetro, tramos locales y horas de espera acordadas con cada ART para facturar por separado.
             </p>
           </div>
         </div>
@@ -1404,7 +1404,7 @@ export default function ArtPage() {
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-semibold text-sm shadow-sm shadow-primary-200 transition-all active:scale-95"
           >
             <Plus className="w-5 h-5" />
-            Nueva ART / Empresa
+            Nueva ART
           </button>
         </div>
       </div>
@@ -1851,7 +1851,7 @@ export default function ArtPage() {
           {loading ? (
             <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center">
               <RefreshCw className="w-8 h-8 animate-spin text-primary-600 mx-auto" />
-              <p className="text-sm text-slate-500 mt-3">Cargando ARTs y convenios corporativos...</p>
+              <p className="text-sm text-slate-500 mt-3">Cargando ARTs y convenios...</p>
             </div>
           ) : artList.length === 0 ? (
             <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-4">
@@ -1859,7 +1859,7 @@ export default function ArtPage() {
                 <Briefcase className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-900">Aún no registraste ninguna ART o Empresa</h3>
+                <h3 className="text-lg font-bold text-slate-900">Aún no registraste ninguna ART</h3>
                 <p className="text-sm text-slate-500 max-w-md mx-auto mt-1">
                   Agregá las ART con las que trabaja {remiseriaNombre} (ej. Provincia ART, La Segunda ART, etc.) e ingresá sus tarifas por kilómetro, tramo local y hora de espera.
                 </p>
@@ -2073,7 +2073,7 @@ export default function ArtPage() {
           <div className="no-print bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Período y Empresa para Facturación</h3>
+                <h3 className="text-base font-bold text-slate-900">Período y ART para Facturación</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Seleccioná la ART y el rango de fechas para generar el reporte de facturación.
                 </p>
@@ -2139,7 +2139,7 @@ export default function ArtPage() {
               {/* Selector de ART */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ART / Empresa
+                  ART
                 </label>
                 <select
                   value={selectedArtFilter}
@@ -2340,7 +2340,7 @@ export default function ArtPage() {
               <span className="text-[11px] text-slate-400 mt-1 block truncate">
                 {selectedArtFilter !== 'all'
                   ? artList.find((a) => a.id === selectedArtFilter)?.nombre || 'ART'
-                  : `${facturacionData?.porArt?.length || 0} empresas con viajes`}
+                  : `${facturacionData?.porArt?.length || 0} ARTs con viajes`}
               </span>
             </div>
           </div>
@@ -3297,7 +3297,7 @@ export default function ArtPage() {
       )}
 
       {/* ============================================================== */}
-      {/* MODAL CREAR / EDITAR ART O EMPRESA                            */}
+      {/* MODAL CREAR / EDITAR ART                                       */}
       {/* ============================================================== */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -3310,7 +3310,7 @@ export default function ArtPage() {
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">
-                    {editingArt ? `Editar ART: ${editingArt.nombre}` : 'Nueva ART o Empresa Corporativa'}
+                    {editingArt ? `Editar ART: ${editingArt.nombre}` : 'Nueva ART'}
                   </h3>
                   <p className="text-xs text-slate-500">
                     Fijá los precios especiales de kilómetro, tramo local y hora de espera.
@@ -3331,12 +3331,12 @@ export default function ArtPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Nombre de la ART / Empresa *
+                    Nombre de la ART *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. Provincia ART, La Segunda ART, Molino Chivilcoy"
+                    placeholder="Ej. Provincia ART, La Segunda ART, Prevención ART"
                     value={formData.nombre}
                     onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -3711,7 +3711,7 @@ export default function ArtPage() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ART / Empresa
+                  ART
                 </label>
                 <select
                   value={nuevoArtIdViaje}
@@ -4394,7 +4394,7 @@ export default function ArtPage() {
             <form onSubmit={handleGenerarCierre} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ART / Empresa Aseguradora <span className="text-red-500">*</span>
+                  ART / Aseguradora <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={artCierreId}
@@ -4743,7 +4743,7 @@ export default function ArtPage() {
       )}
 
       {/* ============================================================== */}
-      {/* MODAL: CREAR Y ASIGNAR NUEVO VIAJE ART / EMPRESA (WIZARD 3 PASOS) */}
+      {/* MODAL: CREAR Y ASIGNAR NUEVO VIAJE ART (WIZARD 3 PASOS)        */}
       {/* ============================================================== */}
       {isModalNuevoViajeArtOpen && (
         <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
@@ -4755,7 +4755,7 @@ export default function ArtPage() {
                     <Car className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">Crear y Asignar Viaje ART / Empresa</h3>
+                    <h3 className="text-base font-bold text-slate-900">Crear y Asignar Viaje ART</h3>
                     <p className="text-xs text-slate-500">Paso {pasoNuevoViajeArt} de 3</p>
                   </div>
                 </div>
@@ -4801,7 +4801,7 @@ export default function ArtPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">ART / Empresa *</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">ART *</label>
                       <select
                         required
                         value={nuevoViajeArtForm.artEmpresaId}
@@ -5519,7 +5519,7 @@ export default function ArtPage() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border font-bold text-xs ${artColors.badge}`}>
                       <span className={`w-2 h-2 rounded-full ${artColors.dot}`} />
-                      ART - {artObj?.nombre || 'Empresa'}
+                      ART - {artObj?.nombre || 'Sin asignar'}
                     </span>
                     {v.numeroSiniestro && (
                       <span className={`px-2 py-0.5 rounded-md border text-xs font-mono font-bold ${artColors.siniestro}`}>

@@ -628,7 +628,7 @@ export default function DuenioDashboard() {
             <span className="text-[10px] text-slate-400">Cobranzas</span>
           </Link>
 
-          {/* ART & Empresas */}
+          {/* ART */}
           <Link
             href="/duenio/art"
             className="flex flex-col items-center justify-center p-3 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-purple-300 hover:shadow-sm active:scale-95 transition-all text-center group"
@@ -637,7 +637,7 @@ export default function DuenioDashboard() {
               <Briefcase className="w-5 h-5" />
             </div>
             <span className="text-xs font-bold text-slate-800 leading-tight">ART</span>
-            <span className="text-[10px] text-slate-400">Empresas</span>
+            <span className="text-[10px] text-slate-400">Convenios</span>
           </Link>
 
           {/* Tarifas */}

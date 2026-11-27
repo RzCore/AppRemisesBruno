@@ -66,9 +66,9 @@ export default function DuenioBottomNav() {
       ]
     },
     {
-      category: 'Finanzas & Empresas',
+      category: 'Finanzas & ART',
       items: [
-        { name: 'ART & Empresas', href: '/duenio/art', icon: Briefcase, desc: 'Convenios y facturación' },
+        { name: 'ART', href: '/duenio/art', icon: Briefcase, desc: 'Convenios y facturación' },
         { name: 'Reporte Diario', href: '/duenio/informes/diario', icon: BarChart3, desc: 'Cierre del día' },
         { name: 'Reporte Mensual', href: '/duenio/informes/mensual', icon: BarChart3, desc: 'Balance acumulado' },
       ]
