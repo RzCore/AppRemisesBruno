@@ -33,7 +33,7 @@ const COOKIE_REFRESH_KEY = 'bruno_interno_refresh_token';
 
 const STAFF_ROLES = ['ADMIN', 'DUENIO', 'COORDINADOR', 'CHOFER'];
 
-function setStaffDomainCookie(name: string, value: string, days = 7) {
+function setStaffDomainCookie(name: string, value: string, days = 30) {
   if (typeof document === 'undefined') return;
   const hostname = window.location.hostname.toLowerCase();
   let domainPart = '';
