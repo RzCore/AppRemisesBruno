@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { MAP_CONFIG } from '@/lib/mapConfig';
-import { coordinadorDashboardService } from '@/lib/api';
+import { coordinadorDashboardService, getApiBaseUrl } from '@/lib/api';
 import { Navigation, Clock, Car } from 'lucide-react';
 
 // Fix para los iconos por defecto de Leaflet en Next.js
@@ -200,25 +200,52 @@ export default function ClienteTrackingMap({
     if (!origenCoords || !destinoCoords) return;
     let cancelled = false;
 
+    const fetchPavedOrOsrm = async (
+      from: [number, number],
+      to: [number, number]
+    ): Promise<{ coords: [number, number][]; distanceKm: number; durationMin: number } | null> => {
+      try {
+        const apiUrl = `${getApiBaseUrl()}/cliente/ruta?fromLat=${from[0]}&fromLon=${from[1]}&toLat=${to[0]}&toLon=${to[1]}`;
+        const res = await fetch(apiUrl);
+        const json = await res.json();
+        if (json?.success && json?.data && Array.isArray(json.data.coords) && json.data.coords.length >= 2) {
+          return {
+            coords: json.data.coords,
+            distanceKm: Number(json.data.distanciaKm) || 0,
+            durationMin: Math.max(1, Number(json.data.duracionMin) || 1),
+          };
+        }
+      } catch {}
+
+      try {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
+        const res = await fetch(osrmUrl);
+        const data = await res.json();
+        if (data?.routes?.length > 0) {
+          const r = data.routes[0];
+          return {
+            coords: r.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
+            distanceKm: (Number(r.distance) || 0) / 1000,
+            durationMin: Math.max(1, Math.round((Number(r.duration) || 0) / 60)),
+          };
+        }
+      } catch {}
+      return null;
+    };
+
     const fetchRoutes = async () => {
       try {
         // Si el auto está yendo a buscar al cliente (ACEPTADO), calculamos el trayecto Auto -> Origen
         if (effectiveCarCoords && estado === 'ACEPTADO') {
-          const pickupUrl = `https://router.project-osrm.org/route/v1/driving/${effectiveCarCoords[1]},${effectiveCarCoords[0]};${origenCoords[1]},${origenCoords[0]}?overview=full&geometries=geojson`;
-          const pickupRes = await fetch(pickupUrl);
-          const pickupData = await pickupRes.json();
+          const pRoute = await fetchPavedOrOsrm(effectiveCarCoords, origenCoords);
 
-          if (!cancelled && pickupData?.routes?.length > 0) {
-            const pRoute = pickupData.routes[0];
-            const pCoords: [number, number][] = pRoute.geometry.coordinates.map(
-              (c: [number, number]) => [c[1], c[0]]
-            );
-            setPickupRouteCoords(pCoords);
-            const distMeters = Number(pRoute.distance) || 0;
+          if (!cancelled && pRoute) {
+            setPickupRouteCoords(pRoute.coords);
+            const distMeters = pRoute.distanceKm * 1000;
             setPickupInfo({
-              distanceKm: (distMeters / 1000).toFixed(1),
+              distanceKm: pRoute.distanceKm.toFixed(1),
               cuadras: Math.max(1, Math.round(distMeters / 100)),
-              durationMin: Math.max(1, Math.round(pRoute.duration / 60)),
+              durationMin: pRoute.durationMin,
             });
           } else if (!cancelled) {
             setPickupRouteCoords([effectiveCarCoords, origenCoords]);
@@ -227,21 +254,15 @@ export default function ClienteTrackingMap({
           setPickupRouteCoords([]);
         }
 
-        // Ruta del viaje (Auto/Origen -> Destino)
+        // Ruta del viaje (Auto/Origen -> Destino) evitando caminos de tierra
         const startPoint = estado === 'EN_CURSO' && effectiveCarCoords ? effectiveCarCoords : origenCoords;
-        const tripUrl = `https://router.project-osrm.org/route/v1/driving/${startPoint[1]},${startPoint[0]};${destinoCoords[1]},${destinoCoords[0]}?overview=full&geometries=geojson`;
-        const tripRes = await fetch(tripUrl);
-        const tripData = await tripRes.json();
+        const tRoute = await fetchPavedOrOsrm(startPoint, destinoCoords);
 
-        if (!cancelled && tripData?.routes?.length > 0) {
-          const tRoute = tripData.routes[0];
-          const tCoords: [number, number][] = tRoute.geometry.coordinates.map(
-            (c: [number, number]) => [c[1], c[0]]
-          );
-          setTripRouteCoords(tCoords);
+        if (!cancelled && tRoute) {
+          setTripRouteCoords(tRoute.coords);
           setTripInfo({
-            distanceKm: (tRoute.distance / 1000).toFixed(1),
-            durationMin: Math.max(1, Math.round(tRoute.duration / 60)),
+            distanceKm: tRoute.distanceKm.toFixed(1),
+            durationMin: tRoute.durationMin,
           });
         } else if (!cancelled) {
           setTripRouteCoords([startPoint, destinoCoords]);

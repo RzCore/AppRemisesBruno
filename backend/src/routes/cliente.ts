@@ -6,6 +6,7 @@ import {
   getClientePinEstado,
   updateClientePin,
   geocodeCliente,
+  getRutaAsfaltada,
   getClienteViajes,
   getClienteReservas,
   solicitarViaje,
@@ -31,6 +32,7 @@ const router = express.Router();
 router.post('/register', registerCliente);
 router.post('/viajes/calcular-precio', calcularPrecio);
 router.get('/geocode', geocodeCliente);
+router.get('/ruta', getRutaAsfaltada);
 router.get('/buscar-dni/:dni', buscarClientePorDni);
 router.get('/disponibilidad', getDisponibilidad);
 router.get('/tracking/:token', getViajeTracking);

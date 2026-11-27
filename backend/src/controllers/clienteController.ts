@@ -9,6 +9,7 @@ import { searchNominatimCached } from './coordinatorDashboardController';
 import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBotService';
 import { calcularAjusteOrigenRemoto, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
+import { calcularRutaAsfaltada } from '../lib/routingUtils';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
 interface RouteCacheEntry {
@@ -659,6 +660,48 @@ export const geocodeCliente = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error en geocodeCliente:', error);
     return res.json({ success: true, data: [] });
+  }
+};
+
+export const getRutaAsfaltada = async (req: Request, res: Response) => {
+  try {
+    const fromLat = parseFloat(String(req.query.fromLat || ''));
+    const fromLon = parseFloat(String(req.query.fromLon || ''));
+    const toLat = parseFloat(String(req.query.toLat || ''));
+    const toLon = parseFloat(String(req.query.toLon || ''));
+
+    if ([fromLat, fromLon, toLat, toLon].some((n) => isNaN(n))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Coordenadas inválidas',
+      });
+    }
+
+    const ruta = await calcularRutaAsfaltada(
+      [
+        { lat: fromLat, lon: fromLon },
+        { lat: toLat, lon: toLon },
+      ],
+      { includeGeometry: true, timeoutMs: 3000 }
+    );
+
+    if (!ruta) {
+      return res.status(502).json({
+        success: false,
+        error: 'No se pudo calcular la ruta en este momento',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: ruta,
+    });
+  } catch (error) {
+    console.error('Error en getRutaAsfaltada:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error calculando ruta',
+    });
   }
 };
 
@@ -2347,34 +2390,16 @@ export async function calcularPrecioViaje(
       tiempoEstimado = cachedRoute.tiempoEstimado;
       calculatedViaRoute = true;
     } else {
-      // 2. Comprobar si el circuit breaker está activo (OSRM temporalmente desactivado)
-      const canUseOsrm = ahora > osrmDisabledUntil;
-
-      if (canUseOsrm) {
-        try {
-          const rawCoords = puntosValidos.map((pt) => `${pt.lon},${pt.lat}`).join(';');
-          const url = `http://router.project-osrm.org/route/v1/driving/${rawCoords}?overview=false`;
-          // Timeout reducido a 1200ms para no demorar al usuario si OSRM se cuelga
-          const response = await fetch(url, { signal: AbortSignal.timeout(1200) });
-          const data = (await response.json()) as any;
-          if (data.routes && data.routes.length > 0) {
-            distanciaKm = data.routes[0].distance / 1000;
-            distanciaKm = Math.round(distanciaKm * 10) / 10;
-            tiempoEstimado = Math.max(5, Math.round(data.routes[0].duration / 60));
-            calculatedViaRoute = true;
-            osrmConsecutiveErrors = 0; // Reset de errores
-
-            // Guardar en caché
-            routeCache.set(coordsQuery, { distanciaKm, tiempoEstimado, timestamp: ahora });
-          }
-        } catch (error) {
-          osrmConsecutiveErrors++;
-          if (osrmConsecutiveErrors >= 3) {
-            // Activar Circuit Breaker por 60 segundos: no saturar la red ni esperar timeouts
-            osrmDisabledUntil = ahora + 60000;
-            console.warn('⚠️ OSRM bajo alta demanda o saturado. Activado Circuit Breaker por 60s (Fallback local Haversine).');
-          }
-        }
+      // 2. Calcular ruta evitando caminos de tierra (Valhalla con fallback a OSRM)
+      const rutaAsfaltada = await calcularRutaAsfaltada(puntosValidos, {
+        includeGeometry: false,
+        timeoutMs: 2200,
+      });
+      if (rutaAsfaltada && rutaAsfaltada.distanciaKm >= 0) {
+        distanciaKm = rutaAsfaltada.distanciaKm;
+        tiempoEstimado = Math.max(5, rutaAsfaltada.duracionMin);
+        calculatedViaRoute = true;
+        routeCache.set(coordsQuery, { distanciaKm, tiempoEstimado, timestamp: ahora });
       }
 
       // 3. Fallback instantáneo a Haversine acumulado (+30% trama urbana)

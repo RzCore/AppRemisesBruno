@@ -6,7 +6,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '../styles/leaflet.css';
 import { MAP_CONFIG } from '@/lib/mapConfig';
-import { coordinadorDashboardService } from '@/lib/api';
+import { coordinadorDashboardService, getApiBaseUrl } from '@/lib/api';
 import { Navigation, Clock, Compass, ExternalLink } from 'lucide-react';
 
 // Fix para los iconos por defecto de Leaflet en Next.js
@@ -174,22 +174,49 @@ export default function ChoferRouteMap({ origen, destino, estado }: ChoferRouteM
     if (!origenCoords || !destinoCoords) return;
     let cancelled = false;
 
+    const fetchPavedOrOsrm = async (
+      from: [number, number],
+      to: [number, number]
+    ): Promise<{ coords: [number, number][]; distanceKm: number; durationMin: number } | null> => {
+      try {
+        const apiUrl = `${getApiBaseUrl()}/cliente/ruta?fromLat=${from[0]}&fromLon=${from[1]}&toLat=${to[0]}&toLon=${to[1]}`;
+        const res = await fetch(apiUrl);
+        const json = await res.json();
+        if (json?.success && json?.data && Array.isArray(json.data.coords) && json.data.coords.length >= 2) {
+          return {
+            coords: json.data.coords,
+            distanceKm: Number(json.data.distanciaKm) || 0,
+            durationMin: Math.max(1, Number(json.data.duracionMin) || 1),
+          };
+        }
+      } catch {}
+
+      try {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
+        const res = await fetch(osrmUrl);
+        const data = await res.json();
+        if (data?.routes?.length > 0) {
+          const r = data.routes[0];
+          return {
+            coords: r.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]),
+            distanceKm: (Number(r.distance) || 0) / 1000,
+            durationMin: Math.max(1, Math.round((Number(r.duration) || 0) / 60)),
+          };
+        }
+      } catch {}
+      return null;
+    };
+
     const fetchOsrmRoute = async () => {
       try {
-        // Ruta principal: Origen -> Destino
-        const url = `https://router.project-osrm.org/route/v1/driving/${origenCoords[1]},${origenCoords[0]};${destinoCoords[1]},${destinoCoords[0]}?overview=full&geometries=geojson`;
-        const response = await fetch(url);
-        const data = await response.json();
+        // Ruta principal: Origen -> Destino (evitando caminos de tierra)
+        const route = await fetchPavedOrOsrm(origenCoords, destinoCoords);
 
-        if (!cancelled && data?.routes?.length > 0) {
-          const route = data.routes[0];
-          const coords: [number, number][] = route.geometry.coordinates.map(
-            (c: [number, number]) => [c[1], c[0]]
-          );
-          setRouteCoords(coords);
+        if (!cancelled && route) {
+          setRouteCoords(route.coords);
           setRouteInfo({
-            distanceKm: (route.distance / 1000).toFixed(1),
-            durationMin: Math.max(1, Math.round(route.duration / 60)),
+            distanceKm: route.distanceKm.toFixed(1),
+            durationMin: route.durationMin,
           });
         } else if (!cancelled) {
           setRouteCoords([origenCoords, destinoCoords]);
@@ -197,14 +224,9 @@ export default function ChoferRouteMap({ origen, destino, estado }: ChoferRouteM
 
         // Si el chofer está yendo al origen (ACEPTADO), trazar también el camino Chofer -> Origen
         if (choferCoords && estado === 'ACEPTADO') {
-          const pickupUrl = `https://router.project-osrm.org/route/v1/driving/${choferCoords[1]},${choferCoords[0]};${origenCoords[1]},${origenCoords[0]}?overview=full&geometries=geojson`;
-          const pickupRes = await fetch(pickupUrl);
-          const pickupData = await pickupRes.json();
-          if (!cancelled && pickupData?.routes?.length > 0) {
-            const pCoords: [number, number][] = pickupData.routes[0].geometry.coordinates.map(
-              (c: [number, number]) => [c[1], c[0]]
-            );
-            setPickupRouteCoords(pCoords);
+          const pRoute = await fetchPavedOrOsrm(choferCoords, origenCoords);
+          if (!cancelled && pRoute) {
+            setPickupRouteCoords(pRoute.coords);
           } else if (!cancelled) {
             setPickupRouteCoords([choferCoords, origenCoords]);
           }

@@ -6,6 +6,7 @@ import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
+import { calcularRutaAsfaltada } from '../lib/routingUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -1400,25 +1401,24 @@ export const coordinatorDashboardController = {
           distanciaKm = cachedRoute.distanceKm;
           calculatedViaRoute = true;
         } else {
-          try {
-            const url = `http://router.project-osrm.org/route/v1/driving/${finalLonOrigen},${finalLatOrigen};${finalLonDestino},${finalLatDestino}?overview=false`;
-            const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
-            const data = (await response.json()) as any;
-            if (data.routes && data.routes.length > 0) {
-              distanciaKm = data.routes[0].distance / 1000;
-              distanciaKm = Math.round(distanciaKm * 10) / 10;
-              calculatedViaRoute = true;
-              if (osrmDistanceCache.size >= 1500) {
-                const oldestKey = osrmDistanceCache.keys().next().value;
-                if (oldestKey) osrmDistanceCache.delete(oldestKey);
-              }
-              osrmDistanceCache.set(routeKey, {
-                distanceKm: distanciaKm,
-                expiresAt: Date.now() + GEOCODE_CACHE_TTL_MS,
-              });
+          const rutaAsf = await calcularRutaAsfaltada(
+            [
+              { lat: finalLatOrigen, lon: finalLonOrigen },
+              { lat: finalLatDestino, lon: finalLonDestino },
+            ],
+            { includeGeometry: false, timeoutMs: 2500 }
+          );
+          if (rutaAsf && rutaAsf.distanciaKm >= 0) {
+            distanciaKm = rutaAsf.distanciaKm;
+            calculatedViaRoute = true;
+            if (osrmDistanceCache.size >= 1500) {
+              const oldestKey = osrmDistanceCache.keys().next().value;
+              if (oldestKey) osrmDistanceCache.delete(oldestKey);
             }
-          } catch (error) {
-            console.warn('OSRM no respondió a tiempo, recurriendo a Haversine:', error);
+            osrmDistanceCache.set(routeKey, {
+              distanceKm: distanciaKm,
+              expiresAt: Date.now() + GEOCODE_CACHE_TTL_MS,
+            });
           }
         }
 

@@ -1,4 +1,5 @@
 // Utilidades compartidas de tarificación para traslados desde base (origen fuera del radio urbano)
+import { calcularRutaAsfaltada } from './routingUtils';
 
 export const DEFAULT_BASE_LAT = -34.8957; // Chivilcoy centro
 export const DEFAULT_BASE_LON = -60.0189;
@@ -168,17 +169,15 @@ export async function calcularDistanciaRutaKm(
   }
 
   let distanciaKm: number | null = null;
-  try {
-    const url = `http://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
-    if (response.ok) {
-      const data = (await response.json()) as any;
-      if (data?.routes && data.routes.length > 0 && typeof data.routes[0].distance === 'number') {
-        distanciaKm = Math.round((data.routes[0].distance / 1000) * 10) / 10;
-      }
-    }
-  } catch {
-    // Fallback a Haversine ajustado por ruta
+  const ruta = await calcularRutaAsfaltada(
+    [
+      { lat: lat1, lon: lon1 },
+      { lat: lat2, lon: lon2 },
+    ],
+    { includeGeometry: false, timeoutMs: 2200 }
+  );
+  if (ruta && ruta.distanciaKm > 0) {
+    distanciaKm = ruta.distanciaKm;
   }
 
   if (distanciaKm === null) {
