@@ -22,6 +22,7 @@ type EstadoConversacion =
   | 'ESPERANDO_DESTINO'
   | 'CONFIRMANDO_AUDIO_DESTINO'
   | 'CONFIRMANDO_COTIZACION'
+  | 'CONFIGURANDO_PREFERENCIAS'
   | 'CONFIRMANDO_CANCELACION_VIAJE'
   | 'CONFIRMANDO_CANCELACION_RESERVA';
 
@@ -46,11 +47,116 @@ interface SesionClienteWhatsApp {
   destinoLon?: number;
   distanciaKm?: number;
   precioEstimado?: number;
+  notaOrigenRemoto?: string;
+  preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+  conMascota?: boolean;
+  conSillaRuedas?: boolean;
   audioDireccionPendiente?: string;
   audioTextoOriginal?: string;
   viajeCancelarId?: string;
   reservaCancelarId?: string;
   updatedAt: number;
+}
+
+function detectarPreferenciasEnTexto(texto: string, sesion: SesionClienteWhatsApp): boolean {
+  if (!texto) return false;
+  let cambio = false;
+  if (/\b(mascota|mascotas|perro|perra|perrito|perrita|gato|gata|gatito|gatita|canil|transportadora)\b/i.test(texto)) {
+    if (!sesion.conMascota) {
+      sesion.conMascota = true;
+      cambio = true;
+    }
+  }
+  if (/silla\s+de\s+ruedas|silla\s+ruedas|discapacidad\s+motriz/i.test(texto)) {
+    if (!sesion.conSillaRuedas) {
+      sesion.conSillaRuedas = true;
+      cambio = true;
+    }
+  }
+  if (/chofer\s+mujer|conductora|remisera|una\s+mujer|que\s+sea\s+mujer|prefiero\s+mujer|solo\s+mujer/i.test(texto)) {
+    if (sesion.preferenciaSexoChofer !== 'FEMENINO') {
+      sesion.preferenciaSexoChofer = 'FEMENINO';
+      cambio = true;
+    }
+  } else if (/chofer\s+hombre|chofer\s+var[oó]n|que\s+sea\s+hombre|prefiero\s+hombre|solo\s+hombre/i.test(texto)) {
+    if (sesion.preferenciaSexoChofer !== 'MASCULINO') {
+      sesion.preferenciaSexoChofer = 'MASCULINO';
+      cambio = true;
+    }
+  }
+  return cambio;
+}
+
+function formatearLineasPreferencias(sesion: SesionClienteWhatsApp): string {
+  const lineas: string[] = [];
+  if (sesion.preferenciaSexoChofer === 'FEMENINO') {
+    lineas.push('♀️ *Preferencia:* Chofer mujer');
+  } else if (sesion.preferenciaSexoChofer === 'MASCULINO') {
+    lineas.push('♂️ *Preferencia:* Chofer hombre');
+  }
+  if (sesion.conMascota) {
+    lineas.push('🐾 *Aviso:* Viaja con mascota');
+  }
+  if (sesion.conSillaRuedas) {
+    lineas.push('♿ *Aviso:* Viaja con silla de ruedas');
+  }
+  return lineas.length > 0 ? `${lineas.join('\n')}\n` : '';
+}
+
+async function enviarResumenCotizacionWhatsApp(cleanFrom: string, sesion: SesionClienteWhatsApp) {
+  const dist = sesion.distanciaKm || 2.5;
+  const precioEstimado = sesion.precioEstimado || 3500;
+  const notaOrigenRemoto = sesion.notaOrigenRemoto || '';
+  const prefsTexto = formatearLineasPreferencias(sesion);
+
+  if (sesion.esReserva && sesion.fechaHoraTexto) {
+    const resumenReserva =
+      `📋 *Resumen de tu Reserva Programada:*\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `🗓️ *Fecha y Hora:* *${sesion.fechaHoraTexto}*\n` +
+      `🟢 *Origen:* ${sesion.origen}\n` +
+      `🔴 *Destino:* ${sesion.destino}\n` +
+      `📏 *Distancia:* ~${dist} km\n` +
+      notaOrigenRemoto +
+      prefsTexto +
+      `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `¿Confirmás la reserva?`;
+
+    return await whatsappService.enviarBotones(
+      cleanFrom,
+      resumenReserva,
+      [
+        { id: 'BTN_CONFIRMAR_RESERVA', title: '✅ Confirmar Reserva' },
+        { id: 'BTN_PREFERENCIAS', title: '⚙️ Preferencias' },
+        { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
+      ],
+      'Reserva de Viaje'
+    );
+  }
+
+  const resumen =
+    `📋 *Resumen de tu viaje:*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `🟢 *Origen:* ${sesion.origen}\n` +
+    `🔴 *Destino:* ${sesion.destino}\n` +
+    `📏 *Distancia:* ~${dist} km\n` +
+    notaOrigenRemoto +
+    prefsTexto +
+    `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `¿Deseas solicitar el móvil ahora?`;
+
+  return await whatsappService.enviarBotones(
+    cleanFrom,
+    resumen,
+    [
+      { id: 'BTN_CONFIRMAR', title: '✅ Confirmar Pedido' },
+      { id: 'BTN_PREFERENCIAS', title: '⚙️ Preferencias' },
+      { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
+    ],
+    'Cotización de Viaje'
+  );
 }
 
 // Almacenamiento en memoria de sesiones activas (expiran a los 30 minutos de inactividad)
@@ -1263,9 +1369,72 @@ export const whatsappBotService = {
     const nombreMostrado = cliente?.nombre || senderName || 'Pasajero';
     sesion.nombre = nombreMostrado;
 
+    // Heredar preferencia de sexo guardada en el perfil si aún no fue elegida en esta sesión
+    if (!sesion.preferenciaSexoChofer && cliente?.preferenciaSexoChofer) {
+      const prefCliente = String(cliente.preferenciaSexoChofer).toUpperCase();
+      if (prefCliente === 'FEMENINO' || prefCliente === 'MASCULINO' || prefCliente === 'INDISTINTO') {
+        sesion.preferenciaSexoChofer = prefCliente;
+      }
+    }
+
+    // Detectar menciones de mascota, silla de ruedas o preferencia de sexo en cualquier texto/audio
+    if (texto) {
+      detectarPreferenciasEnTexto(texto, sesion);
+    }
+
     // 2. Comandos globales directos (reiniciar, cancelar pedido/reserva, estado, operador)
     const textoLower = (texto || '').trim().toLowerCase();
     const actionId = botonId || '';
+
+    // Botón para aceptar cualquier chofer por este viaje si no había del sexo preferido
+    if (actionId.startsWith('BTN_ACEPTAR_CUALQUIER_CHOFER_')) {
+      const targetViajeId = actionId.replace('BTN_ACEPTAR_CUALQUIER_CHOFER_', '').trim();
+      if (targetViajeId) {
+        const viajePend = await prisma.viaje.findUnique({ where: { id: targetViajeId } });
+        if (viajePend && viajePend.estado === 'PENDIENTE' && !viajePend.choferId) {
+          const viajeActualizado = await prisma.viaje.update({
+            where: { id: viajePend.id },
+            data: { preferenciaSexoChofer: 'INDISTINTO' },
+            include: { cliente: true, chofer: true, vehiculo: true, remiseria: true },
+          });
+          try {
+            const { getIO } = await import('../lib/socket');
+            getIO().to(viajePend.remiseriaId).emit('nuevo_viaje_recibido', viajeActualizado);
+          } catch {}
+          try {
+            pushNotificationService.enviarAChoferesDeRemiseria(
+              viajePend.remiseriaId,
+              {
+                title: '🚕 ¡Viaje disponible por WhatsApp!',
+                body: `${viajePend.origen} ➔ ${viajePend.destino} ($${Number(viajePend.precio).toLocaleString('es-AR')})`,
+                url: '/chofer/app',
+                tag: `whatsapp-viaje-${viajePend.id}`,
+                data: { viajeId: viajePend.id },
+              },
+              undefined,
+              {
+                preferenciaSexoChofer: 'INDISTINTO',
+                conMascota: viajePend.conMascota,
+                conSillaRuedas: viajePend.conSillaRuedas,
+              }
+            ).catch(() => {});
+          } catch {}
+          return await whatsappService.enviarBotones(
+            cleanFrom,
+            `✅ *¡Listo!* Actualizamos el viaje *#${viajePend.id.slice(-4).toUpperCase()}* para que pueda tomarlo *cualquier chofer disponible*.\n\n_(Tu preferencia guardada en tu perfil no cambia.)_\n\nTe avisamos apenas salga el móvil hacia tu domicilio.`,
+            [
+              { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
+              { id: `BTN_CANCELAR_VIAJE_${viajePend.id}`, title: '❌ Cancelar Pedido' },
+            ]
+          );
+        } else {
+          return await whatsappService.enviarTexto(
+            cleanFrom,
+            'ℹ️ Ese viaje ya fue asignado o finalizado. Escribí *estado* para ver los detalles.'
+          );
+        }
+      }
+    }
 
     // Botones directos de cancelación de un pedido o reserva ya confirmados
     if (actionId.startsWith('BTN_CANCELAR_VIAJE')) {
@@ -1983,50 +2152,8 @@ export const whatsappBotService = {
           ? `🚗 _Incluye traslado del móvil desde base (Chivilcoy)_\n`
           : '';
 
-        if (sesion.esReserva && sesion.fechaHoraTexto) {
-          const resumenReserva =
-            `📋 *Resumen de tu Reserva Programada:*\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `🗓️ *Fecha y Hora:* *${sesion.fechaHoraTexto}*\n` +
-            `🟢 *Origen:* ${sesion.origen}\n` +
-            `🔴 *Destino:* ${sesion.destino}\n` +
-            `📏 *Distancia:* ~${dist} km\n` +
-            notaOrigenRemoto +
-            `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `¿Confirmás la reserva?`;
-
-          return await whatsappService.enviarBotones(
-            cleanFrom,
-            resumenReserva,
-            [
-              { id: 'BTN_CONFIRMAR_RESERVA', title: '✅ Confirmar Reserva' },
-              { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-            ],
-            'Reserva de Viaje'
-          );
-        } else {
-          const resumen =
-            `📋 *Resumen de tu viaje:*\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `🟢 *Origen:* ${sesion.origen}\n` +
-            `🔴 *Destino:* ${sesion.destino}\n` +
-            `📏 *Distancia:* ~${dist} km\n` +
-            notaOrigenRemoto +
-            `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `¿Deseas solicitar el móvil ahora?`;
-
-          return await whatsappService.enviarBotones(
-            cleanFrom,
-            resumen,
-            [
-              { id: 'BTN_CONFIRMAR', title: '✅ Confirmar Pedido' },
-              { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-            ],
-            'Cotización de Viaje'
-          );
-        }
+        sesion.notaOrigenRemoto = notaOrigenRemoto;
+        return await enviarResumenCotizacionWhatsApp(cleanFrom, sesion);
       }
 
       case 'CONFIRMANDO_AUDIO_DESTINO': {
@@ -2102,50 +2229,8 @@ export const whatsappBotService = {
             ? `🚗 _Incluye traslado del móvil desde base (Chivilcoy)_\n`
             : '';
 
-          if (sesion.esReserva && sesion.fechaHoraTexto) {
-            const resumenReserva =
-              `📋 *Resumen de tu Reserva Programada:*\n` +
-              `━━━━━━━━━━━━━━━━━━━\n` +
-              `🗓️ *Fecha y Hora:* *${sesion.fechaHoraTexto}*\n` +
-              `🟢 *Origen:* ${sesion.origen}\n` +
-              `🔴 *Destino:* ${sesion.destino}\n` +
-              `📏 *Distancia:* ~${dist} km\n` +
-              notaOrigenRemoto2 +
-              `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
-              `━━━━━━━━━━━━━━━━━━━\n` +
-              `¿Confirmás la reserva?`;
-
-            return await whatsappService.enviarBotones(
-              cleanFrom,
-              resumenReserva,
-              [
-                { id: 'BTN_CONFIRMAR_RESERVA', title: '✅ Confirmar Reserva' },
-                { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-              ],
-              'Reserva de Viaje'
-            );
-          } else {
-            const resumen =
-              `📋 *Resumen de tu viaje:*\n` +
-              `━━━━━━━━━━━━━━━━━━━\n` +
-              `🟢 *Origen:* ${sesion.origen}\n` +
-              `🔴 *Destino:* ${sesion.destino}\n` +
-              `📏 *Distancia:* ~${dist} km\n` +
-              notaOrigenRemoto2 +
-              `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
-              `━━━━━━━━━━━━━━━━━━━\n` +
-              `¿Deseas solicitar el móvil ahora?`;
-
-            return await whatsappService.enviarBotones(
-              cleanFrom,
-              resumen,
-              [
-                { id: 'BTN_CONFIRMAR', title: '✅ Confirmar Pedido' },
-                { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-              ],
-              'Cotización de Viaje'
-            );
-          }
+          sesion.notaOrigenRemoto = notaOrigenRemoto2;
+          return await enviarResumenCotizacionWhatsApp(cleanFrom, sesion);
         } else if (esNegativo) {
           sesion.estado = 'ESPERANDO_DESTINO';
           return await whatsappService.enviarTexto(
@@ -2199,50 +2284,8 @@ export const whatsappBotService = {
             ? `🚗 _Incluye traslado del móvil desde base (Chivilcoy)_\n`
             : '';
 
-          if (sesion.esReserva && sesion.fechaHoraTexto) {
-            const resumenReserva =
-              `📋 *Resumen de tu Reserva Programada:*\n` +
-              `━━━━━━━━━━━━━━━━━━━\n` +
-              `🗓️ *Fecha y Hora:* *${sesion.fechaHoraTexto}*\n` +
-              `🟢 *Origen:* ${sesion.origen}\n` +
-              `🔴 *Destino:* ${sesion.destino}\n` +
-              `📏 *Distancia:* ~${dist} km\n` +
-              notaOrigenRemoto3 +
-              `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
-              `━━━━━━━━━━━━━━━━━━━\n` +
-              `¿Confirmás la reserva?`;
-
-            return await whatsappService.enviarBotones(
-              cleanFrom,
-              resumenReserva,
-              [
-                { id: 'BTN_CONFIRMAR_RESERVA', title: '✅ Confirmar Reserva' },
-                { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-              ],
-              'Reserva de Viaje'
-            );
-          }
-
-          const resumen =
-            `📋 *Resumen de tu viaje:*\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `🟢 *Origen:* ${sesion.origen}\n` +
-            `🔴 *Destino:* ${sesion.destino}\n` +
-            `📏 *Distancia:* ~${dist} km\n` +
-            notaOrigenRemoto3 +
-            `💵 *Precio estimado:* *$${precioEstimado.toLocaleString('es-AR')}* _(Efectivo)_\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `¿Deseas solicitar el móvil ahora?`;
-
-          return await whatsappService.enviarBotones(
-            cleanFrom,
-            resumen,
-            [
-              { id: 'BTN_CONFIRMAR', title: '✅ Confirmar Pedido' },
-              { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-            ],
-            'Cotización de Viaje'
-          );
+          sesion.notaOrigenRemoto = notaOrigenRemoto3;
+          return await enviarResumenCotizacionWhatsApp(cleanFrom, sesion);
         } else {
           return await whatsappService.enviarBotones(
             cleanFrom,
@@ -2256,11 +2299,41 @@ export const whatsappBotService = {
       }
 
       case 'CONFIRMANDO_COTIZACION': {
+        if (actionId === 'BTN_PREFERENCIAS' || textoLower.includes('preferencia')) {
+          sesion.estado = 'CONFIGURANDO_PREFERENCIAS';
+          const estadoActual =
+            `⚙️ *Preferencias del viaje*\n\n` +
+            `• Chofer: *${sesion.preferenciaSexoChofer === 'FEMENINO' ? '♀️ Mujer' : sesion.preferenciaSexoChofer === 'MASCULINO' ? '♂️ Hombre' : 'Indistinto'}*\n` +
+            `• Mascota: *${sesion.conMascota ? '🐾 Sí' : 'No'}*\n` +
+            `• Silla de ruedas: *${sesion.conSillaRuedas ? '♿ Sí' : 'No'}*\n\n` +
+            `Tocá una opción para activarla o desactivarla _(o escribí "hombre" / "indistinto" / "volver")_:`;
+
+          return await whatsappService.enviarBotones(
+            cleanFrom,
+            estadoActual,
+            [
+              {
+                id: 'BTN_TOGGLE_MUJER',
+                title: sesion.preferenciaSexoChofer === 'FEMENINO' ? '♀ Mujer: SÍ' : '♀ Chofer mujer',
+              },
+              {
+                id: 'BTN_TOGGLE_MASCOTA',
+                title: sesion.conMascota ? '🐾 Mascota: SÍ' : '🐾 Con mascota',
+              },
+              {
+                id: 'BTN_TOGGLE_SILLA',
+                title: sesion.conSillaRuedas ? '♿ Silla: SÍ' : '♿ Silla ruedas',
+              },
+            ],
+            'Preferencias Especiales'
+          );
+        }
+
         const esAfirmativo =
           actionId === 'BTN_CONFIRMAR' ||
           actionId === 'BTN_CONFIRMAR_RESERVA' ||
-          textoLower.includes('si') ||
-          textoLower.includes('sí') ||
+          textoLower === 'si' ||
+          textoLower === 'sí' ||
           textoLower.includes('confirmar') ||
           textoLower.includes('confirmo');
 
@@ -2271,16 +2344,25 @@ export const whatsappBotService = {
             return await this.crearViajeDesdeWhatsApp(cleanFrom, sesion, cliente, remiseriaId);
           }
         } else {
-          const botonConfirmarId = sesion.esReserva ? 'BTN_CONFIRMAR_RESERVA' : 'BTN_CONFIRMAR';
-          return await whatsappService.enviarBotones(
-            cleanFrom,
-            '¿Querés confirmar el servicio o cancelarlo?',
-            [
-              { id: botonConfirmarId, title: '✅ Confirmar' },
-              { id: 'BTN_CANCELAR', title: '❌ Cancelar' },
-            ]
-          );
+          return await enviarResumenCotizacionWhatsApp(cleanFrom, sesion);
         }
+      }
+
+      case 'CONFIGURANDO_PREFERENCIAS': {
+        if (actionId === 'BTN_TOGGLE_MUJER' || textoLower.includes('mujer')) {
+          sesion.preferenciaSexoChofer =
+            sesion.preferenciaSexoChofer === 'FEMENINO' ? 'INDISTINTO' : 'FEMENINO';
+        } else if (textoLower.includes('hombre') || textoLower.includes('varon') || textoLower.includes('varón')) {
+          sesion.preferenciaSexoChofer = 'MASCULINO';
+        } else if (textoLower.includes('indistinto') || textoLower.includes('cualquier')) {
+          sesion.preferenciaSexoChofer = 'INDISTINTO';
+        } else if (actionId === 'BTN_TOGGLE_MASCOTA' || textoLower.includes('mascota') || textoLower.includes('perro') || textoLower.includes('gato')) {
+          sesion.conMascota = !sesion.conMascota;
+        } else if (actionId === 'BTN_TOGGLE_SILLA' || textoLower.includes('silla')) {
+          sesion.conSillaRuedas = !sesion.conSillaRuedas;
+        }
+        sesion.estado = 'CONFIRMANDO_COTIZACION';
+        return await enviarResumenCotizacionWhatsApp(cleanFrom, sesion);
       }
 
       case 'CONFIRMANDO_CANCELACION_VIAJE': {
@@ -2428,6 +2510,12 @@ export const whatsappBotService = {
           tipo: esPeriodica ? 'PERIODICA' : 'UNICA',
           diasSemana: diasSemanaJson,
           estado: 'ACTIVA',
+          preferenciaSexoChofer:
+            sesion.preferenciaSexoChofer ||
+            (clienteExistente?.preferenciaSexoChofer as string) ||
+            'INDISTINTO',
+          conMascota: Boolean(sesion.conMascota),
+          conSillaRuedas: Boolean(sesion.conSillaRuedas),
           observaciones: `Reserva ${esPeriodica ? 'periódica ' : ''}programada por WhatsApp Bot (${fechaTexto}). Est: $${precio.toLocaleString('es-AR')}`,
           remiseriaId,
           clienteId: clienteExistente?.id || null,
@@ -2532,6 +2620,13 @@ export const whatsappBotService = {
           ? `${sesion.destinoLat},${sesion.destinoLon}`
           : undefined;
 
+      const prefSexoFinal =
+        sesion.preferenciaSexoChofer ||
+        (clienteExistente?.preferenciaSexoChofer as 'INDISTINTO' | 'FEMENINO' | 'MASCULINO') ||
+        'INDISTINTO';
+      const conMascotaFinal = Boolean(sesion.conMascota);
+      const conSillaRuedasFinal = Boolean(sesion.conSillaRuedas);
+
       const viaje = await prisma.viaje.create({
         data: {
           origen,
@@ -2539,6 +2634,9 @@ export const whatsappBotService = {
           precio,
           fecha: new Date(),
           estado: 'PENDIENTE',
+          preferenciaSexoChofer: prefSexoFinal,
+          conMascota: conMascotaFinal,
+          conSillaRuedas: conSillaRuedasFinal,
           observaciones: 'Pedido generado automáticamente por WhatsApp Bot',
           clienteId: clienteExistente?.id || null,
           clienteNombre,
@@ -2570,16 +2668,78 @@ export const whatsappBotService = {
         console.warn('Socket aviso WhatsApp nuevo viaje:', sErr);
       }
 
-      // 2. Disparar notificación Push a los choferes conectados de la remisería
+      // 2. Disparar notificación Push a los choferes conectados compatibles de la remisería
       try {
-        pushNotificationService.enviarAChoferesDeRemiseria(remiseriaId, {
-          title: '🚕 ¡Nuevo viaje por WhatsApp!',
-          body: `${origen} ➔ ${destino} ($${precio.toLocaleString('es-AR')})`,
-          url: '/chofer/app',
-          tag: `whatsapp-viaje-${viaje.id}`,
-          data: { viajeId: viaje.id },
-        }).catch(() => {});
+        const tagsEspeciales = [
+          conMascotaFinal ? '🐾 Mascota' : null,
+          conSillaRuedasFinal ? '♿ Silla de ruedas' : null,
+        ].filter(Boolean).join(' • ');
+        pushNotificationService.enviarAChoferesDeRemiseria(
+          remiseriaId,
+          {
+            title: '🚕 ¡Nuevo viaje por WhatsApp!',
+            body: tagsEspeciales
+              ? `${tagsEspeciales} | ${origen} ➔ ${destino} ($${precio.toLocaleString('es-AR')})`
+              : `${origen} ➔ ${destino} ($${precio.toLocaleString('es-AR')})`,
+            url: '/chofer/app',
+            tag: `whatsapp-viaje-${viaje.id}`,
+            data: { viajeId: viaje.id },
+          },
+          undefined,
+          {
+            preferenciaSexoChofer: prefSexoFinal,
+            conMascota: conMascotaFinal,
+            conSillaRuedas: conSillaRuedasFinal,
+          }
+        ).catch(() => {});
       } catch {}
+
+      // Verificar disponibilidad inmediata si el pasajero pidió sexo de chofer específico
+      let avisoSinChoferSexo = '';
+      let mostrarBotonCualquierChofer = false;
+      if (prefSexoFinal === 'FEMENINO' || prefSexoFinal === 'MASCULINO') {
+        try {
+          const [choferesDelSexo, viajesOcupados] = await Promise.all([
+            prisma.chofer.findMany({
+              where: { remiseriaId, estado: 'ACTIVO', isOnline: true, sexo: prefSexoFinal },
+              select: { id: true, observaciones: true },
+            }),
+            prisma.viaje.findMany({
+              where: {
+                remiseriaId,
+                choferId: { not: null },
+                OR: [
+                  { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+                  { estado: 'ACEPTADO', artEmpresaId: null },
+                ],
+              },
+              select: { choferId: true },
+            }),
+          ]);
+          const ocupadosIds = new Set(viajesOcupados.map((v) => v.choferId).filter(Boolean));
+          const libresDelSexo = choferesDelSexo.filter((c) => {
+            if (ocupadosIds.has(c.id)) return false;
+            if (c.observaciones && c.observaciones.startsWith('{')) {
+              try {
+                if (JSON.parse(c.observaciones).enPausa === true) return false;
+              } catch {}
+            }
+            return true;
+          }).length;
+
+          if (libresDelSexo === 0) {
+            mostrarBotonCualquierChofer = true;
+            const esFem = prefSexoFinal === 'FEMENINO';
+            if (choferesDelSexo.length > 0) {
+              avisoSinChoferSexo =
+                `\n⚠️ *Aviso:* Hay ${choferesDelSexo.length} ${esFem ? 'chofer mujer' : 'chofer hombre'} con turno activo, pero está en viaje. Podés esperar a que se libere o tocar *✅ Cualquier chofer* para salir antes.\n`;
+            } else {
+              avisoSinChoferSexo =
+                `\n⚠️ *Aviso:* En este momento no hay ${esFem ? 'choferes mujeres conectadas' : 'choferes hombres conectados'}. ¿Querés aceptar *cualquier chofer disponible* solo por este viaje?\n`;
+            }
+          }
+        } catch {}
+      }
 
       // 3. Confirmar al pasajero por WhatsApp (con saludo especial si hoy es su cumpleaños)
       let prefijoCumple = '';
@@ -2616,15 +2776,25 @@ export const whatsappBotService = {
         prefijoCumple +
         `🚕 *¡Pedido confirmado!*\n\n` +
         `Tu solicitud ya ingresó a nuestra central con el viaje *#${viaje.id.slice(-4).toUpperCase()}*.\n` +
-        `🔒 *PIN de inicio de viaje:* *${codigoPin}*${avisoDeudaPendiente}\n\n` +
+        `🔒 *PIN de inicio de viaje:* *${codigoPin}*${avisoDeudaPendiente}${avisoSinChoferSexo}\n\n` +
         `Estamos asignándote el mejor móvil disponible. Te avisaremos por acá en cuanto el chofer salga a buscarte.\n\n` +
         `📲 _Tip: Descargá nuestra App en_ *${APP_CLIENTES_URL}* _para ver el móvil en el mapa y pedir viajes aunque algún día se caiga WhatsApp._`;
 
-      await whatsappService.enviarBotones(cleanFrom, confirmacionTexto, [
-        { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
-        { id: `BTN_CANCELAR_VIAJE_${viaje.id}`, title: '❌ Cancelar Pedido' },
-        { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
-      ]);
+      await whatsappService.enviarBotones(
+        cleanFrom,
+        confirmacionTexto,
+        mostrarBotonCualquierChofer
+          ? [
+              { id: `BTN_ACEPTAR_CUALQUIER_CHOFER_${viaje.id}`, title: '✅ Cualquier chofer' },
+              { id: `BTN_CANCELAR_VIAJE_${viaje.id}`, title: '❌ Cancelar Pedido' },
+              { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
+            ]
+          : [
+              { id: 'BTN_ESTADO', title: '📍 Estado del viaje' },
+              { id: `BTN_CANCELAR_VIAJE_${viaje.id}`, title: '❌ Cancelar Pedido' },
+              { id: 'BTN_OPERADOR', title: '📞 Hablar Central' },
+            ]
+      );
 
       return { success: true, viajeId: viaje.id };
     } catch (err: any) {
