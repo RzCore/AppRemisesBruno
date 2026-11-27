@@ -60,7 +60,15 @@ export default function ArtPage() {
   const [asignandoViajeId, setAsignandoViajeId] = useState<string | null>(null);
   const [filtroArtPendiente, setFiltroArtPendiente] = useState<string>('all');
   const [filtroEstadoPendiente, setFiltroEstadoPendiente] = useState<'todos' | 'sin_chofer' | 'asignados'>('todos');
+  const [filtroFechaPendiente, setFiltroFechaPendiente] = useState<string>('');
   const [remiseriaNombre, setRemiseriaNombre] = useState('Remises Bruno');
+
+  const toLocalDateKey = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   // Modal Crear / Editar ART
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -100,6 +108,7 @@ export default function ArtPage() {
   });
   const [savingPortalConfig, setSavingPortalConfig] = useState(false);
   const [sincronizandoPortal, setSincronizandoPortal] = useState(false);
+  const [sincronizandoArtId, setSincronizandoArtId] = useState<string | null>(null);
 
   const abrirModalPortal = (art: any) => {
     setPortalModalArt(art);
@@ -178,6 +187,25 @@ export default function ArtPage() {
       toast.error('Error de red al sincronizar');
     } finally {
       setSincronizandoPortal(false);
+    }
+  };
+
+  const handleSincronizarArtDesdeTarjeta = async (art: ArtEmpresa) => {
+    try {
+      setSincronizandoArtId(art.id);
+      const res = await artEmpresaService.sincronizarPortalExterno(art.id);
+      if (res.success) {
+        toast.success(res.message || `Sincronización de ${art.nombre} completada`);
+        await cargarDatos();
+        if (activeTab === 'facturacion') cargarFacturacion();
+      } else {
+        toast.error(res.message || `No se pudo sincronizar ${art.nombre}`);
+        await cargarDatos();
+      }
+    } catch {
+      toast.error(`Error de red al sincronizar ${art.nombre}`);
+    } finally {
+      setSincronizandoArtId(null);
     }
   };
 
@@ -1481,59 +1509,147 @@ export default function ArtPage() {
       {/* ============================================================== */}
       {/* PESTAÑA 1B: VIAJES ART POR ASIGNAR / PROGRAMADOS (DUEÑO)       */}
       {/* ============================================================== */}
-      {activeTab === 'pendientes' && (
+      {activeTab === 'pendientes' && (() => {
+        const hoyKey = toLocalDateKey(new Date());
+        const mananaDate = new Date();
+        mananaDate.setDate(mananaDate.getDate() + 1);
+        const mananaKey = toLocalDateKey(mananaDate);
+
+        const listaFiltrada = viajesArtPendientes.filter((v) => {
+          if (filtroArtPendiente !== 'all' && v.artEmpresaId !== filtroArtPendiente) return false;
+          if (filtroEstadoPendiente === 'sin_chofer' && v.choferId) return false;
+          if (filtroEstadoPendiente === 'asignados' && !v.choferId) return false;
+          if (filtroFechaPendiente) {
+            const fechaViajeKey = v.fecha ? toLocalDateKey(new Date(v.fecha)) : '';
+            if (fechaViajeKey !== filtroFechaPendiente) return false;
+          }
+          return true;
+        });
+
+        return (
         <div className="space-y-4 animate-in fade-in duration-200">
-          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-900">Viajes ART Pendientes y Programados</h3>
-              <p className="text-xs text-slate-500">
-                Asigná o reasigná choferes directamente a los viajes importados de Feleval o cargados manualmente.
-              </p>
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Viajes ART Pendientes y Programados</h3>
+                <p className="text-xs text-slate-500">
+                  Asigná o reasigná choferes directamente a los viajes importados o cargados manualmente.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={filtroArtPendiente}
+                  onChange={(e) => setFiltroArtPendiente(e.target.value)}
+                  className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white"
+                >
+                  <option value="all">Todas las ARTs</option>
+                  {artList.map((a) => (
+                    <option key={a.id} value={a.id}>{a.nombre}</option>
+                  ))}
+                </select>
+                <select
+                  value={filtroEstadoPendiente}
+                  onChange={(e) => setFiltroEstadoPendiente(e.target.value as any)}
+                  className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white"
+                >
+                  <option value="todos">Todos</option>
+                  <option value="sin_chofer">Sin chofer asignado</option>
+                  <option value="asignados">Ya asignados</option>
+                </select>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={filtroArtPendiente}
-                onChange={(e) => setFiltroArtPendiente(e.target.value)}
-                className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white"
-              >
-                <option value="all">Todas las ARTs</option>
-                {artList.map((a) => (
-                  <option key={a.id} value={a.id}>{a.nombre}</option>
-                ))}
-              </select>
-              <select
-                value={filtroEstadoPendiente}
-                onChange={(e) => setFiltroEstadoPendiente(e.target.value as any)}
-                className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white"
-              >
-                <option value="todos">Todos</option>
-                <option value="sin_chofer">Sin chofer asignado</option>
-                <option value="asignados">Ya asignados</option>
-              </select>
+
+            {/* Selector de día */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-500 flex items-center gap-1 mr-1">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                  Día:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFiltroFechaPendiente('')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    filtroFechaPendiente === ''
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroFechaPendiente(hoyKey)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    filtroFechaPendiente === hoyKey
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Hoy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroFechaPendiente(mananaKey)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    filtroFechaPendiente === mananaKey
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Mañana
+                </button>
+                <div className="flex items-center gap-1 ml-0.5">
+                  <input
+                    type="date"
+                    value={filtroFechaPendiente}
+                    onChange={(e) => setFiltroFechaPendiente(e.target.value)}
+                    aria-label="Filtrar por día"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  {filtroFechaPendiente && (
+                    <button
+                      type="button"
+                      onClick={() => setFiltroFechaPendiente('')}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                      title="Quitar filtro de día"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <span className="text-xs font-semibold text-slate-500">
+                Mostrando <strong className="text-slate-900">{listaFiltrada.length}</strong> de {viajesArtPendientes.length} viajes
+              </span>
             </div>
           </div>
 
-          {(() => {
-            const listaFiltrada = viajesArtPendientes.filter((v) => {
-              if (filtroArtPendiente !== 'all' && v.artEmpresaId !== filtroArtPendiente) return false;
-              if (filtroEstadoPendiente === 'sin_chofer' && v.choferId) return false;
-              if (filtroEstadoPendiente === 'asignados' && !v.choferId) return false;
-              return true;
-            });
-
-            if (listaFiltrada.length === 0) {
-              return (
-                <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center">
+          {listaFiltrada.length === 0 ? (
+                <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-2">
                   <Car className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                  <p className="text-sm font-bold text-slate-700">No hay viajes ART en esta vista</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Creá un viaje manual o sincronizá desde Feleval para verlos acá.
+                  <p className="text-sm font-bold text-slate-700">
+                    {filtroFechaPendiente
+                      ? 'No hay viajes ART para el día seleccionado'
+                      : 'No hay viajes ART en esta vista'}
                   </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {filtroFechaPendiente
+                      ? 'Probá elegir otra fecha o volver a ver todos los días.'
+                      : 'Creá un viaje manual o sincronizá desde el portal para verlos acá.'}
+                  </p>
+                  {filtroFechaPendiente && (
+                    <button
+                      type="button"
+                      onClick={() => setFiltroFechaPendiente('')}
+                      className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold border border-amber-200 transition-colors"
+                    >
+                      Ver todos los días
+                    </button>
+                  )}
                 </div>
-              );
-            }
-
-            return (
+              ) : (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 {/* VISTA MÓVIL (CARDS TÁCTILES) */}
                 <div className="block md:hidden divide-y divide-slate-100">
@@ -1546,7 +1662,7 @@ export default function ArtPage() {
                           <div className="min-w-0">
                             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border font-bold text-[10px] ${artColors.badge}`}>
                               <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
-                              ART - {v.artEmpresa?.nombre || 'Empresa'}
+                              ART - {v.artEmpresa?.nombre || 'ART'}
                             </span>
                             <h4 className="font-bold text-slate-900 text-sm mt-1 break-words">
                               {v.clienteNombre || 'Sin nombre'}
@@ -1689,7 +1805,7 @@ export default function ArtPage() {
                                   <div className="flex flex-col items-start gap-1">
                                     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border font-bold text-[10px] ${artColors.badge}`}>
                                       <span className={`w-1.5 h-1.5 rounded-full ${artColors.dot}`} />
-                                      ART - {v.artEmpresa?.nombre || 'Empresa'}
+                                      ART - {v.artEmpresa?.nombre || 'ART'}
                                     </span>
                                     {v.numeroSiniestro && (
                                       <span className={`inline-flex px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold ${artColors.siniestro}`}>
@@ -1776,10 +1892,10 @@ export default function ArtPage() {
                   </table>
                 </div>
               </div>
-            );
-          })()}
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ============================================================== */}
       {/* PESTAÑA 1: GESTIÓN DE TARIFAS ART                              */}
@@ -1874,13 +1990,111 @@ export default function ArtPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {artList.map((art) => (
+              {artList.map((art) => {
+                const estadoSync = art.portalExternoUltimoEstado;
+                const portalConfigurado = Boolean(art.portalExternoActivo || art.portalExternoEmail || estadoSync);
+                const syncOk = estadoSync === 'OK';
+                const syncError = Boolean(estadoSync && estadoSync !== 'OK');
+                const estaSincronizandoEsta = sincronizandoArtId === art.id;
+                const ultimaSyncTexto = art.portalExternoUltimaSync
+                  ? new Date(art.portalExternoUltimaSync).toLocaleString('es-AR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })
+                  : null;
+
+                return (
                 <div
                   key={art.id}
-                  className={`bg-white rounded-2xl border transition-all duration-200 shadow-sm hover:shadow-md flex flex-col justify-between ${
-                    art.activo ? 'border-slate-200' : 'border-slate-200/60 opacity-80 bg-slate-50/50'
+                  className={`bg-white rounded-2xl border transition-all duration-200 shadow-sm hover:shadow-md flex flex-col justify-between overflow-hidden ${
+                    syncError
+                      ? 'border-red-300'
+                      : art.activo
+                      ? 'border-slate-200'
+                      : 'border-slate-200/60 opacity-80 bg-slate-50/50'
                   }`}
                 >
+                  {/* Banner de Estado de Sincronización */}
+                  <div
+                    className={`px-4 py-2.5 border-b flex items-center justify-between gap-2.5 ${
+                      syncError
+                        ? 'bg-red-50 border-red-200 text-red-900'
+                        : syncOk
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : portalConfigurado
+                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                        : 'bg-slate-50 border-slate-200/80 text-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2 min-w-0">
+                      {syncError ? (
+                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                      ) : syncOk ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      ) : portalConfigurado ? (
+                        <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold leading-tight truncate">
+                          {syncError
+                            ? estadoSync === 'ERROR_CLAVE'
+                              ? 'Error de sync · Clave vencida'
+                              : 'Falló la sincronización'
+                            : syncOk
+                            ? 'Sincronizado correctamente'
+                            : portalConfigurado
+                            ? 'Pendiente de sincronizar'
+                            : 'Sin sincronización configurada'}
+                        </p>
+                        <p
+                          className="text-[11px] opacity-80 truncate mt-0.5"
+                          title={art.portalExternoUltimoMensaje || undefined}
+                        >
+                          {syncError
+                            ? art.portalExternoUltimoMensaje || (ultimaSyncTexto ? `Último intento: ${ultimaSyncTexto}` : 'Reintentá sincronizar ahora')
+                            : syncOk
+                            ? ultimaSyncTexto
+                              ? `Última sync: ${ultimaSyncTexto}`
+                              : 'Portal actualizado'
+                            : portalConfigurado
+                            ? 'Portal listo para importar viajes'
+                            : 'Configurá Feleval o SIMAR2'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {portalConfigurado ? (
+                      <button
+                        type="button"
+                        disabled={estaSincronizandoEsta}
+                        onClick={() => handleSincronizarArtDesdeTarjeta(art)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 shrink-0 transition-colors disabled:opacity-60 ${
+                          syncError
+                            ? 'bg-red-600 hover:bg-red-700 text-white shadow-xs'
+                            : syncOk
+                            ? 'bg-white hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-600 hover:bg-amber-700 text-white shadow-xs'
+                        }`}
+                        title="Sincronizar viajes de esta ART ahora"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${estaSincronizandoEsta ? 'animate-spin' : ''}`} />
+                        {estaSincronizandoEsta ? 'Sincronizando...' : 'Sincronizar ahora'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => abrirModalPortal(art)}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shrink-0 transition-colors"
+                      >
+                        Configurar
+                      </button>
+                    )}
+                  </div>
+
                   {/* Encabezado de la Tarjeta */}
                   <div className="p-6 border-b border-slate-100">
                     <div className="flex items-start justify-between gap-3">
@@ -2058,7 +2272,8 @@ export default function ArtPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

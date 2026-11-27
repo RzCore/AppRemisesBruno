@@ -837,6 +837,14 @@ export interface ArtEmpresa {
   totalKm?: number;
   totalEsperaMinutos?: number;
   totalCostoEspera?: number;
+  portalExternoActivo?: boolean;
+  portalExternoTipo?: 'FELEVAL' | 'SIMAR2' | string | null;
+  portalExternoUrl?: string | null;
+  portalExternoEmail?: string | null;
+  portalExternoEmailAlerta?: string | null;
+  portalExternoUltimaSync?: string | null;
+  portalExternoUltimoEstado?: 'OK' | 'ERROR_CLAVE' | 'ERROR_CONEXION' | string | null;
+  portalExternoUltimoMensaje?: string | null;
 }
 
 export interface CreateArtEmpresaData {
