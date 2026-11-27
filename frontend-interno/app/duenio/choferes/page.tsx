@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useDuenioData, DUENIO_CACHE_KEYS } from '@/contexts/DuenioDataContext';
 import { choferService, remiseriaService, vehiculoService } from '@/lib/api';
 import { Chofer, CreateChoferData, Remiseria, Vehiculo } from '@/types';
-import { Truck, Car, Plus, Edit, Trash2, Eye, EyeOff, Search, Filter, ArrowLeft, User, Calendar, Phone, Mail, MapPin, FileText, CheckCircle, XCircle, Clock, ChevronRight, ChevronLeft, ChevronDown, Check, Sparkles, ShieldCheck, ShieldAlert, Bell } from 'lucide-react';
+import { Truck, Car, Plus, Edit, Trash2, Eye, EyeOff, Search, Filter, ArrowLeft, User, Calendar, Phone, Mail, MapPin, FileText, CheckCircle, XCircle, Clock, ChevronRight, ChevronLeft, ChevronDown, Check, Sparkles, ShieldCheck, ShieldAlert, Bell, Download, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { evaluarDocumentacionClient, getDocumentoBadgeClasses } from '@/lib/documentacionUtils';
 
@@ -719,6 +719,95 @@ export default function ChoferesPage() {
     }
   };
 
+  const normalizarTelefonoWhatsapp = (tel?: string) => {
+    const digits = String(tel || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('549') && digits.length >= 12) return `+${digits}`;
+    if (digits.startsWith('54') && digits.length >= 11) return `+549${digits.slice(2)}`;
+    const sinCero = digits.startsWith('0') ? digits.slice(1) : digits;
+    // Si tiene formato 234615XXXXXX quitar el 15 intermedio
+    const sin15 = sinCero.length === 12 && sinCero.slice(4, 6) === '15'
+      ? `${sinCero.slice(0, 4)}${sinCero.slice(6)}`
+      : sinCero;
+    return `+549${sin15}`;
+  };
+
+  const handleExportarCsv = () => {
+    const lista = [...filteredChoferes].sort((a, b) =>
+      String(a.numeroChofer || '').localeCompare(String(b.numeroChofer || ''), 'es', { numeric: true })
+    );
+    if (lista.length === 0) {
+      toast.error('No hay choferes para exportar con el filtro actual');
+      return;
+    }
+
+    const escapeCsv = (val: unknown) => {
+      const str = String(val ?? '').replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const headers = ['Nombre', 'Apellido', 'Telefono', 'Numero_Movil', 'Estado'];
+    const rows = lista.map((c) => [
+      escapeCsv(c.nombre || ''),
+      escapeCsv(c.apellido || ''),
+      escapeCsv(c.telefono || ''),
+      escapeCsv(c.numeroChofer || ''),
+      escapeCsv(c.estado || ''),
+    ].join(','));
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const fechaHoy = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `choferes_remises_bruno_${fechaHoy}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`CSV descargado con ${lista.length} choferes`);
+  };
+
+  const handleExportarVcf = () => {
+    const lista = [...filteredChoferes]
+      .filter((c) => Boolean(c.telefono))
+      .sort((a, b) =>
+        String(a.numeroChofer || '').localeCompare(String(b.numeroChofer || ''), 'es', { numeric: true })
+      );
+    if (lista.length === 0) {
+      toast.error('No hay choferes con teléfono para exportar');
+      return;
+    }
+
+    const vcards = lista.map((c) => {
+      const movilPrefix = c.numeroChofer ? `Movil ${c.numeroChofer} - ` : '';
+      const fullName = `${movilPrefix}${c.nombre || ''} ${c.apellido || ''}`.trim();
+      const telIntl = normalizarTelefonoWhatsapp(c.telefono);
+      return [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `N:${c.apellido || ''};${movilPrefix}${c.nombre || ''};;;`,
+        `FN:${fullName}`,
+        `ORG:Remises Bruno`,
+        `TEL;TYPE=CELL:${telIntl || c.telefono}`,
+        'END:VCARD',
+      ].join('\r\n');
+    });
+
+    const blob = new Blob([vcards.join('\r\n')], { type: 'text/vcard;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const fechaHoy = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `contactos_choferes_bruno_${fechaHoy}.vcf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`Agenda .vcf descargada con ${lista.length} choferes lista para WhatsApp`);
+  };
+
   if (!user) return null;
 
   return (
@@ -728,13 +817,33 @@ export default function ChoferesPage() {
           <h2 className="text-xl font-bold text-slate-900">Choferes</h2>
           <p className="text-sm text-slate-500">Administrá el alta, documentación y vehículos asignados de tus choferes.</p>
         </div>
-        <button
-          onClick={openCreateModal}
-          className="btn btn-primary shadow-md shadow-primary-500/20"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Nuevo Chofer
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportarCsv}
+            className="btn bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-xs text-xs font-bold px-3.5 py-2.5 flex items-center gap-1.5"
+            title="Descargar CSV con nombre, apellido, teléfono y número de móvil"
+          >
+            <Download className="w-4 h-4 text-emerald-600" />
+            <span>Exportar CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleExportarVcf}
+            className="btn bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs text-xs font-bold px-3.5 py-2.5 flex items-center gap-1.5"
+            title="Descargar archivo .vcf para agendar todos los choferes en 1 toque y armar grupo de WhatsApp"
+          >
+            <UserPlus className="w-4 h-4 text-emerald-700" />
+            <span>Agenda WhatsApp (.vcf)</span>
+          </button>
+          <button
+            onClick={openCreateModal}
+            className="btn btn-primary shadow-md shadow-primary-500/20"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Nuevo Chofer
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
