@@ -12,6 +12,9 @@ export interface BatchMatch {
     fecha: Date;
     precio: number;
     tiempoEsperaMinutos: number;
+    preferenciaSexoChofer?: string;
+    conMascota?: boolean;
+    conSillaRuedas?: boolean;
   };
   choferId: string;
   chofer: {
@@ -19,6 +22,9 @@ export interface BatchMatch {
     nombre: string;
     apellido: string;
     telefono: string;
+    sexo?: string;
+    aceptaMascotas?: boolean;
+    aceptaSillaRuedas?: boolean;
     numeroChofer?: string;
     recaudadoHoy?: number;
     viajesHoy?: number;
@@ -411,8 +417,20 @@ export const batchDispatchService = {
           Math.floor((ahora.getTime() - new Date(viaje.createdAt).getTime()) / (1000 * 60))
         );
 
+        // Respetar estrictamente la preferencia de sexo del chofer, mascota y silla de ruedas
+        const prefSexo = (viaje.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
+        const sexoChofer = (chofer.sexo || 'MASCULINO').toUpperCase();
+        const cumplePreferenciaSexo =
+          prefSexo === 'INDISTINTO' || prefSexo === sexoChofer;
+        const cumpleMascota = !viaje.conMascota || Boolean(chofer.aceptaMascotas);
+        const cumpleSillaRuedas = !viaje.conSillaRuedas || Boolean(chofer.aceptaSillaRuedas);
+        const cumpleRequisitos = cumplePreferenciaSexo && cumpleMascota && cumpleSillaRuedas;
+
         // Costo = ETA - (bonus espera pasajero) - (bonus desempate chofer: Criterio A fila + Criterio B recaudación + Criterio C parada)
-        const costo = Math.max(0.01, etaMinutos - minutosEsperandoCliente * 0.4 - bonusDesempateChofer);
+        // Si no cumple algún requisito, asignar costo prohibitivo (1e9) para que el algoritmo Húngaro nunca lo empareje
+        const costo = cumpleRequisitos
+          ? Math.max(0.01, etaMinutos - minutosEsperandoCliente * 0.4 - bonusDesempateChofer)
+          : 1e9;
 
         costMatrix[i][j] = costo;
         etaMatrix[i][j] = etaMinutos;
@@ -432,7 +450,7 @@ export const batchDispatchService = {
       let menorEta = Infinity;
 
       for (let i = 0; i < numChoferes; i++) {
-        if (!choferesUsadosGreedy.has(i) && etaMatrix[i][j] < menorEta) {
+        if (!choferesUsadosGreedy.has(i) && costMatrix[i][j] < 1e8 && etaMatrix[i][j] < menorEta) {
           menorEta = etaMatrix[i][j];
           mejorChoferIdx = i;
         }
@@ -484,7 +502,10 @@ export const batchDispatchService = {
             clienteTelefono: viaje.clienteTelefono || viaje.cliente?.telefono || null,
             fecha: viaje.fecha,
             precio: Number(viaje.precio),
-            tiempoEsperaMinutos: minutosEspera
+            tiempoEsperaMinutos: minutosEspera,
+            preferenciaSexoChofer: viaje.preferenciaSexoChofer || 'INDISTINTO',
+            conMascota: Boolean(viaje.conMascota),
+            conSillaRuedas: Boolean(viaje.conSillaRuedas)
           },
           choferId: chofer.id,
           chofer: {
@@ -492,6 +513,9 @@ export const batchDispatchService = {
             nombre: chofer.nombre,
             apellido: chofer.apellido,
             telefono: chofer.telefono,
+            sexo: chofer.sexo || 'MASCULINO',
+            aceptaMascotas: Boolean(chofer.aceptaMascotas),
+            aceptaSillaRuedas: chofer.aceptaSillaRuedas !== false,
             numeroChofer: chofer.numeroChofer,
             recaudadoHoy: statChofer.recaudadoTurno,
             viajesHoy: statChofer.viajesTurno,

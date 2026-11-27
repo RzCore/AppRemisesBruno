@@ -1002,7 +1002,10 @@ export const coordinatorDashboardController = {
         vehiculoId,
         artEmpresaId,
         numeroSiniestro,
-        metodoPago
+        metodoPago,
+        preferenciaSexoChofer,
+        conMascota,
+        conSillaRuedas
       } = req.body;
 
       if (!coordinadorId) {
@@ -1037,6 +1040,19 @@ export const coordinatorDashboardController = {
         }
       }
 
+      let preferenciaSexoFinal = 'INDISTINTO';
+      if (preferenciaSexoChofer === 'FEMENINO' || preferenciaSexoChofer === 'MASCULINO' || preferenciaSexoChofer === 'INDISTINTO') {
+        preferenciaSexoFinal = preferenciaSexoChofer;
+      } else if (clienteId) {
+        const clPref = await prisma.cliente.findUnique({
+          where: { id: clienteId },
+          select: { preferenciaSexoChofer: true }
+        });
+        if (clPref?.preferenciaSexoChofer) {
+          preferenciaSexoFinal = clPref.preferenciaSexoChofer;
+        }
+      }
+
       const viaje = await prisma.viaje.create({
         data: {
           origen,
@@ -1048,6 +1064,9 @@ export const coordinatorDashboardController = {
           clienteEmail,
           clienteId: clienteId || null,
           prioridad: prioridad || 'NORMAL',
+          preferenciaSexoChofer: preferenciaSexoFinal,
+          conMascota: Boolean(conMascota),
+          conSillaRuedas: Boolean(conSillaRuedas),
           metodoPago: metodoPagoFinal,
           origenDetallado,
           destinoDetallado,
@@ -1545,7 +1564,10 @@ export const coordinatorDashboardController = {
         horaFin,
         diasSemana,
         tipo,
-        observaciones
+        observaciones,
+        preferenciaSexoChofer,
+        conMascota,
+        conSillaRuedas
       } = req.body;
 
       if (!coordinadorId) {
@@ -1580,6 +1602,12 @@ export const coordinatorDashboardController = {
           horaFin,
           diasSemana: diasSemana ? JSON.stringify(diasSemana) : null,
           tipo: tipo || 'UNICA',
+          preferenciaSexoChofer:
+            preferenciaSexoChofer === 'FEMENINO' || preferenciaSexoChofer === 'MASCULINO'
+              ? preferenciaSexoChofer
+              : 'INDISTINTO',
+          conMascota: Boolean(conMascota),
+          conSillaRuedas: Boolean(conSillaRuedas),
           observaciones,
           remiseriaId: coordinador.remiseriaId,
           estado: 'ACTIVA'
@@ -1629,7 +1657,10 @@ export const coordinatorDashboardController = {
         horaFin,
         diasSemana,
         tipo,
-        observaciones
+        observaciones,
+        preferenciaSexoChofer,
+        conMascota,
+        conSillaRuedas
       } = req.body;
 
       if (!coordinadorId) {
@@ -2387,7 +2418,10 @@ export const coordinatorDashboardController = {
         recargoTipo,
         recargoMonto,
         artEmpresaId,
-        numeroSiniestro
+        numeroSiniestro,
+        preferenciaSexoChofer,
+        conMascota,
+        conSillaRuedas
       } = req.body;
 
       if (!telefono || !origen) {
@@ -2512,6 +2546,12 @@ export const coordinatorDashboardController = {
           estado: estadoInicial,
           observaciones: observaciones || null,
           prioridad: prioridad || 'NORMAL',
+          preferenciaSexoChofer:
+            preferenciaSexoChofer === 'FEMENINO' || preferenciaSexoChofer === 'MASCULINO' || preferenciaSexoChofer === 'INDISTINTO'
+              ? preferenciaSexoChofer
+              : (cliente?.preferenciaSexoChofer || 'INDISTINTO'),
+          conMascota: Boolean(conMascota),
+          conSillaRuedas: Boolean(conSillaRuedas),
           choferId: choferId || null,
           vehiculoId: choferVehiculoId,
           recargoTipo: null,

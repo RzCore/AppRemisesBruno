@@ -232,6 +232,9 @@ export async function procesarReservasProgramadas() {
           choferId: reserva.choferId || null,
           vehiculoId: reserva.vehiculoId || null,
           remiseriaId: reserva.remiseriaId,
+          preferenciaSexoChofer: reserva.preferenciaSexoChofer || 'INDISTINTO',
+          conMascota: Boolean(reserva.conMascota),
+          conSillaRuedas: Boolean(reserva.conSillaRuedas),
           observaciones: observacionesFinal,
         },
         include: {
@@ -268,7 +271,7 @@ export async function procesarReservasProgramadas() {
                 estado: 'ACTIVO',
                 isOnline: true,
               },
-              select: { id: true, observaciones: true },
+              select: { id: true, sexo: true, aceptaMascotas: true, aceptaSillaRuedas: true, observaciones: true },
             }),
             prisma.viaje.findMany({
               where: {
@@ -284,8 +287,14 @@ export async function procesarReservasProgramadas() {
           ]);
 
           const ocupadosSet = new Set(viajesActivos.map((v) => v.choferId).filter(Boolean));
+          const prefSexoReserva = (reserva.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
           const libres = choferesOnline.filter((c) => {
             if (ocupadosSet.has(c.id)) return false;
+            if (prefSexoReserva !== 'INDISTINTO' && (c.sexo || 'MASCULINO').toUpperCase() !== prefSexoReserva) {
+              return false;
+            }
+            if (reserva.conMascota && !c.aceptaMascotas) return false;
+            if (reserva.conSillaRuedas && !c.aceptaSillaRuedas) return false;
             if (c.observaciones && c.observaciones.startsWith('{')) {
               try {
                 if (JSON.parse(c.observaciones).enPausa === true) return false;

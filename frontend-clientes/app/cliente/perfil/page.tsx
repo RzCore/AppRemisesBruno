@@ -127,6 +127,10 @@ export default function ClientePerfilPage() {
   const [mostrarPin, setMostrarPin] = useState(false);
   const [guardandoPin, setGuardandoPin] = useState(false);
 
+  // Preferencia de sexo de chofer
+  const [preferenciaSexoChofer, setPreferenciaSexoChofer] = useState<'INDISTINTO' | 'FEMENINO' | 'MASCULINO'>('INDISTINTO');
+  const [guardandoPreferenciaSexo, setGuardandoPreferenciaSexo] = useState(false);
+
   // Direcciones Frecuentes
   const [direcciones, setDirecciones] = useState<DireccionFrecuente[]>([]);
   const [modalDireccion, setModalDireccion] = useState(false);
@@ -172,6 +176,9 @@ export default function ClientePerfilPage() {
       });
       setIsDomicilioSelected(true);
       setSugerenciasDomicilio([]);
+      setPreferenciaSexoChofer(
+        (user.cliente.preferenciaSexoChofer as 'INDISTINTO' | 'FEMENINO' | 'MASCULINO') || 'INDISTINTO'
+      );
 
       // Parsear direcciones frecuentes si existen
       if (user.cliente.direccionesFrecuentes) {
@@ -334,6 +341,43 @@ export default function ClientePerfilPage() {
     setSugerenciasDomicilio([]);
     setIsDomicilioSelected(true);
     setIsEditing(false);
+  };
+
+  const handleCambiarPreferenciaSexo = async (nuevaPref: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO') => {
+    if (guardandoPreferenciaSexo || nuevaPref === preferenciaSexoChofer) return;
+    const anterior = preferenciaSexoChofer;
+    setPreferenciaSexoChofer(nuevaPref);
+    setGuardandoPreferenciaSexo(true);
+    try {
+      const res = await clienteService.updateProfile({ preferenciaSexoChofer: nuevaPref } as any);
+      if (res.success && res.data) {
+        toast.success(
+          nuevaPref === 'FEMENINO'
+            ? 'Preferencia guardada: Chofer mujer'
+            : nuevaPref === 'MASCULINO'
+            ? 'Preferencia guardada: Chofer hombre'
+            : 'Preferencia guardada: Indistinto'
+        );
+        if (user && user.cliente) {
+          updateUser({
+            ...user,
+            cliente: {
+              ...user.cliente,
+              ...res.data,
+              preferenciaSexoChofer: nuevaPref,
+            },
+          });
+        }
+      } else {
+        setPreferenciaSexoChofer(anterior);
+        toast.error(res.message || 'No se pudo guardar tu preferencia');
+      }
+    } catch {
+      setPreferenciaSexoChofer(anterior);
+      toast.error('Error de conexión al guardar preferencia');
+    } finally {
+      setGuardandoPreferenciaSexo(false);
+    }
   };
 
   const handleGuardarPin = async (e: React.FormEvent) => {
@@ -722,6 +766,54 @@ export default function ClientePerfilPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* TARJETA: PREFERENCIA DE CHOFER */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-gray-200 dark:border-slate-800 p-5 transition-colors space-y-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-pink-50 dark:bg-pink-950/60 text-pink-600 dark:text-pink-400">
+              <User className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-gray-900 dark:text-white">
+                Preferencia de Chofer
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                Elegí si preferís viajar con chofer mujer, chofer hombre o indistinto. Se aplica por defecto en tus viajes y podés cambiarlo cuando quieras.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { value: 'INDISTINTO' as const, label: 'Indistinto', sub: 'Cualquier chofer', icon: '🚕' },
+              { value: 'FEMENINO' as const, label: 'Chofer mujer', sub: 'Solo femenino', icon: '♀' },
+              { value: 'MASCULINO' as const, label: 'Chofer hombre', sub: 'Solo masculino', icon: '♂' },
+            ].map((opt) => {
+              const active = preferenciaSexoChofer === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={guardandoPreferenciaSexo}
+                  onClick={() => handleCambiarPreferenciaSexo(opt.value)}
+                  className={`p-3 rounded-xl border-2 text-center transition-all flex flex-col items-center justify-center gap-1 ${
+                    active
+                      ? opt.value === 'FEMENINO'
+                        ? 'border-pink-500 bg-pink-50 dark:bg-pink-950/40 text-pink-800 dark:text-pink-200 shadow-xs'
+                        : opt.value === 'MASCULINO'
+                        ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-800 dark:text-sky-200 shadow-xs'
+                        : 'border-primary-500 bg-primary-50 dark:bg-primary-950/40 text-primary-800 dark:text-primary-200 shadow-xs'
+                      : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="text-lg leading-none">{opt.icon}</span>
+                  <span className="text-xs font-bold leading-tight">{opt.label}</span>
+                  <span className="text-[10px] opacity-75 leading-tight">{opt.sub}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 

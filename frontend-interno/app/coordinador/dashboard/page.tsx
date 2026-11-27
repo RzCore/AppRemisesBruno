@@ -487,6 +487,9 @@ export default function CoordinadorDashboard() {
           estadoRaw: v.estado,
           tiempo: formattedTime,
           prioridad: v.prioridad || 'NORMAL',
+          preferenciaSexoChofer: v.preferenciaSexoChofer || 'INDISTINTO',
+          conMascota: Boolean(v.conMascota),
+          conSillaRuedas: Boolean(v.conSillaRuedas),
           fecha: formattedDate,
           hora: formattedTime,
           tipo: 'Única',
@@ -5499,6 +5502,32 @@ export default function CoordinadorDashboard() {
                     <span className="font-semibold text-gray-600">Destino:</span>
                     <span className="text-gray-900 truncate max-w-[220px]">{selectedViajeObj.destino}</span>
                   </div>
+                  {selectedViajeObj.preferenciaSexoChofer && selectedViajeObj.preferenciaSexoChofer !== 'INDISTINTO' && (
+                    <div className="pt-1.5 mt-1 border-t border-red-200 flex items-center justify-between">
+                      <span className="font-semibold text-gray-600">Preferencia de Chofer:</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        selectedViajeObj.preferenciaSexoChofer === 'FEMENINO'
+                          ? 'bg-pink-100 text-pink-800 border border-pink-300'
+                          : 'bg-sky-100 text-sky-800 border border-sky-300'
+                      }`}>
+                        {selectedViajeObj.preferenciaSexoChofer === 'FEMENINO' ? '♀ Solo chofer mujer' : '♂ Solo chofer hombre'}
+                      </span>
+                    </div>
+                  )}
+                  {(selectedViajeObj.conMascota || selectedViajeObj.conSillaRuedas) && (
+                    <div className="pt-1.5 mt-1 border-t border-red-200 flex flex-wrap gap-1.5">
+                      {selectedViajeObj.conMascota && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          🐾 Viaja con mascota
+                        </span>
+                      )}
+                      {selectedViajeObj.conSillaRuedas && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                          ♿ Viaja con silla de ruedas
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5515,7 +5544,9 @@ export default function CoordinadorDashboard() {
                   <option value="">Seleccione un chofer disponible...</option>
                   {choferesParaAsignar.map((c: any) => (
                     <option key={c.id} value={c.id}>
-                      {c.nombre} {c.apellido} — {c.vehiculo?.patente || 'Auto propio'} ({c.estado || 'Disponible'})
+                      {c.sexo === 'FEMENINO' ? '♀ ' : '♂ '}{c.nombre} {c.apellido} — {c.vehiculo?.patente || 'Auto propio'} ({c.estado || 'Disponible'})
+                      {c.aceptaMascotas ? ' [🐾]' : ''}
+                      {c.aceptaSillaRuedas === false ? ' [Sin ♿]' : ''}
                       {c.enParadaVirtual ? ' [En Base]' : ''}
                       {c.proximoViajeArt ? ` [⚠️ ART Salida: ${c.proximoViajeArt.horaSalidaChofer}hs - NO DISPONIBLE]` : ''}
                     </option>
@@ -5523,25 +5554,68 @@ export default function CoordinadorDashboard() {
                 </select>
                 {(() => {
                   const choferSeleccionado = choferesParaAsignar.find((c: any) => c.id === selectedChoferId);
-                  if (choferSeleccionado?.proximoViajeArt) {
-                    return (
-                      <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs space-y-1 mt-2">
-                        <div className="font-bold flex items-center gap-1.5 text-amber-950">
-                          <span>⚠️</span> ATENCIÓN COORDINADOR: MÓVIL COMPROMETIDO POR ART
+                  const prefSexo = selectedViajeObj?.preferenciaSexoChofer;
+                  const mismatchSexo =
+                    choferSeleccionado &&
+                    prefSexo &&
+                    prefSexo !== 'INDISTINTO' &&
+                    (choferSeleccionado.sexo || 'MASCULINO') !== prefSexo;
+                  const mismatchMascota =
+                    choferSeleccionado && selectedViajeObj?.conMascota && !choferSeleccionado.aceptaMascotas;
+                  const mismatchSilla =
+                    choferSeleccionado && selectedViajeObj?.conSillaRuedas && choferSeleccionado.aceptaSillaRuedas === false;
+                  return (
+                    <>
+                      {mismatchSexo && (
+                        <div className="p-3 bg-pink-50 border border-pink-300 rounded-xl text-pink-900 text-xs space-y-1 mt-2">
+                          <div className="font-bold flex items-center gap-1.5 text-pink-950">
+                            <span>⚠️</span> PREFERENCIA DE CHOFER NO COINCIDE
+                          </div>
+                          <div>
+                            El pasajero solicitó chofer{' '}
+                            <strong>{prefSexo === 'FEMENINO' ? 'mujer (Femenino)' : 'hombre (Masculino)'}</strong>, pero el chofer elegido está registrado como{' '}
+                            <strong>{choferSeleccionado.sexo === 'FEMENINO' ? 'Femenino' : 'Masculino'}</strong>. Confirmá con el pasajero antes de asignar.
+                          </div>
                         </div>
-                        <div>
-                          Este chofer tiene asignado un viaje de <strong>{choferSeleccionado.proximoViajeArt.artNombre}</strong>.
+                      )}
+                      {mismatchMascota && (
+                        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs space-y-1 mt-2">
+                          <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                            <span>🐾</span> ATENCIÓN: PASAJERO CON MASCOTA
+                          </div>
+                          <div>
+                            Este chofer <strong>no tiene habilitado aceptar mascotas</strong>. Consultá con el chofer antes de asignar.
+                          </div>
                         </div>
-                        <div className="font-semibold text-amber-900">
-                          🚗 Salida del Chofer: <strong>{choferSeleccionado.proximoViajeArt.horaSalidaChofer} hs</strong> | 🏥 Turno: <strong>{choferSeleccionado.proximoViajeArt.horaTurno} hs</strong>
+                      )}
+                      {mismatchSilla && (
+                        <div className="p-3 bg-indigo-50 border border-indigo-300 rounded-xl text-indigo-900 text-xs space-y-1 mt-2">
+                          <div className="font-bold flex items-center gap-1.5 text-indigo-950">
+                            <span>♿</span> ATENCIÓN: PASAJERO CON SILLA DE RUEDAS
+                          </div>
+                          <div>
+                            Este chofer <strong>no tiene habilitado traslado con silla de ruedas</strong>. Verificá si dispone de espacio antes de asignar.
+                          </div>
                         </div>
-                        <p className="text-[11px] text-red-600 font-bold">
-                          Asegúrese de no asignar viajes que impidan al chofer salir puntual a las {choferSeleccionado.proximoViajeArt.horaSalidaChofer} hs.
-                        </p>
-                      </div>
-                    );
-                  }
-                  return null;
+                      )}
+                      {choferSeleccionado?.proximoViajeArt && (
+                        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs space-y-1 mt-2">
+                          <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                            <span>⚠️</span> ATENCIÓN COORDINADOR: MÓVIL COMPROMETIDO POR ART
+                          </div>
+                          <div>
+                            Este chofer tiene asignado un viaje de <strong>{choferSeleccionado.proximoViajeArt.artNombre}</strong>.
+                          </div>
+                          <div className="font-semibold text-amber-900">
+                            🚗 Salida del Chofer: <strong>{choferSeleccionado.proximoViajeArt.horaSalidaChofer} hs</strong> | 🏥 Turno: <strong>{choferSeleccionado.proximoViajeArt.horaTurno} hs</strong>
+                          </div>
+                          <p className="text-[11px] text-red-600 font-bold">
+                            Asegúrese de no asignar viajes que impidan al chofer salir puntual a las {choferSeleccionado.proximoViajeArt.horaSalidaChofer} hs.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  );
                 })()}
               </div>
 

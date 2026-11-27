@@ -95,11 +95,13 @@ export interface Cliente {
   nombre: string;
   apellido: string;
   dni: string;
+  sexo?: 'MASCULINO' | 'FEMENINO';
   telefono: string;
   email: string;
   direccion: string;
   fechaNacimiento: string;
   genero?: string;
+  preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
   fotoUrl?: string | null;
   direccionesFrecuentes?: string | DireccionFrecuente[] | null;
   activo: boolean;
@@ -162,6 +164,7 @@ export interface Chofer {
   nombre: string;
   apellido: string;
   dni: string;
+  sexo?: 'MASCULINO' | 'FEMENINO';
   telefono: string;
   email?: string;
   direccion?: string;
@@ -172,6 +175,8 @@ export interface Chofer {
   observaciones?: string;
   esPropietario?: boolean;
   esFranquero?: boolean;
+  aceptaMascotas?: boolean;
+  aceptaSillaRuedas?: boolean;
   comisionPorcentaje?: number;
   isOnline?: boolean;
   rechazosConsecutivos?: number;
@@ -190,6 +195,7 @@ export interface CreateChoferData {
   nombre: string;
   apellido: string;
   dni: string;
+  sexo?: 'MASCULINO' | 'FEMENINO';
   telefono: string;
   email?: string;
   password?: string;
@@ -201,6 +207,8 @@ export interface CreateChoferData {
   vehiculoId?: string;
   esPropietario?: boolean;
   esFranquero?: boolean;
+  aceptaMascotas?: boolean;
+  aceptaSillaRuedas?: boolean;
   comisionPorcentaje?: number;
 }
 
@@ -209,6 +217,7 @@ export interface UpdateChoferData {
   nombre?: string;
   apellido?: string;
   dni?: string;
+  sexo?: 'MASCULINO' | 'FEMENINO';
   telefono?: string;
   email?: string;
   direccion?: string;
@@ -220,6 +229,8 @@ export interface UpdateChoferData {
   vehiculoId?: string;
   esPropietario?: boolean;
   esFranquero?: boolean;
+  aceptaMascotas?: boolean;
+  aceptaSillaRuedas?: boolean;
   comisionPorcentaje?: number;
   isOnline?: boolean;
   rechazosConsecutivos?: number;

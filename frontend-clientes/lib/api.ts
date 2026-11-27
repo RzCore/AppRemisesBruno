@@ -1887,6 +1887,27 @@ export const clienteService = {
     }
   },
 
+  // Cambiar preferencia de sexo de chofer en un viaje pendiente
+  actualizarPreferenciaSexoViaje: async (
+    viajeId: string,
+    preferenciaSexoChofer: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO'
+  ): Promise<ApiResponse<ViajeCliente>> => {
+    try {
+      const response = await api.patch(`/cliente/viajes/${viajeId}/preferencia-sexo`, {
+        preferenciaSexoChofer,
+      });
+      return handleApiResponse<ViajeCliente>(response);
+    } catch (error: any) {
+      return {
+        success: false,
+        message:
+          error.response?.data?.message ||
+          error.response?.data?.error ||
+          'No se pudo actualizar la preferencia del viaje',
+      };
+    }
+  },
+
   // Calificar viaje completado
   calificarViaje: async (
     viajeId: string,
@@ -2116,8 +2137,16 @@ export const clienteService = {
       totalVehiculosActivos: number;
       viajesPendientes: number;
       todosOcupados: boolean;
-      demoraMin: number;
-      demoraMax: number;
+      demoraMin: number | null;
+      demoraMax: number | null;
+      choferesFemeninoOnline?: number;
+      autosDisponiblesFemenino?: number;
+      choferesMasculinoOnline?: number;
+      autosDisponiblesMasculino?: number;
+      choferesMascotasOnline?: number;
+      autosDisponiblesMascotas?: number;
+      choferesSillaRuedasOnline?: number;
+      autosDisponiblesSillaRuedas?: number;
     }>
   > => {
     try {

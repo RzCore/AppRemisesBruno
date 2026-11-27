@@ -217,6 +217,10 @@ export default function ClienteApp() {
   // Método de pago y cambio en efectivo
   const [metodoPago, setMetodoPago] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE'>('EFECTIVO');
   const [pagaCon, setPagaCon] = useState<string>('');
+  const [preferenciaSexoChofer, setPreferenciaSexoChofer] = useState<'INDISTINTO' | 'FEMENINO' | 'MASCULINO'>('INDISTINTO');
+  const [conMascota, setConMascota] = useState(false);
+  const [conSillaRuedas, setConSillaRuedas] = useState(false);
+  const [cambiandoPreferenciaSexo, setCambiandoPreferenciaSexo] = useState(false);
 
   // Estados del Proceso
   const [isCalculando, setIsCalculando] = useState(false);
@@ -722,7 +726,23 @@ export default function ClienteApp() {
     todosOcupados: boolean;
     demoraMin: number | null;
     demoraMax: number | null;
+    choferesFemeninoOnline?: number;
+    autosDisponiblesFemenino?: number;
+    choferesMasculinoOnline?: number;
+    autosDisponiblesMasculino?: number;
+    choferesMascotasOnline?: number;
+    autosDisponiblesMascotas?: number;
+    choferesSillaRuedasOnline?: number;
+    autosDisponiblesSillaRuedas?: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (user?.cliente?.preferenciaSexoChofer) {
+      setPreferenciaSexoChofer(
+        user.cliente.preferenciaSexoChofer as 'INDISTINTO' | 'FEMENINO' | 'MASCULINO'
+      );
+    }
+  }, [user?.cliente?.preferenciaSexoChofer]);
 
   const cargarDisponibilidad = async () => {
     try {
@@ -1260,7 +1280,10 @@ export default function ClienteApp() {
         observaciones: observaciones || undefined,
         paradas: paradasPayload.length > 0 ? paradasPayload : undefined,
         metodoPago,
-        pagaCon: metodoPago === 'EFECTIVO' && pagaCon ? parseFloat(pagaCon) : undefined
+        pagaCon: metodoPago === 'EFECTIVO' && pagaCon ? parseFloat(pagaCon) : undefined,
+        preferenciaSexoChofer,
+        conMascota,
+        conSillaRuedas
       };
 
       const res = await clienteService.solicitarViaje(payload);
@@ -1296,6 +1319,25 @@ export default function ClienteApp() {
       setEstadoViaje('IDLE');
     } finally {
       setIsRequesting(false);
+    }
+  };
+
+  const handleAceptarCualquierChofer = async () => {
+    if (!activeViaje?.id || cambiandoPreferenciaSexo) return;
+    setCambiandoPreferenciaSexo(true);
+    try {
+      const res = await clienteService.actualizarPreferenciaSexoViaje(activeViaje.id, 'INDISTINTO');
+      if (res.success && res.data) {
+        setActiveViaje(res.data);
+        toast.success('¡Listo! Ahora cualquier chofer disponible puede tomar tu viaje.', { duration: 5000 });
+        buscarViajeActivo();
+      } else {
+        toast.error(res.message || 'No se pudo cambiar la preferencia de este viaje');
+      }
+    } catch {
+      toast.error('Error de conexión al actualizar la preferencia');
+    } finally {
+      setCambiandoPreferenciaSexo(false);
     }
   };
 
@@ -1982,6 +2024,158 @@ export default function ClienteApp() {
                 )}
               </div>
 
+              {/* Preferencia de Chofer (por viaje, pre-cargada del perfil) */}
+              <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                    Preferencia de chofer
+                  </label>
+                  {user?.cliente?.preferenciaSexoChofer && user.cliente.preferenciaSexoChofer !== 'INDISTINTO' && (
+                    <span className="text-[10px] font-semibold text-pink-600 dark:text-pink-400">
+                      Según tu perfil
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'INDISTINTO' as const, label: 'Indistinto', icon: '🚕' },
+                    { value: 'FEMENINO' as const, label: 'Mujer', icon: '♀' },
+                    { value: 'MASCULINO' as const, label: 'Hombre', icon: '♂' },
+                  ].map((opt) => {
+                    const active = preferenciaSexoChofer === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setPreferenciaSexoChofer(opt.value)}
+                        className={`py-2 px-2 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+                          active
+                            ? opt.value === 'FEMENINO'
+                              ? 'bg-pink-50 dark:bg-pink-950/40 border-pink-500 text-pink-800 dark:text-pink-200 ring-1 ring-pink-300'
+                              : opt.value === 'MASCULINO'
+                              ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500 text-sky-800 dark:text-sky-200 ring-1 ring-sky-300'
+                              : 'bg-primary-50 dark:bg-primary-950/40 border-primary-500 text-primary-700 dark:text-primary-300 ring-1 ring-primary-300'
+                            : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <span>{opt.icon}</span>
+                        <span>{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {preferenciaSexoChofer !== 'INDISTINTO' && disponibilidad && (() => {
+                  const esFem = preferenciaSexoChofer === 'FEMENINO';
+                  const libres = esFem
+                    ? (disponibilidad.autosDisponiblesFemenino ?? 0)
+                    : (disponibilidad.autosDisponiblesMasculino ?? 0);
+                  const online = esFem
+                    ? (disponibilidad.choferesFemeninoOnline ?? 0)
+                    : (disponibilidad.choferesMasculinoOnline ?? 0);
+
+                  if (libres > 0) {
+                    return (
+                      <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-lg px-2.5 py-1.5">
+                        {esFem ? '♀' : '♂'} Hay {libres} {esFem ? (libres === 1 ? 'chofer mujer disponible' : 'choferes mujeres disponibles') : (libres === 1 ? 'chofer hombre disponible' : 'choferes hombres disponibles')} ahora.
+                      </p>
+                    );
+                  }
+                  if (online > 0) {
+                    return (
+                      <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-2.5 py-2 space-y-1">
+                        <p className="font-semibold">
+                          {esFem ? '♀' : '♂'} Hay {online} {esFem ? (online === 1 ? 'chofer mujer trabajando' : 'choferes mujeres trabajando') : (online === 1 ? 'chofer hombre trabajando' : 'choferes hombres trabajando')}, pero en este momento está en viaje.
+                        </p>
+                        <p className="text-[10px] opacity-90">
+                          Podés pedir igual y esperar a que se libere, o elegir <strong>Indistinto</strong> por este viaje si preferís salir antes.
+                        </p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="text-[11px] text-rose-800 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 rounded-lg px-2.5 py-2 space-y-1">
+                      <p className="font-semibold">
+                        {esFem ? '♀ No hay choferes mujeres conectadas en este momento.' : '♂ No hay choferes hombres conectados en este momento.'}
+                      </p>
+                      <p className="text-[10px] opacity-90">
+                        Si querés salir ahora, podés elegir <strong>Indistinto</strong> solo para este viaje (tu preferencia del perfil no cambia).
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Avisos especiales: Mascota y Silla de ruedas */}
+              <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-slate-800">
+                <label className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400 tracking-wider block">
+                  ¿Necesitás avisar algo especial?
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConMascota((prev) => !prev)}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      conMascota
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-300'
+                        : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>🐾</span>
+                    <span>Viajo con mascota</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConSillaRuedas((prev) => !prev)}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      conSillaRuedas
+                        ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-800 dark:text-indigo-200 ring-1 ring-indigo-300'
+                        : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>♿</span>
+                    <span>Silla de ruedas</span>
+                  </button>
+                </div>
+
+                {conMascota && disponibilidad && (() => {
+                  const libres = disponibilidad.autosDisponiblesMascotas ?? 0;
+                  const online = disponibilidad.choferesMascotasOnline ?? 0;
+                  if (libres > 0) {
+                    return (
+                      <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-lg px-2.5 py-1.5">
+                        🐾 Hay {libres} {libres === 1 ? 'móvil habilitado' : 'móviles habilitados'} para mascotas disponible ahora.
+                      </p>
+                    );
+                  }
+                  if (online > 0) {
+                    return (
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-2.5 py-1.5">
+                        🐾 Hay {online} {online === 1 ? 'chofer que acepta mascotas trabajando' : 'choferes que aceptan mascotas trabajando'}, pero está en viaje. Puede demorar un poco más.
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="text-[11px] text-rose-800 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 rounded-lg px-2.5 py-1.5">
+                      🐾 En este momento no hay choferes conectados habilitados para llevar mascotas. Tu pedido quedará en espera o podés consultar a la central.
+                    </p>
+                  );
+                })()}
+
+                {conSillaRuedas && disponibilidad && (() => {
+                  const libres = disponibilidad.autosDisponiblesSillaRuedas ?? 0;
+                  const online = disponibilidad.choferesSillaRuedasOnline ?? 0;
+                  if (libres === 0 && online === 0) {
+                    return (
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-2.5 py-1.5">
+                        ♿ En este momento no hay móviles conectados con habilitación para silla de ruedas. Tu pedido será coordinado con la central.
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+
               <button 
                 onClick={pedirAuto}
                 disabled={isRequesting || !estadoAgencia.abierta}
@@ -2019,9 +2213,91 @@ export default function ClienteApp() {
               </div>
             </div>
             <div>
-              <h3 className="font-bold text-lg text-gray-900 dark:text-white">Buscando conductor...</h3>
+              <h3 className="font-bold text-lg text-gray-900 dark:text-white">
+                {activeViaje?.preferenciaSexoChofer === 'FEMENINO'
+                  ? 'Buscando chofer mujer...'
+                  : activeViaje?.preferenciaSexoChofer === 'MASCULINO'
+                  ? 'Buscando chofer hombre...'
+                  : 'Buscando conductor...'}
+              </h3>
               <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Tu solicitud ha sido enviada al coordinador de la remisería</p>
+              {(activeViaje?.conMascota || activeViaje?.conSillaRuedas) && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
+                  {activeViaje?.conMascota && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                      🐾 Con mascota
+                    </span>
+                  )}
+                  {activeViaje?.conSillaRuedas && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800">
+                      ♿ Con silla de ruedas
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
+
+            {activeViaje?.preferenciaSexoChofer && activeViaje.preferenciaSexoChofer !== 'INDISTINTO' && (() => {
+              const esFem = activeViaje.preferenciaSexoChofer === 'FEMENINO';
+              const dispSexo = activeViaje.disponibilidadSexoChofer;
+              const disponiblesAhora =
+                dispSexo?.disponiblesAhora ??
+                (esFem ? disponibilidad?.autosDisponiblesFemenino : disponibilidad?.autosDisponiblesMasculino) ??
+                0;
+              const trabajandoOnline =
+                dispSexo?.trabajandoOnline ??
+                (esFem ? disponibilidad?.choferesFemeninoOnline : disponibilidad?.choferesMasculinoOnline) ??
+                0;
+
+              if (disponiblesAhora > 0) {
+                return (
+                  <div className="bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800/50 rounded-xl p-3 text-left text-xs text-pink-800 dark:text-pink-200 font-semibold">
+                    {esFem ? '♀ Preferencia activa: Chofer mujer.' : '♂ Preferencia activa: Chofer hombre.'} Estamos ofreciendo tu viaje a {esFem ? 'las choferes disponibles' : 'los choferes disponibles'}.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="bg-pink-50 dark:bg-pink-950/30 border-2 border-pink-200 dark:border-pink-800/60 rounded-xl p-3.5 text-left space-y-2.5">
+                  <div className="flex items-start gap-2">
+                    <span className="text-base leading-none mt-0.5">{esFem ? '♀' : '♂'}</span>
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-pink-950 dark:text-pink-100">
+                        {trabajandoOnline > 0
+                          ? esFem
+                            ? `Hay ${trabajandoOnline} chofer mujer con turno activo, pero está ocupada`
+                            : `Hay ${trabajandoOnline} chofer hombre con turno activo, pero está ocupado`
+                          : esFem
+                          ? 'No hay choferes mujeres disponibles en este momento'
+                          : 'No hay choferes hombres disponibles en este momento'}
+                      </p>
+                      <p className="text-[11px] text-pink-900/90 dark:text-pink-200/90 leading-snug">
+                        {trabajandoOnline > 0
+                          ? 'Si querés esperar a que se libere, dejá esta pantalla abierta. O si preferís salir antes, podés aceptar que por este viaje vaya cualquier chofer disponible.'
+                          : esFem
+                          ? '¿Querés aceptar que por este viaje te enviemos un chofer masculino disponible? Si preferís no hacerlo, podés esperar o cancelar.'
+                          : '¿Querés aceptar que por este viaje te enviemos cualquier chofer disponible? Si preferís no hacerlo, podés esperar o cancelar.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAceptarCualquierChofer}
+                    disabled={cambiandoPreferenciaSexo}
+                    className="w-full py-2.5 px-3 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs shadow-sm active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {cambiandoPreferenciaSexo
+                      ? 'Actualizando pedido...'
+                      : esFem
+                      ? 'Sí, aceptar chofer masculino por este viaje'
+                      : 'Sí, aceptar cualquier chofer por este viaje'}
+                  </button>
+                  <p className="text-[10px] text-center text-pink-800/80 dark:text-pink-300/80">
+                    Solo aplica a este viaje. Tu preferencia guardada en el perfil no cambia.
+                  </p>
+                </div>
+              );
+            })()}
 
             {(activeViaje?.posicionEnCola > 1 || disponibilidad?.todosOcupados) && (
               <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl p-3 text-left space-y-1">

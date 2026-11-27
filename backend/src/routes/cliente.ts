@@ -12,6 +12,7 @@ import {
   calcularPrecio,
   crearReserva,
   cancelarViaje,
+  actualizarPreferenciaSexoViaje,
   cancelarReserva,
   getUbicacionActual,
   buscarClientePorDni,
@@ -46,6 +47,7 @@ router.get('/reservas', authenticateToken, getClienteReservas);
 router.post('/viajes/solicitar', authenticateToken, solicitarViaje);
 router.post('/reservas', authenticateToken, crearReserva);
 router.patch('/viajes/:id/cancelar', authenticateToken, cancelarViaje);
+router.patch('/viajes/:id/preferencia-sexo', authenticateToken, actualizarPreferenciaSexoViaje);
 router.post('/viajes/:id/calificar', authenticateToken, calificarViaje);
 router.post('/viajes/:id/paradas', authenticateToken, agregarParadaEnCurso);
 router.post('/viajes/:id/chat', authenticateToken, enviarMensajeChat);

@@ -221,13 +221,37 @@ export const pushNotificationService = {
   /**
    * Envía notificación Push a todos los choferes conectados/activos de una remisería
    */
-  async enviarAChoferesDeRemiseria(remiseriaId: string, payload: PushNotificationPayload, excludeChoferId?: string) {
+  async enviarAChoferesDeRemiseria(
+    remiseriaId: string,
+    payload: PushNotificationPayload,
+    excludeChoferId?: string,
+    preferenciaSexoOFiltros?:
+      | string
+      | null
+      | {
+          preferenciaSexoChofer?: string | null;
+          conMascota?: boolean;
+          conSillaRuedas?: boolean;
+        }
+  ) {
     try {
+      const filtrosObj =
+        typeof preferenciaSexoOFiltros === 'object' && preferenciaSexoOFiltros !== null
+          ? preferenciaSexoOFiltros
+          : { preferenciaSexoChofer: preferenciaSexoOFiltros };
+
+      const prefSexo = (filtrosObj.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
+      const filtroSexo =
+        prefSexo === 'FEMENINO' || prefSexo === 'MASCULINO' ? { sexo: prefSexo } : {};
+
       const choferes = await prisma.chofer.findMany({
         where: {
           remiseriaId,
           isOnline: true,
           estado: 'ACTIVO',
+          ...filtroSexo,
+          ...(filtrosObj.conMascota ? { aceptaMascotas: true } : {}),
+          ...(filtrosObj.conSillaRuedas ? { aceptaSillaRuedas: true } : {}),
           ...(excludeChoferId ? { id: { not: excludeChoferId } } : {}),
         },
         select: { id: true },

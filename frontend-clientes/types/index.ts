@@ -100,6 +100,7 @@ export interface Cliente {
   direccion: string;
   fechaNacimiento: string;
   genero?: string;
+  preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
   fotoUrl?: string | null;
   direccionesFrecuentes?: string | DireccionFrecuente[] | null;
   activo: boolean;
@@ -602,6 +603,9 @@ export interface SolicitudViajeData {
   paradas?: ParadaIntermedia[];
   metodoPago?: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE';
   pagaCon?: number;
+  preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+  conMascota?: boolean;
+  conSillaRuedas?: boolean;
 }
 
 export interface CalculoPrecioData {
@@ -632,6 +636,9 @@ export interface ReservaClienteData {
   longitudOrigen?: number;
   latitudDestino?: number;
   longitudDestino?: number;
+  preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+  conMascota?: boolean;
+  conSillaRuedas?: boolean;
 }
 
 export interface ViajeCliente {
@@ -644,6 +651,17 @@ export interface ViajeCliente {
   metodoPago?: MetodoPago;
   pagaCon?: number;
   vueltoEstimado?: number;
+  preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+  conMascota?: boolean;
+  conSillaRuedas?: boolean;
+  disponibilidadSexoChofer?: {
+    preferencia: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+    disponiblesAhora: number;
+    trabajandoOnline: number;
+    enViajeOPausa: number;
+    hayOtrosDisponibles: boolean;
+    otrosDisponibles: number;
+  } | null;
   observaciones?: string;
   createdAt: string;
   trackingToken?: string;

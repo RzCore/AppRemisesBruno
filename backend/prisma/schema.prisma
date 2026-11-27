@@ -164,6 +164,7 @@ model Cliente {
   direccion String
   fechaNacimiento DateTime
   genero    String?  // M, F, O
+  preferenciaSexoChofer String @default("INDISTINTO") // INDISTINTO | FEMENINO | MASCULINO
   fotoUrl   String?
   direccionesFrecuentes String? // JSON array de direcciones frecuentes/favoritas
   observaciones String? // Notas del cliente (conflictivo, VIP, etc.)
@@ -238,6 +239,7 @@ model Chofer {
   nombre           String
   apellido         String
   dni              String   @unique
+  sexo             String   @default("MASCULINO") // MASCULINO | FEMENINO
   telefono         String
   email            String?
   direccion        String?
@@ -248,6 +250,8 @@ model Chofer {
   observaciones    String?
   esPropietario    Boolean  @default(false)
   esFranquero      Boolean  @default(false)
+  aceptaMascotas   Boolean  @default(false)
+  aceptaSillaRuedas Boolean @default(true)
   comisionPorcentaje Float  @default(30.0)
   isOnline         Boolean  @default(false)
   fotoUrl          String?
@@ -360,6 +364,9 @@ model Viaje {
   clienteTelefono String?
   clienteEmail String?
   prioridad   Prioridad @default(NORMAL)
+  preferenciaSexoChofer String @default("INDISTINTO") // INDISTINTO | FEMENINO | MASCULINO
+  conMascota     Boolean @default(false)
+  conSillaRuedas Boolean @default(false)
   origenDetallado String?
   destinoDetallado String?
   // Kilometraje del viaje
@@ -491,6 +498,9 @@ model Reserva {
   diasSemana  String? // JSON array de días de la semana
   tipo        TipoReserva @default(UNICA)
   estado      ReservaEstado @default(ACTIVA)
+  preferenciaSexoChofer String @default("INDISTINTO") // INDISTINTO | FEMENINO | MASCULINO
+  conMascota     Boolean @default(false)
+  conSillaRuedas Boolean @default(false)
   observaciones String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

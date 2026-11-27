@@ -254,6 +254,77 @@ export const getClienteProfile = async (req: AuthenticatedRequest, res: Response
   }
 };
 
+function normalizarPreferenciaSexo(raw?: any): 'INDISTINTO' | 'FEMENINO' | 'MASCULINO' {
+  const val = String(raw || '').trim().toUpperCase();
+  if (val === 'FEMENINO' || val === 'MUJER' || val === 'F') return 'FEMENINO';
+  if (val === 'MASCULINO' || val === 'HOMBRE' || val === 'M') return 'MASCULINO';
+  return 'INDISTINTO';
+}
+
+async function calcularDisponibilidadPorSexo(
+  remiseriaId: string | null | undefined,
+  preferencia: string
+) {
+  const pref = normalizarPreferenciaSexo(preferencia);
+  const [choferesOnline, viajesActivos] = await Promise.all([
+    prisma.chofer.findMany({
+      where: {
+        ...(remiseriaId ? { remiseriaId } : {}),
+        estado: 'ACTIVO',
+        isOnline: true,
+      },
+      select: {
+        id: true,
+        sexo: true,
+        observaciones: true,
+      },
+    }),
+    prisma.viaje.findMany({
+      where: {
+        ...(remiseriaId ? { remiseriaId } : {}),
+        choferId: { not: null },
+        OR: [
+          { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+          { estado: 'ACEPTADO', artEmpresaId: null },
+        ],
+      },
+      select: { choferId: true },
+    }),
+  ]);
+
+  const ocupadosIds = new Set(
+    viajesActivos.map((v) => v.choferId).filter((id): id is string => Boolean(id))
+  );
+
+  const estaLibre = (c: { id: string; observaciones: string | null }) => {
+    if (ocupadosIds.has(c.id)) return false;
+    if (c.observaciones && c.observaciones.startsWith('{')) {
+      try {
+        if (JSON.parse(c.observaciones).enPausa === true) return false;
+      } catch {}
+    }
+    return true;
+  };
+
+  const delSexoPedido = choferesOnline.filter(
+    (c) => (c.sexo || 'MASCULINO').toUpperCase() === pref
+  );
+  const disponiblesAhora = delSexoPedido.filter(estaLibre).length;
+  const trabajandoOnline = delSexoPedido.length;
+  const otrosLibres = choferesOnline.filter(
+    (c) => (c.sexo || 'MASCULINO').toUpperCase() !== pref && estaLibre(c)
+  ).length;
+
+  return {
+    preferencia: pref,
+    disponiblesAhora,
+    trabajandoOnline,
+    enViajeOPausa: Math.max(0, trabajandoOnline - disponiblesAhora),
+    hayOtrosDisponibles: otrosLibres > 0,
+    otrosDisponibles: otrosLibres,
+  };
+}
+
 export const updateClienteProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -265,6 +336,7 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
       fechaNacimiento,
       direccion,
       genero,
+      preferenciaSexoChofer,
       fotoUrl,
       direccionesFrecuentes
     } = req.body;
@@ -378,6 +450,9 @@ export const updateClienteProfile = async (req: AuthenticatedRequest, res: Respo
 
     if (direccion !== undefined) updateData.direccion = String(direccion).trim();
     if (genero !== undefined) updateData.genero = genero;
+    if (preferenciaSexoChofer !== undefined) {
+      updateData.preferenciaSexoChofer = normalizarPreferenciaSexo(preferenciaSexoChofer);
+    }
     if (fotoUrl !== undefined) updateData.fotoUrl = fotoUrl;
     if (direccionesFrecuentes !== undefined) {
       updateData.direccionesFrecuentes =
@@ -639,6 +714,7 @@ export const getClienteViajes = async (req: AuthenticatedRequest, res: Response)
             id: true,
             nombre: true,
             apellido: true,
+            sexo: true,
             telefono: true,
             fotoUrl: true,
             vehiculo: {
@@ -685,9 +761,10 @@ export const getClienteViajes = async (req: AuthenticatedRequest, res: Response)
     });
 
     // Si el cliente tiene un viaje PENDIENTE (normal, excluyendo viajes programados de ART),
-    // calcular su posición real en la cola de espera para hora pico
+    // calcular su posición real en la cola de espera para hora pico y disponibilidad según preferencia de sexo
     const viajePendiente = viajes.find((v) => v.estado === 'PENDIENTE' && !v.artEmpresaId);
     let posicionEnCola: number | null = null;
+    let disponibilidadSexoChofer: Awaited<ReturnType<typeof calcularDisponibilidadPorSexo>> | null = null;
     if (viajePendiente) {
       const colaPendientes = await prisma.viaje.findMany({
         where: {
@@ -700,10 +777,29 @@ export const getClienteViajes = async (req: AuthenticatedRequest, res: Response)
       });
       const idx = colaPendientes.findIndex((p) => p.id === viajePendiente.id);
       posicionEnCola = idx !== -1 ? idx + 1 : 1;
+
+      if (
+        !viajePendiente.choferId &&
+        viajePendiente.preferenciaSexoChofer &&
+        viajePendiente.preferenciaSexoChofer !== 'INDISTINTO'
+      ) {
+        disponibilidadSexoChofer = await calcularDisponibilidadPorSexo(
+          viajePendiente.remiseriaId,
+          viajePendiente.preferenciaSexoChofer
+        );
+      }
     }
 
     const viajesConCola = viajes.map((v) =>
-      v.estado === 'PENDIENTE' && !v.artEmpresaId ? { ...v, posicionEnCola } : v
+      v.estado === 'PENDIENTE' && !v.artEmpresaId
+        ? {
+            ...v,
+            posicionEnCola,
+            ...(v.id === viajePendiente?.id && disponibilidadSexoChofer
+              ? { disponibilidadSexoChofer }
+              : {}),
+          }
+        : v
     );
 
     res.json({
@@ -819,7 +915,10 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       longitudDestino,
       paradas,
       metodoPago,
-      pagaCon
+      pagaCon,
+      preferenciaSexoChofer,
+      conMascota,
+      conSillaRuedas
     } = req.body;
 
     if (!origen || !destino) {
@@ -923,6 +1022,14 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       }
     }
 
+    const preferenciaSexoFinal =
+      preferenciaSexoChofer !== undefined
+        ? normalizarPreferenciaSexo(preferenciaSexoChofer)
+        : normalizarPreferenciaSexo(clienteActual?.preferenciaSexoChofer);
+
+    const conMascotaFinal = Boolean(conMascota);
+    const conSillaRuedasFinal = Boolean(conSillaRuedas);
+
     // Crear viaje
     const viaje = await prisma.viaje.create({
       data: {
@@ -931,6 +1038,9 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
         precio,
         fecha: fechaHora ? new Date(fechaHora) : new Date(),
         estado: 'PENDIENTE',
+        preferenciaSexoChofer: preferenciaSexoFinal,
+        conMascota: conMascotaFinal,
+        conSillaRuedas: conSillaRuedasFinal,
         observaciones,
         clienteId,
         clienteNombre,
@@ -961,6 +1071,7 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
             id: true,
             nombre: true,
             apellido: true,
+            sexo: true,
             telefono: true,
             fotoUrl: true,
             vehiculo: {
@@ -1012,19 +1123,35 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       console.warn('Socket aviso nuevo viaje:', socketErr);
     }
 
-    // Notificación Push nativa a todos los choferes activos (para cuando tienen la app cerrada o bloqueada)
+    // Notificación Push nativa a todos los choferes activos que cumplan la preferencia de sexo
     try {
       const { pushNotificationService } = await import('../services/pushNotificationService');
+      const etiquetasEspeciales = [
+        conMascotaFinal ? '🐾 Mascota' : null,
+        conSillaRuedasFinal ? '♿ Silla de ruedas' : null,
+      ].filter(Boolean).join(' • ');
+      const bodyPush = etiquetasEspeciales
+        ? `${etiquetasEspeciales} | ${origen} ➔ ${destino} ($${Number(precio).toLocaleString('es-AR')})`
+        : `${origen} ➔ ${destino} ($${Number(precio).toLocaleString('es-AR')})`;
       pushNotificationService.enviarAChoferesDeRemiseria(remiseria.id, {
         title: '🚕 ¡Nuevo viaje disponible!',
-        body: `${origen} ➔ ${destino} ($${Number(precio).toLocaleString('es-AR')})`,
+        body: bodyPush,
         url: '/chofer/app',
         tag: `nuevo-viaje-${viaje.id}`,
         data: { viajeId: viaje.id },
+      }, undefined, {
+        preferenciaSexoChofer: preferenciaSexoFinal,
+        conMascota: conMascotaFinal,
+        conSillaRuedas: conSillaRuedasFinal,
       }).catch((e) => console.warn('Push error nuevo viaje:', e));
     } catch (pushErr) {
       console.warn('Push aviso nuevo viaje:', pushErr);
     }
+
+    const disponibilidadSexoChofer =
+      preferenciaSexoFinal !== 'INDISTINTO'
+        ? await calcularDisponibilidadPorSexo(remiseria.id, preferenciaSexoFinal)
+        : null;
 
     // Si hoy es el cumpleaños del pasajero, enviarle saludo especial por el bot de WhatsApp e incluirlo en respuesta
     let saludoCumpleanios: string | undefined = undefined;
@@ -1035,7 +1162,8 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
 
     res.json({
       success: true,
-      data: viaje,
+      data: disponibilidadSexoChofer ? { ...viaje, disponibilidadSexoChofer } : viaje,
+      disponibilidadSexoChofer,
       saludoCumpleanios,
       message: 'Viaje solicitado exitosamente'
     });
@@ -1158,7 +1286,10 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
       latitudOrigen,
       longitudOrigen,
       latitudDestino,
-      longitudDestino
+      longitudDestino,
+      preferenciaSexoChofer,
+      conMascota,
+      conSillaRuedas
     } = req.body;
 
     if (!origen || !destino || !fechaInicio || !horaInicio || !tipoReserva) {
@@ -1205,6 +1336,15 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
         : new Date(fechaFin)
       : null;
 
+    const clienteDb = await prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { preferenciaSexoChofer: true }
+    });
+    const preferenciaSexoReserva =
+      preferenciaSexoChofer !== undefined
+        ? normalizarPreferenciaSexo(preferenciaSexoChofer)
+        : normalizarPreferenciaSexo(clienteDb?.preferenciaSexoChofer);
+
     // Crear reserva
     const reserva = await prisma.reserva.create({
       data: {
@@ -1220,6 +1360,9 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
         diasSemana: diasSemana ? diasSemana.join(',') : null,
         horaFin,
         estado: 'ACTIVA',
+        preferenciaSexoChofer: preferenciaSexoReserva,
+        conMascota: Boolean(conMascota),
+        conSillaRuedas: Boolean(conSillaRuedas),
         observaciones,
         clienteId,
         remiseriaId: remiseria.id
@@ -2316,6 +2459,10 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
         select: {
           id: true,
           nombre: true,
+          sexo: true,
+          aceptaMascotas: true,
+          aceptaSillaRuedas: true,
+          observaciones: true,
           vehiculoId: true
         }
       }),
@@ -2349,9 +2496,26 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
       viajesActivos.map((v) => v.choferId).filter((id): id is string => Boolean(id))
     );
 
-    const autosLibresOnline = choferesOnline.filter(
-      (c) => !choferesOcupadosIds.has(c.id)
-    ).length;
+    const estaLibreDisp = (c: { id: string; observaciones?: string | null }) => {
+      if (choferesOcupadosIds.has(c.id)) return false;
+      if (c.observaciones && c.observaciones.startsWith('{')) {
+        try {
+          if (JSON.parse(c.observaciones).enPausa === true) return false;
+        } catch {}
+      }
+      return true;
+    };
+
+    const choferesLibresList = choferesOnline.filter(estaLibreDisp);
+    const autosLibresOnline = choferesLibresList.length;
+    const choferesFemeninoOnline = choferesOnline.filter((c) => (c.sexo || 'MASCULINO').toUpperCase() === 'FEMENINO').length;
+    const autosDisponiblesFemenino = choferesLibresList.filter((c) => (c.sexo || 'MASCULINO').toUpperCase() === 'FEMENINO').length;
+    const choferesMasculinoOnline = choferesOnline.filter((c) => (c.sexo || 'MASCULINO').toUpperCase() === 'MASCULINO').length;
+    const autosDisponiblesMasculino = choferesLibresList.filter((c) => (c.sexo || 'MASCULINO').toUpperCase() === 'MASCULINO').length;
+    const choferesMascotasOnline = choferesOnline.filter((c) => Boolean(c.aceptaMascotas)).length;
+    const autosDisponiblesMascotas = choferesLibresList.filter((c) => Boolean(c.aceptaMascotas)).length;
+    const choferesSillaRuedasOnline = choferesOnline.filter((c) => c.aceptaSillaRuedas !== false).length;
+    const autosDisponiblesSillaRuedas = choferesLibresList.filter((c) => c.aceptaSillaRuedas !== false).length;
 
     const autosEnViaje = viajesActivos.length;
     const hayAutosDisponibles = autosLibresOnline > 0;
@@ -2390,7 +2554,15 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
         viajesPendientes,
         todosOcupados,
         demoraMin,
-        demoraMax
+        demoraMax,
+        choferesFemeninoOnline,
+        autosDisponiblesFemenino,
+        choferesMasculinoOnline,
+        autosDisponiblesMasculino,
+        choferesMascotasOnline,
+        autosDisponiblesMascotas,
+        choferesSillaRuedasOnline,
+        autosDisponiblesSillaRuedas
       }
     };
 
@@ -2405,6 +2577,121 @@ export const getDisponibilidad = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Error al consultar disponibilidad'
+    });
+  }
+};
+
+// Permitir al pasajero cambiar la preferencia de sexo del chofer de un viaje PENDIENTE
+// (ej: aceptar cualquier chofer por este viaje si no hay chofer mujer libre)
+export const actualizarPreferenciaSexoViaje = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const clienteId = req.user?.cliente?.id;
+    const { id } = req.params;
+    const { preferenciaSexoChofer } = req.body;
+
+    if (!clienteId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Cliente no autenticado'
+      });
+    }
+
+    const viaje = await prisma.viaje.findFirst({
+      where: { id, clienteId }
+    });
+
+    if (!viaje) {
+      return res.status(404).json({
+        success: false,
+        error: 'Viaje no encontrado'
+      });
+    }
+
+    if (viaje.estado !== 'PENDIENTE' || viaje.choferId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Solo podés modificar esta preferencia mientras el viaje espera asignación'
+      });
+    }
+
+    const nuevaPref = normalizarPreferenciaSexo(preferenciaSexoChofer);
+    const viajeActualizado = await prisma.viaje.update({
+      where: { id: viaje.id },
+      data: { preferenciaSexoChofer: nuevaPref },
+      include: {
+        cliente: {
+          select: {
+            id: true,
+            nombre: true,
+            apellido: true,
+            telefono: true,
+            fotoUrl: true,
+          }
+        },
+        chofer: {
+          select: {
+            id: true,
+            nombre: true,
+            apellido: true,
+            sexo: true,
+            telefono: true,
+            fotoUrl: true,
+          }
+        },
+        vehiculo: true,
+        remiseria: true,
+      }
+    });
+
+    try {
+      const { getIO } = await import('../lib/socket');
+      const io = getIO();
+      io.to(viaje.remiseriaId).emit('nuevo_viaje_recibido', viajeActualizado);
+    } catch {}
+
+    try {
+      const { pushNotificationService } = await import('../services/pushNotificationService');
+      pushNotificationService
+        .enviarAChoferesDeRemiseria(
+          viaje.remiseriaId,
+          {
+            title: '🚕 ¡Viaje disponible!',
+            body: `${viaje.origen} ➔ ${viaje.destino} ($${Number(viaje.precio).toLocaleString('es-AR')})`,
+            url: '/chofer/app',
+            tag: `nuevo-viaje-${viaje.id}`,
+            data: { viajeId: viaje.id },
+          },
+          undefined,
+          {
+            preferenciaSexoChofer: nuevaPref,
+            conMascota: viaje.conMascota,
+            conSillaRuedas: viaje.conSillaRuedas,
+          }
+        )
+        .catch(() => {});
+    } catch {}
+
+    const disponibilidadSexoChofer =
+      nuevaPref !== 'INDISTINTO'
+        ? await calcularDisponibilidadPorSexo(viaje.remiseriaId, nuevaPref)
+        : null;
+
+    res.json({
+      success: true,
+      data: disponibilidadSexoChofer
+        ? { ...viajeActualizado, disponibilidadSexoChofer }
+        : viajeActualizado,
+      disponibilidadSexoChofer,
+      message:
+        nuevaPref === 'INDISTINTO'
+          ? '¡Listo! Ahora cualquier chofer disponible puede tomar tu viaje.'
+          : `Preferencia actualizada a chofer ${nuevaPref === 'FEMENINO' ? 'mujer' : 'hombre'}.`
+    });
+  } catch (error) {
+    console.error('Error actualizando preferencia de sexo del viaje:', error);
+    res.status(500).json({
+      success: false,
+      error: 'No se pudo actualizar la preferencia del viaje'
     });
   }
 };

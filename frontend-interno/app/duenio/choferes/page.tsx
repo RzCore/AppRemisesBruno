@@ -70,6 +70,7 @@ export default function ChoferesPage() {
     nombre: '',
     apellido: '',
     dni: '',
+    sexo: 'MASCULINO',
     telefono: '',
     email: '',
     direccion: '',
@@ -79,6 +80,8 @@ export default function ChoferesPage() {
     vehiculoId: '',
     esPropietario: false,
     esFranquero: false,
+    aceptaMascotas: false,
+    aceptaSillaRuedas: true,
     comisionPorcentaje: 30
   });
 
@@ -305,6 +308,7 @@ export default function ChoferesPage() {
         nombre: formData.nombre,
         apellido: formData.apellido,
         dni: formData.dni,
+        sexo: formData.sexo || 'MASCULINO',
         telefono: formData.telefono,
         email: formData.email,
         direccion: formData.direccion,
@@ -313,6 +317,8 @@ export default function ChoferesPage() {
         vehiculoId: vehiculoIdFinal,
         esPropietario: formData.esPropietario,
         esFranquero: Boolean(formData.esFranquero),
+        aceptaMascotas: Boolean(formData.aceptaMascotas),
+        aceptaSillaRuedas: formData.aceptaSillaRuedas !== false,
         comisionPorcentaje: formData.comisionPorcentaje
       };
 
@@ -474,6 +480,7 @@ export default function ChoferesPage() {
       nombre: chofer.nombre,
       apellido: chofer.apellido,
       dni: chofer.dni,
+      sexo: chofer.sexo || 'MASCULINO',
       telefono: chofer.telefono,
       email: chofer.email || '',
       direccion: chofer.direccion || '',
@@ -483,6 +490,8 @@ export default function ChoferesPage() {
       vehiculoId: chofer.vehiculoId || '',
       esPropietario: chofer.esPropietario || false,
       esFranquero: chofer.esFranquero || false,
+      aceptaMascotas: Boolean(chofer.aceptaMascotas),
+      aceptaSillaRuedas: chofer.aceptaSillaRuedas !== false,
       comisionPorcentaje: chofer.comisionPorcentaje !== undefined ? chofer.comisionPorcentaje : 30
     });
     resetNuevoVehiculo(chofer.esPropietario || false);
@@ -737,6 +746,23 @@ export default function ChoferesPage() {
                                   Franquero
                                 </span>
                               )}
+                              <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md border shrink-0 ${
+                                chofer.sexo === 'FEMENINO'
+                                  ? 'bg-pink-50 text-pink-700 border-pink-200'
+                                  : 'bg-sky-50 text-sky-700 border-sky-200'
+                              }`}>
+                                {chofer.sexo === 'FEMENINO' ? '♀ Femenino' : '♂ Masculino'}
+                              </span>
+                              {chofer.aceptaMascotas && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0" title="Acepta traslado con mascotas">
+                                  🐾 Mascotas
+                                </span>
+                              )}
+                              {chofer.aceptaSillaRuedas !== false && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0" title="Acepta silla de ruedas">
+                                  ♿ Silla ruedas
+                                </span>
+                              )}
                             </h4>
                             <p className="text-xs text-slate-500 mt-0.5">
                               #{chofer.numeroChofer} • DNI: {chofer.dni}
@@ -873,6 +899,23 @@ export default function ChoferesPage() {
                               {chofer.esFranquero && (
                                 <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-100 text-amber-800 border border-amber-200">
                                   Franquero
+                                </span>
+                              )}
+                              <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md border ${
+                                chofer.sexo === 'FEMENINO'
+                                  ? 'bg-pink-50 text-pink-700 border-pink-200'
+                                  : 'bg-sky-50 text-sky-700 border-sky-200'
+                              }`}>
+                                {chofer.sexo === 'FEMENINO' ? '♀ Femenino' : '♂ Masculino'}
+                              </span>
+                              {chofer.aceptaMascotas && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200" title="Acepta mascotas">
+                                  🐾
+                                </span>
+                              )}
+                              {chofer.aceptaSillaRuedas !== false && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200" title="Acepta silla de ruedas">
+                                  ♿
                                 </span>
                               )}
                             </div>
@@ -1134,6 +1177,63 @@ export default function ChoferesPage() {
                           placeholder="Sin puntos"
                         />
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Sexo del Chofer *
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, sexo: 'MASCULINO' })}
+                          className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            (formData.sexo || 'MASCULINO') === 'MASCULINO'
+                              ? 'bg-sky-50 border-sky-500 text-sky-800 ring-2 ring-sky-200'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span>♂</span> Masculino
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, sexo: 'FEMENINO' })}
+                          className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            formData.sexo === 'FEMENINO'
+                              ? 'bg-pink-50 border-pink-500 text-pink-800 ring-2 ring-pink-200'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span>♀</span> Femenino
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer hover:bg-slate-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(formData.aceptaMascotas)}
+                          onChange={(e) => setFormData({ ...formData, aceptaMascotas: e.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-800 block">🐾 Acepta mascotas</span>
+                          <span className="text-[10px] text-slate-500 block">Recibe viajes con animales</span>
+                        </div>
+                      </label>
+                      <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer hover:bg-slate-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={formData.aceptaSillaRuedas !== false}
+                          onChange={(e) => setFormData({ ...formData, aceptaSillaRuedas: e.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-800 block">♿ Acepta silla de ruedas</span>
+                          <span className="text-[10px] text-slate-500 block">Espacio / baúl apto</span>
+                        </div>
+                      </label>
                     </div>
 
                     <label className="flex items-start gap-2.5 p-3 rounded-xl border border-amber-200 bg-amber-50/70 cursor-pointer hover:bg-amber-50 transition-colors">

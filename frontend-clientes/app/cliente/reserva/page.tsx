@@ -29,6 +29,9 @@ interface ReservaForm {
   diasSemana: string[];
   horaFin?: string;
   observaciones: string;
+  preferenciaSexoChofer: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+  conMascota: boolean;
+  conSillaRuedas: boolean;
 }
 
 export default function NuevaReserva() {
@@ -52,8 +55,20 @@ export default function NuevaReserva() {
     horaInicio: '',
     tipoReserva: 'unica',
     diasSemana: [],
-    observaciones: ''
+    observaciones: '',
+    preferenciaSexoChofer: (user?.cliente?.preferenciaSexoChofer as 'INDISTINTO' | 'FEMENINO' | 'MASCULINO') || 'INDISTINTO',
+    conMascota: false,
+    conSillaRuedas: false
   });
+
+  useEffect(() => {
+    if (user?.cliente?.preferenciaSexoChofer) {
+      setFormData((prev) => ({
+        ...prev,
+        preferenciaSexoChofer: user.cliente!.preferenciaSexoChofer as 'INDISTINTO' | 'FEMENINO' | 'MASCULINO',
+      }));
+    }
+  }, [user?.cliente?.preferenciaSexoChofer]);
 
   const [estadoAgencia, setEstadoAgencia] = useState<{
     abierta: boolean;
@@ -322,7 +337,10 @@ export default function NuevaReserva() {
         fechaFin: formData.fechaFin || undefined,
         diasSemana: formData.tipoReserva === 'periodica' ? formData.diasSemana : undefined,
         horaFin: formData.horaFin || undefined,
-        observaciones: formData.observaciones || undefined
+        observaciones: formData.observaciones || undefined,
+        preferenciaSexoChofer: formData.preferenciaSexoChofer,
+        conMascota: formData.conMascota,
+        conSillaRuedas: formData.conSillaRuedas
       };
 
       const res = await clienteService.crearReserva(datosReserva);
@@ -610,6 +628,74 @@ export default function NuevaReserva() {
                 </div>
               </div>
             )}
+
+            {/* Preferencia de Chofer */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                Preferencia de Chofer
+              </label>
+              <div className="grid grid-cols-3 gap-2.5">
+                {[
+                  { value: 'INDISTINTO' as const, label: 'Indistinto', icon: '🚕' },
+                  { value: 'FEMENINO' as const, label: 'Chofer mujer', icon: '♀' },
+                  { value: 'MASCULINO' as const, label: 'Chofer hombre', icon: '♂' },
+                ].map((opt) => {
+                  const active = formData.preferenciaSexoChofer === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, preferenciaSexoChofer: opt.value }))}
+                      className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        active
+                          ? opt.value === 'FEMENINO'
+                            ? 'border-pink-500 bg-pink-50 dark:bg-pink-950/40 text-pink-800 dark:text-pink-200'
+                            : opt.value === 'MASCULINO'
+                            ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-800 dark:text-sky-200'
+                            : 'border-blue-500 bg-blue-50 dark:bg-primary-950/40 text-blue-900 dark:text-primary-200'
+                          : 'border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-gray-700 dark:text-slate-300 hover:border-gray-400'
+                      }`}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Mascota y Silla de ruedas */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                ¿Necesitás avisar algo especial?
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, conMascota: !prev.conMascota }))}
+                  className={`py-3 px-4 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                    formData.conMascota
+                      ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200'
+                      : 'border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-gray-700 dark:text-slate-300 hover:border-gray-400'
+                  }`}
+                >
+                  <span>🐾</span>
+                  <span>Viajo con mascota</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, conSillaRuedas: !prev.conSillaRuedas }))}
+                  className={`py-3 px-4 rounded-xl border-2 text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                    formData.conSillaRuedas
+                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200'
+                      : 'border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-gray-700 dark:text-slate-300 hover:border-gray-400'
+                  }`}
+                >
+                  <span>♿</span>
+                  <span>Viajo con silla de ruedas</span>
+                </button>
+              </div>
+            </div>
 
             {/* Observaciones */}
             <div>

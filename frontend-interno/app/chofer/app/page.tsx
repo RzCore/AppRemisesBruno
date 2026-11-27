@@ -3146,6 +3146,20 @@ export default function ChoferApp() {
                       {viajeActual.metodoPago === 'CUENTA_CORRIENTE' ? '🏛️ Cuenta Corriente (No cobrar)' : viajeActual.metodoPago === 'TRANSFERENCIA' ? '💳 Transferencia' : '💵 Efectivo'}
                       {viajeActual.pagaCon ? ` (Paga c/ $${Number(viajeActual.pagaCon).toLocaleString('es-AR')})` : ''}
                     </p>
+                    {(viajeActual.conMascota || viajeActual.conSillaRuedas) && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {viajeActual.conMascota && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                            🐾 Viaja con mascota
+                          </span>
+                        )}
+                        {viajeActual.conSillaRuedas && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800">
+                            ♿ Silla de ruedas
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 

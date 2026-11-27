@@ -334,6 +334,7 @@ export const choferController = {
         nombre, 
         apellido, 
         dni, 
+        sexo,
         telefono, 
         email, 
         direccion, 
@@ -344,6 +345,8 @@ export const choferController = {
         vehiculoId,
         esPropietario,
         esFranquero,
+        aceptaMascotas,
+        aceptaSillaRuedas,
         comisionPorcentaje,
         fotoUrl
       } = req.body;
@@ -469,6 +472,7 @@ export const choferController = {
             nombre,
             apellido,
             dni,
+            sexo: typeof sexo === 'string' && sexo.toUpperCase() === 'FEMENINO' ? 'FEMENINO' : 'MASCULINO',
             telefono,
             email: choferEmail,
             direccion,
@@ -478,6 +482,8 @@ export const choferController = {
             observaciones: observaciones || null,
             esPropietario: esPropietario || false,
             esFranquero: Boolean(esFranquero),
+            aceptaMascotas: Boolean(aceptaMascotas),
+            aceptaSillaRuedas: aceptaSillaRuedas !== undefined ? Boolean(aceptaSillaRuedas) : true,
             comisionPorcentaje: comisionPorcentaje !== undefined ? parseFloat(comisionPorcentaje) : 30.0,
             remiseriaId,
             vehiculoId: vehiculoId || null,
@@ -550,6 +556,7 @@ export const choferController = {
         nombre, 
         apellido, 
         dni, 
+        sexo,
         telefono, 
         email, 
         direccion, 
@@ -560,6 +567,8 @@ export const choferController = {
         vehiculoId,
         esPropietario,
         esFranquero,
+        aceptaMascotas,
+        aceptaSillaRuedas,
         comisionPorcentaje,
         fotoUrl
       } = req.body;
@@ -639,6 +648,9 @@ export const choferController = {
       if (nombre) updateData.nombre = nombre;
       if (apellido) updateData.apellido = apellido;
       if (dni) updateData.dni = dni;
+      if (sexo !== undefined && (String(sexo).toUpperCase() === 'MASCULINO' || String(sexo).toUpperCase() === 'FEMENINO')) {
+        updateData.sexo = String(sexo).toUpperCase();
+      }
       if (telefono) updateData.telefono = telefono;
       if (email !== undefined) updateData.email = email;
       if (direccion !== undefined) updateData.direccion = direccion;
@@ -649,6 +661,8 @@ export const choferController = {
       if (vehiculoId !== undefined) updateData.vehiculoId = vehiculoId || null;
       if (esPropietario !== undefined) updateData.esPropietario = esPropietario;
       if (esFranquero !== undefined) updateData.esFranquero = Boolean(esFranquero);
+      if (aceptaMascotas !== undefined) updateData.aceptaMascotas = Boolean(aceptaMascotas);
+      if (aceptaSillaRuedas !== undefined) updateData.aceptaSillaRuedas = Boolean(aceptaSillaRuedas);
       if (comisionPorcentaje !== undefined) updateData.comisionPorcentaje = parseFloat(comisionPorcentaje);
       if (fotoUrl !== undefined) updateData.fotoUrl = fotoUrl;
 
@@ -1461,6 +1475,7 @@ export const choferController = {
           nombre: true,
           apellido: true,
           dni: true,
+          sexo: true,
           telefono: true,
           email: true,
           estado: true,
@@ -1468,6 +1483,8 @@ export const choferController = {
           observaciones: true,
           esPropietario: true,
           esFranquero: true,
+          aceptaMascotas: true,
+          aceptaSillaRuedas: true,
           comisionPorcentaje: true,
           isOnline: true,
           enParadaVirtual: true,
@@ -1565,6 +1582,9 @@ export const choferController = {
               id: true,
               nombre: true,
               apellido: true,
+              sexo: true,
+              aceptaMascotas: true,
+              aceptaSillaRuedas: true,
               isOnline: true,
               enParadaVirtual: true,
               paradaVirtualIngreso: true,
@@ -1722,6 +1742,8 @@ export const choferController = {
               fecha: v.fecha,
               createdAt: v.createdAt,
               esArt: Boolean(v.artEmpresaId),
+              conMascota: Boolean(v.conMascota),
+              conSillaRuedas: Boolean(v.conSillaRuedas),
               motivoOferta: 'ASIGNADO_DIRECTO',
               puestoTabla: puestoEnTabla || 1,
             });
@@ -1729,6 +1751,22 @@ export const choferController = {
           }
 
           if (tablaChoferesLibres.length === 0) continue;
+
+          // Filtrar por preferencia de sexo del chofer, mascota y silla de ruedas
+          const prefSexoViaje = (v.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
+          const tablaElegiblePorSexo = tablaChoferesLibres.filter((c) => {
+            if (
+              (prefSexoViaje === 'FEMENINO' || prefSexoViaje === 'MASCULINO') &&
+              (c.sexo || 'MASCULINO').toUpperCase() !== prefSexoViaje
+            ) {
+              return false;
+            }
+            if (v.conMascota && !c.aceptaMascotas) return false;
+            if (v.conSillaRuedas && !c.aceptaSillaRuedas) return false;
+            return true;
+          });
+
+          if (tablaElegiblePorSexo.length === 0) continue;
 
           let state = ofertasViajesMap.get(v.id);
           if (!state) {
@@ -1755,25 +1793,25 @@ export const choferController = {
             state.choferOfertadoId = '';
           }
 
-          // Verificar si el chofer actualmente ofertado sigue libre
+          // Verificar si el chofer actualmente ofertado sigue libre y cumple preferencia de sexo
           const ofertadoSigueLibre =
             state.choferOfertadoId &&
             !state.rechazadosIds.has(state.choferOfertadoId) &&
-            tablaChoferesLibres.some((c) => c.id === state!.choferOfertadoId);
+            tablaElegiblePorSexo.some((c) => c.id === state!.choferOfertadoId);
 
           if (ofertadoSigueLibre) {
             choferesConOfertaActiva.add(state.choferOfertadoId);
           } else {
             // Filtrar choferes de la tabla que aún no rechazaron ni dejaron vencer este viaje
             // y que NO tengan ya otro viaje ofreciéndose en simultáneo
-            let elegibles = tablaChoferesLibres.filter(
+            let elegibles = tablaElegiblePorSexo.filter(
               (c) => !state!.rechazadosIds.has(c.id) && !choferesConOfertaActiva.has(c.id)
             );
 
             if (elegibles.length === 0) {
               // Si todos los que no tienen oferta activa ya habían rechazado este viaje,
               // reiniciar historial de rechazos pero respetando a los que están ocupados con otra oferta
-              const libresSinOtraOferta = tablaChoferesLibres.filter(
+              const libresSinOtraOferta = tablaElegiblePorSexo.filter(
                 (c) => !choferesConOfertaActiva.has(c.id)
               );
               if (libresSinOtraOferta.length > 0) {
@@ -1853,12 +1891,21 @@ export const choferController = {
               fecha: v.fecha,
               createdAt: v.createdAt,
               esArt: Boolean(v.artEmpresaId),
+              conMascota: Boolean(v.conMascota),
+              conSillaRuedas: Boolean(v.conSillaRuedas),
               motivoOferta: state.motivoOferta,
               puestoTabla: state.puestoTabla,
               distanciaOfertaMetros: state.distanciaMetros,
               segundosParaAceptar: Math.max(1, Math.ceil((state.expiraEn - ahoraMs) / 1000)),
             });
-          } else if (!viajeEnColaTabla && state.choferOfertadoId) {
+          } else if (
+            !viajeEnColaTabla &&
+            state.choferOfertadoId &&
+            (prefSexoViaje === 'INDISTINTO' ||
+              (chofer.sexo || 'MASCULINO').toUpperCase() === prefSexoViaje) &&
+            (!v.conMascota || chofer.aceptaMascotas) &&
+            (!v.conSillaRuedas || chofer.aceptaSillaRuedas)
+          ) {
             const choferOfertadoObj = tablaChoferesLibres.find((c) => c.id === state!.choferOfertadoId);
             viajeEnColaTabla = {
               viajeId: v.id,
@@ -2116,6 +2163,31 @@ export const choferController = {
         return res.status(400).json({
           success: false,
           message: 'El viaje fue cancelado por el cliente',
+        });
+      }
+
+      const prefSexoViaje = (viaje.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
+      const sexoChofer = (chofer.sexo || 'MASCULINO').toUpperCase();
+      if (
+        viaje.choferId !== chofer.id &&
+        (prefSexoViaje === 'FEMENINO' || prefSexoViaje === 'MASCULINO') &&
+        sexoChofer !== prefSexoViaje
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: `Este viaje requiere chofer ${prefSexoViaje === 'FEMENINO' ? 'mujer' : 'hombre'}`,
+        });
+      }
+      if (viaje.choferId !== chofer.id && viaje.conMascota && !chofer.aceptaMascotas) {
+        return res.status(403).json({
+          success: false,
+          message: 'Este viaje indica traslado con mascota y tu perfil no acepta mascotas',
+        });
+      }
+      if (viaje.choferId !== chofer.id && viaje.conSillaRuedas && !chofer.aceptaSillaRuedas) {
+        return res.status(403).json({
+          success: false,
+          message: 'Este viaje indica traslado con silla de ruedas y tu perfil no tiene habilitada esta opción',
         });
       }
 
@@ -4178,6 +4250,7 @@ export const choferController = {
         nombre,
         apellido,
         dni,
+        sexo,
         telefono,
         email,
         password,
@@ -4286,6 +4359,7 @@ export const choferController = {
             nombre: nombre.trim(),
             apellido: apellido.trim(),
             dni: dni.trim(),
+            sexo: typeof sexo === 'string' && sexo.toUpperCase() === 'FEMENINO' ? 'FEMENINO' : 'MASCULINO',
             telefono: telefono.trim(),
             email: email.toLowerCase().trim(),
             direccion: direccion ? direccion.trim() : null,

@@ -34,6 +34,9 @@ interface ReservaFormData {
   // Detalles adicionales
   observaciones: string;
   prioridad: 'normal' | 'alta' | 'urgente';
+  preferenciaSexoChofer: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
+  conMascota: boolean;
+  conSillaRuedas: boolean;
   metodoContacto: 'app' | 'telefono' | 'personal';
 }
 
@@ -52,6 +55,9 @@ export default function NuevaReserva() {
     tipoReserva: 'unica',
     observaciones: '',
     prioridad: 'normal',
+    preferenciaSexoChofer: 'INDISTINTO',
+    conMascota: false,
+    conSillaRuedas: false,
     metodoContacto: 'telefono'
   });
 
@@ -102,6 +108,9 @@ export default function NuevaReserva() {
         horaFin: formData.tipoReserva === 'periodica' ? formData.horaFin || undefined : undefined,
         diasSemana: formData.tipoReserva === 'periodica' ? formData.diasSemana || [] : undefined,
         tipo: formData.tipoReserva === 'periodica' ? 'PERIODICA' : 'UNICA',
+        preferenciaSexoChofer: formData.preferenciaSexoChofer,
+        conMascota: formData.conMascota,
+        conSillaRuedas: formData.conSillaRuedas,
         observaciones: formData.observaciones.trim() || undefined,
       });
 
@@ -344,6 +353,42 @@ export default function NuevaReserva() {
                     <option value="alta">Alta</option>
                     <option value="urgente">Urgente</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preferencia de Chofer
+                  </label>
+                  <select
+                    value={formData.preferenciaSexoChofer}
+                    onChange={(e) => handleInputChange('preferenciaSexoChofer', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="INDISTINTO">Indistinto (cualquier chofer)</option>
+                    <option value="FEMENINO">♀ Solo chofer mujer</option>
+                    <option value="MASCULINO">♂ Solo chofer hombre</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <label className="flex items-center gap-2.5 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={formData.conMascota}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, conMascota: e.target.checked }))}
+                      className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="text-sm font-medium text-gray-800">🐾 Pasajero viaja con mascota</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 p-3 rounded-lg border border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={formData.conSillaRuedas}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, conSillaRuedas: e.target.checked }))}
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm font-medium text-gray-800">♿ Pasajero viaja con silla de ruedas</span>
+                  </label>
                 </div>
               </div>
 
