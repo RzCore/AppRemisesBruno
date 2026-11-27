@@ -49,6 +49,7 @@ export default function ConfiguracionPage() {
   // Watch tariff values for live trip cost simulator
   const watchedBajada = watch('bajadaBandera', 3500);
   const watchedKm = watch('valorKm', 1200);
+  const watchedKmRuta = watch('valorKmRuta', 900);
   const watchedComision = watch('comisionPorcentaje', 30);
   const watchedAgenciaAbierta = watch('agenciaAbierta', true);
 
@@ -62,6 +63,7 @@ export default function ConfiguracionPage() {
       telefono: miRemiseria.telefono || '',
       bajadaBandera: miRemiseria.bajadaBandera || 3500,
       valorKm: miRemiseria.valorKm || 1200,
+      valorKmRuta: miRemiseria.valorKmRuta || 900,
       valorHoraEspera: miRemiseria.valorHoraEspera || 10000,
       comisionPorcentaje: miRemiseria.comisionPorcentaje || 30.0,
       comisionDuenioAuto: miRemiseria.comisionDuenioAuto || 20.0,
@@ -122,6 +124,7 @@ export default function ConfiguracionPage() {
         telefono: data.telefono?.trim(),
         bajadaBandera: Number(data.bajadaBandera),
         valorKm: Number(data.valorKm),
+        valorKmRuta: Number(data.valorKmRuta),
         valorHoraEspera: Number(data.valorHoraEspera),
         comisionPorcentaje: Number(data.comisionPorcentaje),
         comisionDuenioAuto: Number(data.comisionDuenioAuto),
@@ -312,7 +315,7 @@ export default function ConfiguracionPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Bajada de Bandera ($) *
@@ -330,12 +333,12 @@ export default function ConfiguracionPage() {
                     placeholder="3500"
                   />
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">Precio inicial del viaje</p>
+                <p className="text-[11px] text-slate-400 mt-1">Precio inicial urbano</p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Valor por Kilómetro ($/km) *
+                  Km en Ciudad ($/km) *
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-bold">$</span>
@@ -350,7 +353,43 @@ export default function ConfiguracionPage() {
                     placeholder="1200"
                   />
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">Costo por km recorrido</p>
+                <p className="text-[11px] text-slate-400 mt-1">Viajes menores a 15 km</p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Km en Ruta ($/km) *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setValue('valorKmRuta', Math.round((Number(watchedKm) || 1200) * 0.75), {
+                        shouldDirty: true,
+                      })
+                    }
+                    className="text-[10px] font-bold text-primary-600 hover:underline"
+                    title="Calcular 75% del valor de km en ciudad"
+                  >
+                    75% ciudad
+                  </button>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-bold">$</span>
+                  <input
+                    type="number"
+                    step="any"
+                    {...register('valorKmRuta', { 
+                      required: 'Requerido',
+                      min: { value: 0, message: 'Debe ser mayor o igual a 0' } 
+                    })}
+                    className="input pl-8 text-sm font-semibold"
+                    placeholder="900"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  ≥ 15 km sin bajada ({Number(watchedKmRuta || 900) * 54 > 0 ? `ej. 54 km: $${(Math.round((Number(watchedKmRuta || 900) * 54) / 100) * 100).toLocaleString('es-AR')}` : 'larga distancia'})
+                </p>
               </div>
 
               <div>

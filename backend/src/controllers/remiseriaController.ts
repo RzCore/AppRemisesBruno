@@ -19,6 +19,7 @@ export const getRemiseriaActiva = async (req: Request, res: Response) => {
         longitud: true,
         estado: true,
         valorKm: true,
+        valorKmRuta: true,
         bajadaBandera: true,
         valorHoraEspera: true,
         comisionPorcentaje: true,
@@ -414,6 +415,7 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
       estado, 
       duenioIds, 
       valorKm, 
+      valorKmRuta,
       bajadaBandera, 
       valorHoraEspera, 
       comisionDuenioAuto, 
@@ -490,6 +492,7 @@ export const updateRemiseria = async (req: AuthenticatedRequest, res: Response) 
       }
     }
     if (valorKm !== undefined) updateData.valorKm = valorKm;
+    if (valorKmRuta !== undefined) updateData.valorKmRuta = valorKmRuta;
     if (bajadaBandera !== undefined) updateData.bajadaBandera = bajadaBandera;
     if (valorHoraEspera !== undefined) updateData.valorHoraEspera = valorHoraEspera;
     if (comisionDuenioAuto !== undefined) updateData.comisionDuenioAuto = comisionDuenioAuto;

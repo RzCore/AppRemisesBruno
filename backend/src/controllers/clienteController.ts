@@ -7,7 +7,7 @@ import { AuthenticatedRequest } from '../types';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { searchNominatimCached } from './coordinatorDashboardController';
 import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBotService';
-import { calcularAjusteOrigenRemoto } from '../lib/pricingUtils';
+import { calcularAjusteOrigenRemoto, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
@@ -1304,6 +1304,7 @@ export const calcularPrecio = async (req: Request, res: Response) => {
         esTarifaDiferenciada: Boolean(customTarifas),
         esOrigenRemoto: cotizacion.esOrigenRemoto,
         kmAproximacion: cotizacion.kmAproximacion,
+        tienePeajes: cotizacion.tienePeajes,
         latOrigen: cotizacion.latOrigen,
         lonOrigen: cotizacion.lonOrigen,
         latDestino: cotizacion.latDestino,
@@ -2259,6 +2260,7 @@ export async function calcularPrecioViaje(
   tiempoEstimado: number;
   esOrigenRemoto: boolean;
   kmAproximacion: number;
+  tienePeajes: boolean;
   latOrigen?: number;
   lonOrigen?: number;
   latDestino?: number;
@@ -2271,6 +2273,9 @@ export async function calcularPrecioViaje(
   const valorKm = (customTarifas?.valorKm && customTarifas.valorKm > 0)
     ? customTarifas.valorKm
     : (remiseria?.valorKm || 1200);
+  const valorKmRuta = remiseria?.valorKmRuta && remiseria.valorKmRuta > 0
+    ? remiseria.valorKmRuta
+    : Math.round(valorKm * 0.75);
 
   let distanciaKm = 0;
   let tiempoEstimado = 10;
@@ -2425,19 +2430,33 @@ export async function calcularPrecioViaje(
 
   const distanciaFacturable = ajusteRemoto.distanciaFacturableKm;
 
-  let precioEstimado = bajadaBandera;
-  if (distanciaFacturable > 1) {
-    precioEstimado += (distanciaFacturable - 1) * valorKm;
-  }
+  const { precio: precioBaseCalculado, valorKmAplicado } = calcularPrecioTarifaNormal({
+    distanciaFacturableKm: distanciaFacturable,
+    bajadaBandera,
+    valorKm,
+    valorKmRuta,
+    esTarifaPersonalizada: Boolean(customTarifas),
+  });
+  let precioEstimado = precioBaseCalculado;
 
   // Cada parada intermedia suma recargo por parada (detención/espera corta y desvío mínimo)
   if (cantidadParadas > 0) {
-    const recargoParada = Math.round((valorKm * 1.5) / 100) * 100;
+    const recargoParada = Math.round((valorKmAplicado * 1.5) / 100) * 100;
     precioEstimado += cantidadParadas * recargoParada;
   }
 
   // Redondear siempre en múltiplos de 100
   precioEstimado = Math.round(precioEstimado / 100) * 100;
+
+  const tienePeajes = detectarPeajesEnRecorrido({
+    origen,
+    destino,
+    latOrigen: latOri,
+    lonOrigen: lonOri,
+    latDestino: latDes,
+    lonDestino: lonDes,
+    distanciaKm: distanciaFacturable,
+  });
 
   return {
     precio: precioEstimado,
@@ -2446,6 +2465,7 @@ export async function calcularPrecioViaje(
     tiempoEstimado,
     esOrigenRemoto: ajusteRemoto.esOrigenRemoto,
     kmAproximacion: ajusteRemoto.kmAproximacion,
+    tienePeajes,
     latOrigen: latOri,
     lonOrigen: lonOri,
     latDestino: latDes,

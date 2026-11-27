@@ -83,6 +83,7 @@ export interface UpdateRemiseriaRequest {
   estado?: boolean;
   duenioIds?: string[];
   valorKm?: number;
+  valorKmRuta?: number;
   bajadaBandera?: number;
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;

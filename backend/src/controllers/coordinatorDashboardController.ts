@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from '../types';
 import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
-import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
+import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
@@ -1492,12 +1492,31 @@ export const coordinatorDashboardController = {
           }
         }
       } else {
-        // Fórmula estándar de remisería: bajada de bandera (0-1 km) + km adicionales, redondeado a múltiplos de 100
-        if (distanciaFacturable > 1) {
-          precioEstimado += (distanciaFacturable - 1) * valorKm;
-        }
-        precioEstimado = redondearPrecioMultiplo100(precioEstimado);
+        // Fórmula estándar de remisería:
+        // - < 15 km (o tarifa personalizada de cliente): bajada de bandera + (km - 1) * valorKm
+        // - >= 15 km (tarifa normal): km * valorKmRuta (sin bajada de bandera)
+        const esTarifaPersonalizadaCliente = Boolean(
+          clienteTarifaAplicada && clienteTarifaAplicada.tipoTarifa === 'PERSONALIZADA'
+        );
+        const { precio: precioNormal } = calcularPrecioTarifaNormal({
+          distanciaFacturableKm: distanciaFacturable,
+          bajadaBandera,
+          valorKm,
+          valorKmRuta: remiseriaActual?.valorKmRuta,
+          esTarifaPersonalizada: esTarifaPersonalizadaCliente,
+        });
+        precioEstimado = precioNormal;
       }
+
+      const tienePeajes = detectarPeajesEnRecorrido({
+        origen,
+        destino,
+        latOrigen: finalLatOrigen,
+        lonOrigen: finalLonOrigen,
+        latDestino: finalLatDestino,
+        lonDestino: finalLonDestino,
+        distanciaKm: distanciaFacturable,
+      });
 
       // Precio confidencial ART (solo se devuelve al DUENIO)
       let precioArtEstimado: number | undefined = undefined;
@@ -1525,6 +1544,8 @@ export const coordinatorDashboardController = {
           ...(precioArtEstimado !== undefined ? { precioArtEstimado } : {}),
           bajadaBandera,
           valorKm,
+          valorKmRuta: remiseriaActual?.valorKmRuta || 900,
+          tienePeajes,
           calculatedViaRoute,
           artEmpresa: artEmpresaAplicada,
           esTarifaArt: !!artEmpresaAplicada,

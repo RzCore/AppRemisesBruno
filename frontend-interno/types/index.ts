@@ -36,6 +36,7 @@ export interface Remiseria {
   longitud?: number;
   estado: boolean;
   valorKm?: number;
+  valorKmRuta?: number;
   bajadaBandera?: number;
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;
@@ -428,6 +429,7 @@ export interface UpdateRemiseriaData {
   estado?: boolean;
   duenioIds?: string[];
   valorKm?: number;
+  valorKmRuta?: number;
   bajadaBandera?: number;
   valorHoraEspera?: number;
   comisionDuenioAuto?: number;

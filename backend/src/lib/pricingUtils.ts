@@ -3,6 +3,106 @@
 export const DEFAULT_BASE_LAT = -34.8957; // Chivilcoy centro
 export const DEFAULT_BASE_LON = -60.0189;
 export const RADIO_URBANO_BASE_KM = 12; // Radio urbano de la base (coincide con isEnChivilcoy)
+export const UMBRAL_KM_RUTA = 15; // A partir de 15 km aplica tarifa Km en Ruta (sin bajada de bandera)
+export const DEFAULT_VALOR_KM_RUTA = 900;
+
+/**
+ * Calcula el precio de un viaje normal aplicando:
+ * - < 15 km (urbano): bajadaBandera + (km - 1) * valorKm
+ * - >= 15 km (ruta / larga distancia, si NO es tarifa personalizada): km * valorKmRuta (sin bajada de bandera)
+ * Redondeado siempre a múltiplos de $100.
+ */
+export function calcularPrecioTarifaNormal(params: {
+  distanciaFacturableKm: number;
+  bajadaBandera: number;
+  valorKm: number;
+  valorKmRuta?: number | null;
+  esTarifaPersonalizada?: boolean;
+}): { precio: number; esTarifaRuta: boolean; valorKmAplicado: number } {
+  const {
+    distanciaFacturableKm,
+    bajadaBandera,
+    valorKm,
+    valorKmRuta,
+    esTarifaPersonalizada = false,
+  } = params;
+
+  if (!esTarifaPersonalizada && distanciaFacturableKm >= UMBRAL_KM_RUTA) {
+    const kmRuta =
+      typeof valorKmRuta === 'number' && valorKmRuta > 0
+        ? valorKmRuta
+        : Math.round(valorKm * 0.75);
+    return {
+      precio: redondearPrecioMultiplo100(distanciaFacturableKm * kmRuta),
+      esTarifaRuta: true,
+      valorKmAplicado: kmRuta,
+    };
+  }
+
+  let precio = bajadaBandera;
+  if (distanciaFacturableKm > 1) {
+    precio += (distanciaFacturableKm - 1) * valorKm;
+  }
+  return {
+    precio: redondearPrecioMultiplo100(precio),
+    esTarifaRuta: false,
+    valorKmAplicado: valorKm,
+  };
+}
+
+/**
+ * Detecta si el recorrido cruza corredores conocidos con peaje desde/hacia la zona de Chivilcoy:
+ * - Ruta 5 Este / Acceso Oeste (Peaje Olivera pasando Mercedes, Luján, Moreno, CABA, Ezeiza, La Plata, etc.)
+ * - Ruta 5 Oeste pasando Bragado (Peaje 9 de Julio, Carlos Casares, Pehuajó, Trenque Lauquen, etc.)
+ * - Corredor Norte / Ruta 7 / Ruta 8 / Ruta 9 (Junín, Pergamino, Rosario, Pilar, Campana, Zárate, etc.)
+ * No marca peaje en tramos sin peaje como Chivilcoy urbano, Alberti, Bragado, Suipacha, Moquehuá o Mercedes.
+ */
+export function detectarPeajesEnRecorrido(params: {
+  origen?: string;
+  destino?: string;
+  latOrigen?: number;
+  lonOrigen?: number;
+  latDestino?: number;
+  lonDestino?: number;
+  distanciaKm?: number;
+}): boolean {
+  const { origen = '', destino = '', latOrigen, lonOrigen, latDestino, lonDestino, distanciaKm = 0 } = params;
+  if (distanciaKm > 0 && distanciaKm < UMBRAL_KM_RUTA) {
+    return false;
+  }
+
+  const texto = `${origen} ${destino}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const regexZonasConPeaje =
+    /\b(lujan|general rodriguez|gral\.?\s*rodriguez|moreno|merlo|ituzaingo|moron|castelar|ramos mejia|ciudadela|haedo|caba|capital federal|ciudad autonoma de buenos aires|retiro|palermo|belgrano|recoleta|microcentro|ezeiza|aeroparque|la plata|avellaneda|quilmes|lanus|lomas de zamora|tigre|pilar|escobar|campana|zarate|san isidro|vicente lopez|9 de julio|nueve de julio|carlos casares|pehuajo|trenque lauquen|santa rosa|junin|pergamino|rosario|mar del plata|pinamar|villa gesell|tandil|bahia blanca)\b/i;
+
+  if (regexZonasConPeaje.test(texto)) {
+    return true;
+  }
+
+  // Verificación geográfica:
+  // - Al este de Mercedes (Peaje Olivera en Ruta 5, lon > -59.35)
+  // - Al oeste de Bragado (Peaje 9 de Julio en Ruta 5, lon < -60.75)
+  // - Al norte de Ruta 7 / Junín / Rosario (lat > -34.45)
+  const puntos = [
+    { lat: latOrigen, lon: lonOrigen },
+    { lat: latDestino, lon: lonDestino },
+  ];
+
+  for (const pt of puntos) {
+    if (typeof pt.lon === 'number' && !isNaN(pt.lon)) {
+      if (pt.lon > -59.35 || pt.lon < -60.75) return true;
+    }
+    if (typeof pt.lat === 'number' && !isNaN(pt.lat)) {
+      if (pt.lat > -34.45) return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Redondea el importe de un viaje normal al múltiplo de 100 más cercano (ej: 10450 -> 10500).

@@ -74,6 +74,7 @@ model Remiseria {
   comisionPorcentaje Float @default(30.0)
   comisionDuenioAuto Float @default(20.0)
   valorKm       Float    @default(1200)
+  valorKmRuta   Float    @default(900)
   bajadaBandera Float    @default(3500)
   valorHoraEspera Float  @default(12000)
   tarifaEspecialActiva String?   @default("NORMAL")

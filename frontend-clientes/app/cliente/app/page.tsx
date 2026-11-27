@@ -1132,6 +1132,7 @@ export default function ClienteApp() {
           esTarifaDiferenciada: res.data.esTarifaDiferenciada,
           esOrigenRemoto: Boolean(res.data.esOrigenRemoto),
           kmAproximacion: Number(res.data.kmAproximacion || 0),
+          tienePeajes: Boolean(res.data.tienePeajes),
         });
       }
     } catch {
@@ -1320,6 +1321,7 @@ export default function ClienteApp() {
           esTarifaDiferenciada: res.data.esTarifaDiferenciada,
           esOrigenRemoto: Boolean(res.data.esOrigenRemoto),
           kmAproximacion: Number(res.data.kmAproximacion || 0),
+          tienePeajes: Boolean(res.data.tienePeajes),
         });
       } else {
         setPresupuesto(null);
@@ -2059,6 +2061,11 @@ export default function ClienteApp() {
                     {presupuesto.esOrigenRemoto && (
                       <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400 mt-0.5">
                         Incluye traslado desde Chivilcoy
+                      </p>
+                    )}
+                    {presupuesto.tienePeajes && (
+                      <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 mt-0.5">
+                        🛣️ Este recorrido incluye peajes (se abonan aparte)
                       </p>
                     )}
                   </div>

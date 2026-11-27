@@ -623,6 +623,7 @@ export interface CalculoPrecioData {
   tarifaPorMinuto: number;
   esOrigenRemoto?: boolean;
   kmAproximacion?: number;
+  tienePeajes?: boolean;
   latOrigen?: number;
   lonOrigen?: number;
   latDestino?: number;
