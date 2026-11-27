@@ -174,14 +174,14 @@
 }
 
 /* Botones oscuros (bg-slate-900) visibles sobre tarjetas oscuras */
-.dark .duenio-module main button.bg-slate-900,
-.dark .duenio-module main a.bg-slate-900 {
+.dark .duenio-module main button[class*="bg-slate-900"],
+.dark .duenio-module main a[class*="bg-slate-900"] {
   background-color: #334155;
   border: 1px solid #475569;
 }
 
-.dark .duenio-module main button.bg-slate-900:hover,
-.dark .duenio-module main a.bg-slate-900:hover {
+.dark .duenio-module main button[class*="bg-slate-900"]:hover,
+.dark .duenio-module main a[class*="bg-slate-900"]:hover {
   background-color: #475569;
 }
 
