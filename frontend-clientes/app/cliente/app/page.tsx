@@ -206,6 +206,9 @@ export default function ClienteApp() {
   const [destinoSuggestions, setDestinoSuggestions] = useState<any[]>([]);
   const [isOrigenSelected, setIsOrigenSelected] = useState(false);
   const [isDestinoSelected, setIsDestinoSelected] = useState(false);
+  const [editandoOrigen, setEditandoOrigen] = useState(false);
+  const [detectandoGps, setDetectandoGps] = useState(false);
+  const gpsAutoIntentadoRef = useRef(false);
   
   // Coordenadas
   const [origenCoords, setOrigenCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -1005,6 +1008,8 @@ export default function ClienteApp() {
     setDestinoCoords(null);
     setIsOrigenSelected(false);
     setIsDestinoSelected(false);
+    setEditandoOrigen(false);
+    gpsAutoIntentadoRef.current = false;
     setObservaciones('');
     setPagaCon('');
     setCantidadPasajeros(1);
@@ -1086,6 +1091,7 @@ export default function ClienteApp() {
       lon: parseFloat(s.lon)
     });
     setOrigenSuggestions([]);
+    setEditandoOrigen(false);
     setPresupuesto(null);
   };
 
@@ -1196,13 +1202,18 @@ export default function ClienteApp() {
     }
   };
 
-  const usarUbicacionActual = () => {
+  const usarUbicacionActual = (silencioso = false) => {
     if (typeof window === 'undefined' || !navigator.geolocation) {
-      toast.error('Tu dispositivo o navegador no soporta geolocalización GPS');
+      if (!silencioso) {
+        toast.error('Tu dispositivo o navegador no soporta geolocalización GPS');
+      } else {
+        setEditandoOrigen(true);
+      }
       return;
     }
 
-    const toastId = toast.loading('📍 Obteniendo tu ubicación GPS real...');
+    setDetectandoGps(true);
+    const toastId = silencioso ? undefined : toast.loading('📍 Obteniendo tu ubicación GPS real...');
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -1246,35 +1257,57 @@ export default function ClienteApp() {
           setOrigen(direccionFormateada);
           setOrigenCoords({ lat: latitude, lon: longitude });
           setIsOrigenSelected(true);
+          setEditandoOrigen(false);
           setOrigenSuggestions([]);
-          toast.success(`📍 Ubicación real obtenida: ${direccionFormateada}`, { id: toastId, duration: 4500 });
+          if (!silencioso && toastId) {
+            toast.success(`📍 Ubicación real obtenida: ${direccionFormateada}`, { id: toastId, duration: 4500 });
+          }
         } catch (err) {
           console.warn('Error en reverse geocoding:', err);
           const fallbackDir = `Ubicación GPS (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
           setOrigen(fallbackDir);
           setOrigenCoords({ lat: latitude, lon: longitude });
           setIsOrigenSelected(true);
+          setEditandoOrigen(false);
           setOrigenSuggestions([]);
-          toast.success('📍 Ubicación GPS real obtenida', { id: toastId });
+          if (!silencioso && toastId) {
+            toast.success('📍 Ubicación GPS real obtenida', { id: toastId });
+          }
+        } finally {
+          setDetectandoGps(false);
         }
       },
       (error) => {
         console.error('Error GPS:', error);
-        if (error.code === error.PERMISSION_DENIED) {
-          toast.error('Permiso de GPS denegado. Habilitá los permisos de ubicación en tu navegador o celular.', { id: toastId, duration: 5000 });
-        } else if (error.code === error.TIMEOUT) {
-          toast.error('Tiempo de espera agotado al consultar GPS. Por favor intentá nuevamente.', { id: toastId });
-        } else {
-          toast.error('No se pudo acceder a tu ubicación actual.', { id: toastId });
+        setDetectandoGps(false);
+        setEditandoOrigen(true);
+        if (!silencioso && toastId) {
+          if (error.code === error.PERMISSION_DENIED) {
+            toast.error('Permiso de GPS denegado. Habilitá los permisos de ubicación en tu navegador o celular.', { id: toastId, duration: 5000 });
+          } else if (error.code === error.TIMEOUT) {
+            toast.error('Tiempo de espera agotado al consultar GPS. Por favor intentá nuevamente.', { id: toastId });
+          } else {
+            toast.error('No se pudo acceder a tu ubicación actual.', { id: toastId });
+          }
         }
       },
       {
         enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0
+        timeout: 12000,
+        maximumAge: 30000
       }
     );
   };
+
+  // Estilo Uber: detectar automáticamente la ubicación GPS al abrir la app en modo solicitud
+  useEffect(() => {
+    if (authLoading || !user || user.rol !== 'CLIENTE') return;
+    if (estadoViaje !== 'IDLE' || !estadoAgencia.abierta) return;
+    if (origen.trim() || gpsAutoIntentadoRef.current) return;
+    gpsAutoIntentadoRef.current = true;
+    usarUbicacionActual(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user?.id, estadoViaje, estadoAgencia.abierta]);
 
   const calcularPrecio = async (metodoPagoParam?: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE') => {
     if (!origen || !destino) {
@@ -1677,74 +1710,92 @@ export default function ClienteApp() {
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-800 transition-colors">
             <div className="p-4 space-y-3.5">
               
-              {/* Input de Origen */}
-              <div className="relative z-40">
-                <div className="flex gap-3 items-center">
-                  <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0">
-                    <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></div>
+              {/* Origen compacto estilo Uber (auto-detectado por GPS) o desplegado si elige Cambiar */}
+              {!editandoOrigen && (origen.trim() || detectandoGps) ? (
+                <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50 rounded-xl">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className={`w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 ${detectandoGps ? 'animate-ping' : ''}`} />
+                    <span className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-200 truncate">
+                      {detectandoGps ? 'Detectando tu ubicación actual...' : `Desde: ${origen}`}
+                    </span>
                   </div>
-                  <div className="flex-1 relative">
-                    <input 
-                      type="text" 
-                      value={origen}
-                      onChange={(e) => {
-                        setOrigen(e.target.value);
-                        setIsOrigenSelected(false);
-                        setOrigenCoords(null);
-                        setPresupuesto(null);
-                      }}
-                      placeholder="¿Dónde te buscamos? (Origen)"
-                      className="w-full bg-gray-50 dark:bg-slate-800 border-none rounded-xl p-3 pr-9 text-sm focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-white font-medium placeholder-gray-500 dark:placeholder-slate-400"
-                    />
-                    <button 
-                      type="button"
-                      onClick={usarUbicacionActual}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-primary-600 dark:text-primary-400 hover:text-primary-800 transition-colors p-1"
-                      title="Usar mi ubicación GPS real"
-                    >
-                      <Navigation className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditandoOrigen(true)}
+                    className="text-[11px] font-bold text-primary-600 dark:text-primary-400 hover:underline shrink-0 px-1.5 py-0.5"
+                  >
+                    Cambiar
+                  </button>
                 </div>
-
-                {/* Acceso rápido destacado para usar ubicación GPS real */}
-                {!isOrigenSelected && !origen.trim() && (
-                  <div className="pl-7 pt-1.5">
-                    <button
-                      type="button"
-                      onClick={usarUbicacionActual}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 rounded-xl text-xs font-bold transition-all shadow-2xs active:scale-95"
-                    >
-                      <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
-                      <span>📍 Usar mi ubicación actual (GPS real)</span>
-                    </button>
+              ) : (
+                <div className="relative z-40">
+                  <div className="flex gap-3 items-center">
+                    <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0">
+                      <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></div>
+                    </div>
+                    <div className="flex-1 relative">
+                      <input 
+                        type="text" 
+                        value={origen}
+                        onChange={(e) => {
+                          setOrigen(e.target.value);
+                          setIsOrigenSelected(false);
+                          setOrigenCoords(null);
+                          setPresupuesto(null);
+                        }}
+                        placeholder="¿Dónde te buscamos? (Origen)"
+                        className="w-full bg-gray-50 dark:bg-slate-800 border-none rounded-xl p-3 pr-9 text-sm focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-white font-medium placeholder-gray-500 dark:placeholder-slate-400"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => usarUbicacionActual(false)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-primary-600 dark:text-primary-400 hover:text-primary-800 transition-colors p-1"
+                        title="Usar mi ubicación GPS real"
+                      >
+                        <Navigation className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                )}
 
-                {/* Sugerencias Origen */}
-                {origenSuggestions.length > 0 && (
-                  <div className="absolute left-7 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
-                    <button
-                      type="button"
-                      onClick={usarUbicacionActual}
-                      className="w-full text-left p-2.5 text-xs bg-emerald-50/70 hover:bg-emerald-100/90 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/50 border-b border-emerald-100 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold flex items-center gap-2 transition-colors"
-                    >
-                      <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      <span>📍 Usar mi ubicación GPS actual en vivo</span>
-                    </button>
-                    {origenSuggestions.map((s, idx) => (
+                  {/* Acceso rápido destacado para usar ubicación GPS real */}
+                  {!isOrigenSelected && !origen.trim() && (
+                    <div className="pl-7 pt-1.5">
                       <button
                         type="button"
-                        key={idx}
-                        onClick={() => handleSelectOrigen(s)}
-                        className="w-full text-left p-3 text-xs hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-0 text-gray-800 dark:text-slate-200 font-medium truncate block"
+                        onClick={() => usarUbicacionActual(false)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 rounded-xl text-xs font-bold transition-all shadow-2xs active:scale-95"
                       >
-                        {s.display_name}
+                        <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
+                        <span>📍 Usar mi ubicación actual (GPS real)</span>
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+
+                  {/* Sugerencias Origen */}
+                  {origenSuggestions.length > 0 && (
+                    <div className="absolute left-7 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => usarUbicacionActual(false)}
+                        className="w-full text-left p-2.5 text-xs bg-emerald-50/70 hover:bg-emerald-100/90 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/50 border-b border-emerald-100 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold flex items-center gap-2 transition-colors"
+                      >
+                        <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span>📍 Usar mi ubicación GPS actual en vivo</span>
+                      </button>
+                      {origenSuggestions.map((s, idx) => (
+                        <button
+                          type="button"
+                          key={idx}
+                          onClick={() => handleSelectOrigen(s)}
+                          className="w-full text-left p-3 text-xs hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-0 text-gray-800 dark:text-slate-200 font-medium truncate block"
+                        >
+                          {s.display_name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* PARADAS INTERMEDIAS */}
               {paradas.map((parada, idx) => (
@@ -1822,8 +1873,8 @@ export default function ClienteApp() {
                         setDestinoCoords(null);
                         setPresupuesto(null);
                       }}
-                      placeholder="¿A dónde quieres ir? (Destino final)"
-                      className="w-full bg-gray-50 dark:bg-slate-800 border-none rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-white font-medium placeholder-gray-500 dark:placeholder-slate-400"
+                      placeholder="¿A dónde vas?"
+                      className="w-full bg-gray-100 dark:bg-slate-800 border-none rounded-xl p-3.5 text-base focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-white font-semibold placeholder-gray-500 dark:placeholder-slate-400"
                     />
                   </div>
                 </div>
