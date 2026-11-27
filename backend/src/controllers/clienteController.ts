@@ -15,6 +15,7 @@ import { calcularRutaAsfaltada } from '../lib/routingUtils';
 interface RouteCacheEntry {
   distanciaKm: number;
   tiempoEstimado: number;
+  tienePeajes?: boolean;
   timestamp: number;
 }
 const routeCache = new Map<string, RouteCacheEntry>();
@@ -2323,6 +2324,7 @@ export async function calcularPrecioViaje(
   let distanciaKm = 0;
   let tiempoEstimado = 10;
   let calculatedViaRoute = false;
+  let rutaTienePeajes: boolean | undefined = undefined;
 
   // Resolver coordenadas reales si el cliente escribió la dirección sin tocar una sugerencia.
   // NUNCA inventar distancias/precios por hash si una dirección no existe o no se pudo ubicar.
@@ -2388,6 +2390,7 @@ export async function calcularPrecioViaje(
     if (cachedRoute && ahora - cachedRoute.timestamp < 3600000) {
       distanciaKm = cachedRoute.distanciaKm;
       tiempoEstimado = cachedRoute.tiempoEstimado;
+      rutaTienePeajes = cachedRoute.tienePeajes;
       calculatedViaRoute = true;
     } else {
       // 2. Calcular ruta evitando caminos de tierra (Valhalla con fallback a OSRM)
@@ -2398,8 +2401,14 @@ export async function calcularPrecioViaje(
       if (rutaAsfaltada && rutaAsfaltada.distanciaKm >= 0) {
         distanciaKm = rutaAsfaltada.distanciaKm;
         tiempoEstimado = Math.max(5, rutaAsfaltada.duracionMin);
+        rutaTienePeajes = rutaAsfaltada.tienePeajes;
         calculatedViaRoute = true;
-        routeCache.set(coordsQuery, { distanciaKm, tiempoEstimado, timestamp: ahora });
+        routeCache.set(coordsQuery, {
+          distanciaKm,
+          tiempoEstimado,
+          tienePeajes: rutaAsfaltada.tienePeajes,
+          timestamp: ahora,
+        });
       }
 
       // 3. Fallback instantáneo a Haversine acumulado (+30% trama urbana)
@@ -2474,8 +2483,7 @@ export async function calcularPrecioViaje(
   precioEstimado = Math.round(precioEstimado / 100) * 100;
 
   const tienePeajes = detectarPeajesEnRecorrido({
-    origen,
-    destino,
+    rutaTienePeajes,
     latOrigen: latOri,
     lonOrigen: lonOri,
     latDestino: latDes,

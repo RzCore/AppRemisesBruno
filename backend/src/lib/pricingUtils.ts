@@ -52,42 +52,32 @@ export function calcularPrecioTarifaNormal(params: {
 }
 
 /**
- * Detecta si el recorrido cruza corredores conocidos con peaje desde/hacia la zona de Chivilcoy:
- * - Ruta 5 Este / Acceso Oeste (Peaje Olivera pasando Mercedes, Luján, Moreno, CABA, Ezeiza, La Plata, etc.)
- * - Ruta 5 Oeste pasando Bragado (Peaje 9 de Julio, Carlos Casares, Pehuajó, Trenque Lauquen, etc.)
- * - Corredor Norte / Ruta 7 / Ruta 8 / Ruta 9 (Junín, Pergamino, Rosario, Pilar, Campana, Zárate, etc.)
- * No marca peaje en tramos sin peaje como Chivilcoy urbano, Alberti, Bragado, Suipacha, Moquehuá o Mercedes.
+ * Determina si el recorrido real pasa por peajes.
+ * Prioriza la detección geométrica exacta de Valhalla (`has_toll` + proximidad a cabinas reales).
+ * Solo si no hubo resultado de ruteo (fallback), aplica verificación geográfica estricta
+ * (sin regex sobre nombres de calles para evitar falsos positivos).
  */
 export function detectarPeajesEnRecorrido(params: {
-  origen?: string;
-  destino?: string;
+  rutaTienePeajes?: boolean;
   latOrigen?: number;
   lonOrigen?: number;
   latDestino?: number;
   lonDestino?: number;
   distanciaKm?: number;
 }): boolean {
-  const { origen = '', destino = '', latOrigen, lonOrigen, latDestino, lonDestino, distanciaKm = 0 } = params;
+  const { rutaTienePeajes, latOrigen, lonOrigen, latDestino, lonDestino, distanciaKm = 0 } = params;
   if (distanciaKm > 0 && distanciaKm < UMBRAL_KM_RUTA) {
     return false;
   }
 
-  const texto = `${origen} ${destino}`
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-
-  const regexZonasConPeaje =
-    /\b(lujan|general rodriguez|gral\.?\s*rodriguez|moreno|merlo|ituzaingo|moron|castelar|ramos mejia|ciudadela|haedo|caba|capital federal|ciudad autonoma de buenos aires|retiro|palermo|belgrano|recoleta|microcentro|ezeiza|aeroparque|la plata|avellaneda|quilmes|lanus|lomas de zamora|tigre|pilar|escobar|campana|zarate|san isidro|vicente lopez|9 de julio|nueve de julio|carlos casares|pehuajo|trenque lauquen|santa rosa|junin|pergamino|rosario|mar del plata|pinamar|villa gesell|tandil|bahia blanca)\b/i;
-
-  if (regexZonasConPeaje.test(texto)) {
-    return true;
+  // Si el ruteador real (Valhalla + cabinas reales sobre la polilínea) respondió, confiar 100% en eso
+  if (typeof rutaTienePeajes === 'boolean') {
+    return rutaTienePeajes;
   }
 
-  // Verificación geográfica:
-  // - Al este de Mercedes (Peaje Olivera en Ruta 5, lon > -59.35)
-  // - Al oeste de Bragado (Peaje 9 de Julio en Ruta 5, lon < -60.75)
-  // - Al norte de Ruta 7 / Junín / Rosario (lat > -34.45)
+  // Fallback puramente geográfico si no hubo ruteo:
+  // - Al este de Peaje Olivera (lon > -59.28) -> Luján, Acceso Oeste, CABA, Ezeiza, La Plata
+  // - Al oeste de Peaje 9 de Julio (lon < -60.72) -> 9 de Julio, Carlos Casares, Pehuajó
   const puntos = [
     { lat: latOrigen, lon: lonOrigen },
     { lat: latDestino, lon: lonDestino },
@@ -95,10 +85,7 @@ export function detectarPeajesEnRecorrido(params: {
 
   for (const pt of puntos) {
     if (typeof pt.lon === 'number' && !isNaN(pt.lon)) {
-      if (pt.lon > -59.35 || pt.lon < -60.75) return true;
-    }
-    if (typeof pt.lat === 'number' && !isNaN(pt.lat)) {
-      if (pt.lat > -34.45) return true;
+      if (pt.lon > -59.28 || pt.lon < -60.72) return true;
     }
   }
 

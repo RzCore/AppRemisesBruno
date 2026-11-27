@@ -10,7 +10,44 @@ export interface RutaCalculada {
   distanciaKm: number;
   duracionMin: number;
   coords: [number, number][]; // [lat, lon][]
+  tienePeajes: boolean;
   provider: 'valhalla' | 'osrm';
+}
+
+// Cabinas de peaje reales en rutas nacionales alrededor de Chivilcoy
+// (algunas no tienen `toll=yes` en las vías de OSM, por eso verificamos por proximidad exacta a la cabina)
+const CABINAS_PEAJE_REGIONALES: Array<{ nombre: string; lat: number; lon: number }> = [
+  { nombre: 'Peaje Olivera (RN5)', lat: -34.6450223, lon: -59.2942848 },
+  { nombre: 'Peaje 9 de Julio (RN5)', lat: -35.3604447, lon: -60.7029105 },
+  { nombre: 'Peaje Villa Espil (RN7)', lat: -34.5198525, lon: -59.3089066 },
+];
+
+function distanciaKmRapida(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function polilineaPasaPorCabinaPeaje(coords: [number, number][]): boolean {
+  if (!coords || coords.length === 0) return false;
+  // Revisamos con paso adaptativo y radio de 400m alrededor de cada cabina real
+  for (const cabina of CABINAS_PEAJE_REGIONALES) {
+    for (let i = 0; i < coords.length; i++) {
+      const [lat, lon] = coords[i];
+      if (Math.abs(lat - cabina.lat) > 0.01 || Math.abs(lon - cabina.lon) > 0.01) continue;
+      if (distanciaKmRapida(lat, lon, cabina.lat, cabina.lon) <= 0.4) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 interface CacheEntry {
@@ -119,26 +156,37 @@ export async function calcularRutaAsfaltada(
         if (summary && typeof summary.length === 'number' && summary.length >= 0) {
           const distanciaKm = Math.round(summary.length * 10) / 10;
           const duracionMin = Math.max(3, Math.round((Number(summary.time) || 0) / 60));
-          let coords: [number, number][] = [];
+          const decodedCoords: [number, number][] = [];
 
-          if (includeGeometry && Array.isArray(json?.trip?.legs)) {
+          if (Array.isArray(json?.trip?.legs)) {
             for (const leg of json.trip.legs) {
               if (typeof leg?.shape === 'string' && leg.shape.length > 0) {
                 const decoded = decodePolyline6(leg.shape);
-                if (coords.length > 0 && decoded.length > 0) {
-                  coords.push(...decoded.slice(1));
+                if (decodedCoords.length > 0 && decoded.length > 0) {
+                  decodedCoords.push(...decoded.slice(1));
                 } else {
-                  coords.push(...decoded);
+                  decodedCoords.push(...decoded);
                 }
               }
             }
           }
+
+          const hasTollOsrm =
+            Boolean(summary.has_toll) ||
+            (Array.isArray(json?.trip?.legs) &&
+              json.trip.legs.some(
+                (leg: any) =>
+                  Array.isArray(leg?.maneuvers) && leg.maneuvers.some((m: any) => Boolean(m?.toll))
+              ));
+          const tienePeajes = hasTollOsrm || polilineaPasaPorCabinaPeaje(decodedCoords);
+          const coords: [number, number][] = includeGeometry ? decodedCoords : [];
 
           valhallaConsecutiveErrors = 0;
           const result: RutaCalculada = {
             distanciaKm,
             duracionMin,
             coords,
+            tienePeajes,
             provider: 'valhalla',
           };
 
@@ -184,6 +232,7 @@ export async function calcularRutaAsfaltada(
             distanciaKm,
             duracionMin,
             coords,
+            tienePeajes: coords.length > 0 ? polilineaPasaPorCabinaPeaje(coords) : false,
             provider: 'osrm',
           };
 

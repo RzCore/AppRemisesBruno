@@ -1509,8 +1509,6 @@ export const coordinatorDashboardController = {
       }
 
       const tienePeajes = detectarPeajesEnRecorrido({
-        origen,
-        destino,
         latOrigen: finalLatOrigen,
         lonOrigen: finalLonOrigen,
         latDestino: finalLatDestino,
