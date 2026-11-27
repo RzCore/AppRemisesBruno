@@ -280,6 +280,17 @@ export default function HistorialLiquidacionesPage() {
     return 0;
   };
 
+  const getCoordinadorInfoLiq = (liq: any) => {
+    const esDuenio = Boolean(liq.coordinador?.duenio?.nombre && !liq.coordinador?.coordinador?.nombre);
+    const nombre =
+      liq.coordinador?.coordinador?.nombre ||
+      (liq.coordinador?.duenio?.nombre ? `${liq.coordinador.duenio.nombre} (Dueño)` : null) ||
+      liq.coordinador?.email ||
+      'Sin identificar';
+    const key = liq.coordinadorId || nombre;
+    return { key, nombre, esDuenio };
+  };
+
   const calcularResumenPorCoordinador = (lista: any[]) => {
     const map = new Map<
       string,
@@ -293,18 +304,13 @@ export default function HistorialLiquidacionesPage() {
         netoEfectivoTotal: number;
         pendienteEntregarEfectivo: number;
         yaEntregadoEfectivo: number;
+        totalTransfAgencia: number;
+        totalCuentaCorriente: number;
       }
     >();
 
     for (const liq of lista) {
-      const esDuenio = Boolean(liq.coordinador?.duenio?.nombre && !liq.coordinador?.coordinador?.nombre);
-      const nombre =
-        liq.coordinador?.coordinador?.nombre ||
-        (liq.coordinador?.duenio?.nombre ? `${liq.coordinador.duenio.nombre} (Dueño)` : null) ||
-        liq.coordinador?.email ||
-        'Sin identificar';
-
-      const key = liq.coordinadorId || nombre;
+      const { key, nombre, esDuenio } = getCoordinadorInfoLiq(liq);
       if (!map.has(key)) {
         map.set(key, {
           nombre,
@@ -316,11 +322,15 @@ export default function HistorialLiquidacionesPage() {
           netoEfectivoTotal: 0,
           pendienteEntregarEfectivo: 0,
           yaEntregadoEfectivo: 0,
+          totalTransfAgencia: 0,
+          totalCuentaCorriente: 0,
         });
       }
 
       const acc = map.get(key)!;
       acc.cierres += 1;
+      acc.totalTransfAgencia += getTransferenciasLiq(liq).agencia;
+      acc.totalCuentaCorriente += getCuentaCorrienteLiq(liq);
 
       const saldoNeto = Number(liq.saldoNeto || 0);
       const saldoAFavor = Number(liq.saldoAFavorChofer || 0);
@@ -389,29 +399,26 @@ export default function HistorialLiquidacionesPage() {
   );
 
   const viajesSeparadosDuenio = useMemo(() => {
-    const transfAgencia: Array<{
+    type ViajeSeparadoItem = {
       id: string;
       fecha: string;
       chofer: string;
+      coordinador: string;
       titular: string;
       origen: string;
       destino: string;
       km: number;
       importe: number;
-    }> = [];
-    const cuentaCorriente: Array<{
-      id: string;
-      fecha: string;
-      chofer: string;
-      titular: string;
-      origen: string;
-      destino: string;
-      km: number;
-      importe: number;
-    }> = [];
+    };
+
+    const transfAgencia: ViajeSeparadoItem[] = [];
+    const cuentaCorriente: ViajeSeparadoItem[] = [];
+    const transfMap = new Map<string, { coordinador: string; viajes: ViajeSeparadoItem[]; total: number }>();
+    const ccMap = new Map<string, { coordinador: string; viajes: ViajeSeparadoItem[]; total: number }>();
 
     for (const liq of filteredLiquidaciones) {
       const choferLabel = `${liq.chofer?.nombre || ''} ${liq.chofer?.apellido || ''}`.trim();
+      const { key: coordKey, nombre: coordNombre } = getCoordinadorInfoLiq(liq);
       const viajesLiq = Array.isArray(liq.viajes) ? liq.viajes : [];
       for (const v of viajesLiq) {
         const titular = v?.artEmpresa?.nombre
@@ -419,10 +426,11 @@ export default function HistorialLiquidacionesPage() {
           : v?.cliente && `${v.cliente.nombre || ''} ${v.cliente.apellido || ''}`.trim()
           ? `${v.cliente.nombre || ''} ${v.cliente.apellido || ''}`.trim()
           : v?.clienteNombre || '—';
-        const item = {
+        const item: ViajeSeparadoItem = {
           id: v.id || `${liq.id}-${v.fecha}-${v.origen}`,
           fecha: v.fecha,
           chofer: choferLabel,
+          coordinador: coordNombre,
           titular,
           origen: v.origen || '',
           destino: v.destino || '',
@@ -431,8 +439,20 @@ export default function HistorialLiquidacionesPage() {
         };
         if (v.metodoPago === 'CUENTA_CORRIENTE') {
           cuentaCorriente.push(item);
+          if (!ccMap.has(coordKey)) {
+            ccMap.set(coordKey, { coordinador: coordNombre, viajes: [], total: 0 });
+          }
+          const grp = ccMap.get(coordKey)!;
+          grp.viajes.push(item);
+          grp.total += item.importe;
         } else if (v.metodoPago === 'TRANSFERENCIA' && v.destinoTransferencia !== 'CUENTA_PROPIA') {
           transfAgencia.push(item);
+          if (!transfMap.has(coordKey)) {
+            transfMap.set(coordKey, { coordinador: coordNombre, viajes: [], total: 0 });
+          }
+          const grp = transfMap.get(coordKey)!;
+          grp.viajes.push(item);
+          grp.total += item.importe;
         }
       }
     }
@@ -440,6 +460,8 @@ export default function HistorialLiquidacionesPage() {
     return {
       transfAgencia,
       cuentaCorriente,
+      transfAgenciaPorCoordinador: Array.from(transfMap.values()),
+      cuentaCorrientePorCoordinador: Array.from(ccMap.values()),
       totalTransfAgencia: transfAgencia.reduce((s, v) => s + v.importe, 0),
       totalCuentaCorriente: cuentaCorriente.reduce((s, v) => s + v.importe, 0),
     };
@@ -862,6 +884,8 @@ export default function HistorialLiquidacionesPage() {
         const totCoordEfecCob = resumenCoords.reduce((s, c) => s + c.cobradoEfectivo, 0);
         const totCoordPagChofer = resumenCoords.reduce((s, c) => s + c.pagadoChoferesEfectivo, 0);
         const totCoordTrCob = resumenCoords.reduce((s, c) => s + c.cobradoTransferencia, 0);
+        const totCoordTrAg = resumenCoords.reduce((s, c) => s + c.totalTransfAgencia, 0);
+        const totCoordCC = resumenCoords.reduce((s, c) => s + c.totalCuentaCorriente, 0);
         const totCoordNeto = resumenCoords.reduce((s, c) => s + c.netoEfectivoTotal, 0);
         const totCoordEntregado = resumenCoords.reduce((s, c) => s + c.yaEntregadoEfectivo, 0);
         const totCoordPendiente = resumenCoords.reduce((s, c) => s + c.pendienteEntregarEfectivo, 0);
@@ -873,6 +897,8 @@ export default function HistorialLiquidacionesPage() {
             fmt(c.cobradoEfectivo),
             c.pagadoChoferesEfectivo > 0 ? `- ${fmt(c.pagadoChoferesEfectivo)}` : fmt(0),
             fmt(c.cobradoTransferencia),
+            fmt(c.totalTransfAgencia),
+            fmt(c.totalCuentaCorriente),
             fmt(c.netoEfectivoTotal),
             fmt(c.yaEntregadoEfectivo),
             c.esDuenio ? 'Directo Dueño' : fmt(c.pendienteEntregarEfectivo)
@@ -883,6 +909,8 @@ export default function HistorialLiquidacionesPage() {
             fmt(totCoordEfecCob),
             totCoordPagChofer > 0 ? `- ${fmt(totCoordPagChofer)}` : fmt(0),
             fmt(totCoordTrCob),
+            fmt(totCoordTrAg),
+            fmt(totCoordCC),
             fmt(totCoordNeto),
             fmt(totCoordEntregado),
             fmt(totCoordPendiente)
@@ -897,22 +925,26 @@ export default function HistorialLiquidacionesPage() {
             'Cobrado Efec.',
             'Pagó a Choferes',
             'Transf. Cierres',
+            'Transf. Agencia',
+            'Cta. Cte.',
             'Neto Efec. Total',
             'Ya Entregado',
             'DEBE ENTREGAR AL DUEÑO'
           ]],
           body: coordRows,
           theme: 'grid',
-          headStyles: { fillColor: [15, 118, 110], fontSize: 7.5, halign: 'center' },
-          bodyStyles: { fontSize: 8 },
+          headStyles: { fillColor: [15, 118, 110], fontSize: 7, halign: 'center' },
+          bodyStyles: { fontSize: 7.5 },
           columnStyles: {
             1: { halign: 'center' },
             2: { halign: 'right' },
             3: { halign: 'right' },
             4: { halign: 'right' },
             5: { halign: 'right', fontStyle: 'bold' },
-            6: { halign: 'right' },
-            7: { halign: 'right', fontStyle: 'bold' }
+            6: { halign: 'right', fontStyle: 'bold' },
+            7: { halign: 'right', fontStyle: 'bold' },
+            8: { halign: 'right' },
+            9: { halign: 'right', fontStyle: 'bold' }
           },
           didParseCell: (hookData: any) => {
             if (hookData.section === 'body') {
@@ -920,11 +952,23 @@ export default function HistorialLiquidacionesPage() {
               if (isTotalRow) {
                 hookData.cell.styles.fillColor = [241, 245, 249];
                 hookData.cell.styles.fontStyle = 'bold';
-                if (hookData.column.index === 7) {
+                if (hookData.column.index === 5) {
+                  hookData.cell.styles.fillColor = [219, 234, 254];
+                  hookData.cell.styles.textColor = [29, 78, 216];
+                } else if (hookData.column.index === 6) {
+                  hookData.cell.styles.fillColor = [243, 232, 255];
+                  hookData.cell.styles.textColor = [107, 33, 168];
+                } else if (hookData.column.index === 9) {
                   hookData.cell.styles.fillColor = totCoordPendiente > 0 ? [254, 243, 199] : [209, 250, 229];
                   hookData.cell.styles.textColor = totCoordPendiente > 0 ? [180, 83, 9] : [4, 120, 87];
                 }
-              } else if (hookData.column.index === 7) {
+              } else if (hookData.column.index === 5) {
+                hookData.cell.styles.fillColor = [239, 246, 255];
+                hookData.cell.styles.textColor = [29, 78, 216];
+              } else if (hookData.column.index === 6) {
+                hookData.cell.styles.fillColor = [250, 245, 255];
+                hookData.cell.styles.textColor = [107, 33, 168];
+              } else if (hookData.column.index === 9) {
                 const c = resumenCoords[hookData.row.index];
                 if (!c.esDuenio && c.pendienteEntregarEfectivo > 0) {
                   hookData.cell.styles.fillColor = [254, 243, 199];
@@ -1027,13 +1071,15 @@ export default function HistorialLiquidacionesPage() {
         }
       });
 
-      // Sección 2: Control específico de Transferencias a Cuenta de la Agencia (para conciliar Banco / MP)
-      const viajesTransfAgenciaRows: any[][] = [];
+      // Sección 2: Control específico de Transferencias a Cuenta de la Agencia (dividido por coordinador)
+      const transfAgenciaPorCoord = new Map<string, { coordinador: string; rows: any[][]; total: number }>();
       let totalTransfAgenciaDetalle = 0;
+      let cantidadTransfAgenciaDetalle = 0;
 
-      // Sección 2B: Control específico de Viajes con Cuenta Corriente (a facturar / cobrar)
-      const viajesCuentaCorrienteRows: any[][] = [];
+      // Sección 2B: Control específico de Viajes con Cuenta Corriente (dividido por coordinador)
+      const cuentaCorrientePorCoord = new Map<string, { coordinador: string; rows: any[][]; total: number }>();
       let totalCuentaCorrienteDetalle = 0;
+      let cantidadCuentaCorrienteDetalle = 0;
 
       // Sección 3: Detalle completo de todos los viajes incluidos en los cierres (con Titular de Cuenta Corriente)
       const todosLosViajesRows: any[][] = [];
@@ -1041,6 +1087,7 @@ export default function HistorialLiquidacionesPage() {
 
       for (const liq of lista) {
         const choferLabel = `${liq.chofer?.nombre || ''} ${liq.chofer?.apellido || ''}`.trim();
+        const { key: coordKey, nombre: coordNombre } = getCoordinadorInfoLiq(liq);
         const viajesLiq = Array.isArray(liq.viajes) ? liq.viajes : [];
         for (const v of viajesLiq) {
           const fStr = `${new Date(v.fecha).toLocaleDateString('es-AR')} ${new Date(v.fecha).toLocaleTimeString('es-AR', {
@@ -1064,7 +1111,13 @@ export default function HistorialLiquidacionesPage() {
           if (v.metodoPago === 'CUENTA_CORRIENTE') {
             tipoFilaViaje.push('CC');
             totalCuentaCorrienteDetalle += importe;
-            viajesCuentaCorrienteRows.push([
+            cantidadCuentaCorrienteDetalle += 1;
+            if (!cuentaCorrientePorCoord.has(coordKey)) {
+              cuentaCorrientePorCoord.set(coordKey, { coordinador: coordNombre, rows: [], total: 0 });
+            }
+            const grp = cuentaCorrientePorCoord.get(coordKey)!;
+            grp.total += importe;
+            grp.rows.push([
               fStr,
               choferLabel,
               titular,
@@ -1077,7 +1130,13 @@ export default function HistorialLiquidacionesPage() {
           } else if (v.metodoPago === 'TRANSFERENCIA') {
             tipoFilaViaje.push('TR_AG');
             totalTransfAgenciaDetalle += importe;
-            viajesTransfAgenciaRows.push([
+            cantidadTransfAgenciaDetalle += 1;
+            if (!transfAgenciaPorCoord.has(coordKey)) {
+              transfAgenciaPorCoord.set(coordKey, { coordinador: coordNombre, rows: [], total: 0 });
+            }
+            const grp = transfAgenciaPorCoord.get(coordKey)!;
+            grp.total += importe;
+            grp.rows.push([
               fStr,
               choferLabel,
               titular,
@@ -1090,7 +1149,7 @@ export default function HistorialLiquidacionesPage() {
         }
       }
 
-      if (viajesTransfAgenciaRows.length > 0) {
+      if (cantidadTransfAgenciaDetalle > 0) {
         const afterResumenY = (doc as any).lastAutoTable?.finalY || 90;
         const startTransfY = afterResumenY + 10 > 175 ? 20 : afterResumenY + 10;
         if (startTransfY === 20) {
@@ -1100,10 +1159,34 @@ export default function HistorialLiquidacionesPage() {
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(29, 78, 216);
         doc.text(
-          `TRANSFERENCIAS A CUENTA DE LA AGENCIA (${viajesTransfAgenciaRows.length} viajes — Total a verificar en cuenta: ${fmt(totalTransfAgenciaDetalle)})`,
+          `TRANSFERENCIAS A CUENTA DE LA AGENCIA — POR COORDINADOR (${cantidadTransfAgenciaDetalle} viajes — Total: ${fmt(totalTransfAgenciaDetalle)})`,
           14,
           startTransfY
         );
+
+        const transfBody: any[] = [];
+        const transfRowTypes: Array<'GROUP' | 'DATA' | 'SUBTOTAL' | 'TOTAL'> = [];
+
+        for (const grp of Array.from(transfAgenciaPorCoord.values())) {
+          transfBody.push([
+            {
+              content: `TURNO / COORDINADOR: ${grp.coordinador}  (${grp.rows.length} ${grp.rows.length === 1 ? 'viaje' : 'viajes'})`,
+              colSpan: 5
+            }
+          ]);
+          transfRowTypes.push('GROUP');
+
+          for (const row of grp.rows) {
+            transfBody.push(row);
+            transfRowTypes.push('DATA');
+          }
+
+          transfBody.push(['', '', '', `SUBTOTAL ${grp.coordinador.toUpperCase()}`, fmt(grp.total)]);
+          transfRowTypes.push('SUBTOTAL');
+        }
+
+        transfBody.push(['', '', '', 'TOTAL GENERAL EN CUENTA AGENCIA', fmt(totalTransfAgenciaDetalle)]);
+        transfRowTypes.push('TOTAL');
 
         autoTable(doc, {
           startY: startTransfY + 4,
@@ -1114,10 +1197,7 @@ export default function HistorialLiquidacionesPage() {
             'Recorrido (Origen → Destino)',
             'Importe Acreditado'
           ]],
-          body: [
-            ...viajesTransfAgenciaRows,
-            ['', '', '', 'TOTAL EN CUENTA AGENCIA', fmt(totalTransfAgenciaDetalle)]
-          ],
+          body: transfBody,
           theme: 'grid',
           headStyles: { fillColor: [29, 78, 216], fontSize: 7.5 },
           bodyStyles: { fontSize: 7.5 },
@@ -1125,16 +1205,28 @@ export default function HistorialLiquidacionesPage() {
             4: { halign: 'right', fontStyle: 'bold' }
           },
           didParseCell: (hookData: any) => {
-            if (hookData.section === 'body' && hookData.row.index === viajesTransfAgenciaRows.length) {
-              hookData.cell.styles.fillColor = [219, 234, 254];
-              hookData.cell.styles.textColor = [30, 64, 175];
-              hookData.cell.styles.fontStyle = 'bold';
+            if (hookData.section === 'body') {
+              const rType = transfRowTypes[hookData.row.index];
+              if (rType === 'GROUP') {
+                hookData.cell.styles.fillColor = [239, 246, 255];
+                hookData.cell.styles.textColor = [30, 58, 138];
+                hookData.cell.styles.fontStyle = 'bold';
+                hookData.cell.styles.halign = 'left';
+              } else if (rType === 'SUBTOTAL') {
+                hookData.cell.styles.fillColor = [241, 245, 249];
+                hookData.cell.styles.textColor = [29, 78, 216];
+                hookData.cell.styles.fontStyle = 'bold';
+              } else if (rType === 'TOTAL') {
+                hookData.cell.styles.fillColor = [219, 234, 254];
+                hookData.cell.styles.textColor = [30, 64, 175];
+                hookData.cell.styles.fontStyle = 'bold';
+              }
             }
           }
         });
       }
 
-      if (viajesCuentaCorrienteRows.length > 0) {
+      if (cantidadCuentaCorrienteDetalle > 0) {
         const afterTransfY = (doc as any).lastAutoTable?.finalY || 90;
         const startCcY = afterTransfY + 10 > 175 ? 20 : afterTransfY + 10;
         if (startCcY === 20) {
@@ -1144,10 +1236,34 @@ export default function HistorialLiquidacionesPage() {
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(107, 33, 168);
         doc.text(
-          `VIAJES CON CUENTA CORRIENTE (${viajesCuentaCorrienteRows.length} viajes — Total Cuenta Corriente: ${fmt(totalCuentaCorrienteDetalle)})`,
+          `VIAJES CON CUENTA CORRIENTE — POR COORDINADOR (${cantidadCuentaCorrienteDetalle} viajes — Total: ${fmt(totalCuentaCorrienteDetalle)})`,
           14,
           startCcY
         );
+
+        const ccBody: any[] = [];
+        const ccRowTypes: Array<'GROUP' | 'DATA' | 'SUBTOTAL' | 'TOTAL'> = [];
+
+        for (const grp of Array.from(cuentaCorrientePorCoord.values())) {
+          ccBody.push([
+            {
+              content: `TURNO / COORDINADOR: ${grp.coordinador}  (${grp.rows.length} ${grp.rows.length === 1 ? 'viaje' : 'viajes'})`,
+              colSpan: 6
+            }
+          ]);
+          ccRowTypes.push('GROUP');
+
+          for (const row of grp.rows) {
+            ccBody.push(row);
+            ccRowTypes.push('DATA');
+          }
+
+          ccBody.push(['', '', '', '', `SUBTOTAL ${grp.coordinador.toUpperCase()}`, fmt(grp.total)]);
+          ccRowTypes.push('SUBTOTAL');
+        }
+
+        ccBody.push(['', '', '', '', 'TOTAL GENERAL CUENTA CORRIENTE', fmt(totalCuentaCorrienteDetalle)]);
+        ccRowTypes.push('TOTAL');
 
         autoTable(doc, {
           startY: startCcY + 4,
@@ -1159,10 +1275,7 @@ export default function HistorialLiquidacionesPage() {
             'Km',
             'Importe'
           ]],
-          body: [
-            ...viajesCuentaCorrienteRows,
-            ['', '', '', '', 'TOTAL CUENTA CORRIENTE', fmt(totalCuentaCorrienteDetalle)]
-          ],
+          body: ccBody,
           theme: 'grid',
           headStyles: { fillColor: [107, 33, 168], fontSize: 7.5 },
           bodyStyles: { fontSize: 7.5 },
@@ -1171,10 +1284,22 @@ export default function HistorialLiquidacionesPage() {
             5: { halign: 'right', fontStyle: 'bold' }
           },
           didParseCell: (hookData: any) => {
-            if (hookData.section === 'body' && hookData.row.index === viajesCuentaCorrienteRows.length) {
-              hookData.cell.styles.fillColor = [243, 232, 255];
-              hookData.cell.styles.textColor = [88, 28, 135];
-              hookData.cell.styles.fontStyle = 'bold';
+            if (hookData.section === 'body') {
+              const rType = ccRowTypes[hookData.row.index];
+              if (rType === 'GROUP') {
+                hookData.cell.styles.fillColor = [250, 245, 255];
+                hookData.cell.styles.textColor = [88, 28, 135];
+                hookData.cell.styles.fontStyle = 'bold';
+                hookData.cell.styles.halign = 'left';
+              } else if (rType === 'SUBTOTAL') {
+                hookData.cell.styles.fillColor = [241, 245, 249];
+                hookData.cell.styles.textColor = [107, 33, 168];
+                hookData.cell.styles.fontStyle = 'bold';
+              } else if (rType === 'TOTAL') {
+                hookData.cell.styles.fillColor = [243, 232, 255];
+                hookData.cell.styles.textColor = [88, 28, 135];
+                hookData.cell.styles.fontStyle = 'bold';
+              }
             }
           }
         });
@@ -1533,6 +1658,8 @@ export default function HistorialLiquidacionesPage() {
                       <th className="px-3 py-2.5 text-center font-semibold text-slate-600">Cierres</th>
                       <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Cobrado Efec.</th>
                       <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Pagó a Choferes</th>
+                      <th className="px-3 py-2.5 text-right font-semibold text-blue-700 bg-blue-50/40">Transf. Agencia</th>
+                      <th className="px-3 py-2.5 text-right font-semibold text-purple-800 bg-purple-50/40">Cta. Cte.</th>
                       <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Neto Efec. Total</th>
                       <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Ya Entregado</th>
                       <th className="px-4 py-2.5 text-right font-extrabold text-amber-800 bg-amber-50/70">
@@ -1552,6 +1679,12 @@ export default function HistorialLiquidacionesPage() {
                           {c.pagadoChoferesEfectivo > 0
                             ? `- $${c.pagadoChoferesEfectivo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
                             : '$0,00'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-bold text-blue-800 bg-blue-50/25">
+                          ${c.totalTransfAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-bold text-purple-800 bg-purple-50/25">
+                          ${c.totalCuentaCorriente.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="px-3 py-2.5 text-right font-bold text-slate-900">
                           ${c.netoEfectivoTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -1578,13 +1711,13 @@ export default function HistorialLiquidacionesPage() {
             </div>
           )}
 
-          {/* Detalle separado: Transferencias a Cuenta de la Remisería */}
+          {/* Detalle separado por Coordinador: Transferencias a Cuenta de la Remisería */}
           {viajesSeparadosDuenio.transfAgencia.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-blue-200 overflow-hidden">
               <div className="px-4 py-3 bg-blue-50/70 border-b border-blue-100 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-xs sm:text-sm font-extrabold text-blue-900 uppercase tracking-wider">
-                    🏦 Transferencias a Cuenta de la Remisería ({viajesSeparadosDuenio.transfAgencia.length}{' '}
+                    🏦 Transferencias a Cuenta de la Remisería — Por Coordinador ({viajesSeparadosDuenio.transfAgencia.length}{' '}
                     {viajesSeparadosDuenio.transfAgencia.length === 1 ? 'viaje' : 'viajes'})
                   </h3>
                   <p className="text-[11px] text-blue-700">
@@ -1603,58 +1736,71 @@ export default function HistorialLiquidacionesPage() {
                 </button>
               </div>
               {showTransfAgenciaDetalle && (
-                <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-xs">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr>
-                        <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Fecha / Hora</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Chofer</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Pasajero / Cliente</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Recorrido</th>
-                        <th className="px-4 py-2.5 text-right font-semibold text-blue-700">Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {viajesSeparadosDuenio.transfAgencia.map((v) => (
-                        <tr key={v.id} className="hover:bg-blue-50/40">
-                          <td className="px-4 py-2 whitespace-nowrap text-slate-600">
-                            {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
-                            {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800">{v.chofer}</td>
-                          <td className="px-3 py-2 whitespace-nowrap text-slate-700">{v.titular}</td>
-                          <td className="px-3 py-2 text-slate-700 max-w-[260px] truncate" title={`${v.origen} → ${v.destino}`}>
-                            <span className="font-semibold">{v.origen}</span> → {v.destino}
-                          </td>
-                          <td className="px-4 py-2 whitespace-nowrap text-right font-black text-blue-800">
-                            ${v.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-blue-50/80 border-t border-blue-200">
-                      <tr>
-                        <td colSpan={4} className="px-4 py-2.5 text-right font-extrabold text-blue-900 uppercase text-[11px]">
-                          Total Transferencias Cuenta Remisería
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-black text-blue-900">
-                          ${viajesSeparadosDuenio.totalTransfAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                <div className="divide-y divide-blue-100">
+                  {viajesSeparadosDuenio.transfAgenciaPorCoordinador.map((grupo) => (
+                    <div key={grupo.coordinador}>
+                      <div className="px-4 py-2 bg-blue-50/40 flex flex-wrap items-center justify-between gap-2 border-b border-blue-100/80">
+                        <span className="text-xs font-extrabold text-blue-950">
+                          Turno / Coordinador: {grupo.coordinador}{' '}
+                          <span className="font-semibold text-blue-700">
+                            ({grupo.viajes.length} {grupo.viajes.length === 1 ? 'viaje' : 'viajes'})
+                          </span>
+                        </span>
+                        <span className="text-xs font-black text-blue-800">
+                          Subtotal: ${grupo.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-xs">
+                          <thead className="bg-slate-50 sticky top-0">
+                            <tr>
+                              <th className="px-4 py-2 text-left font-semibold text-slate-600">Fecha / Hora</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-600">Chofer</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-600">Pasajero / Cliente</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-600">Recorrido</th>
+                              <th className="px-4 py-2 text-right font-semibold text-blue-700">Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {grupo.viajes.map((v) => (
+                              <tr key={v.id} className="hover:bg-blue-50/40">
+                                <td className="px-4 py-2 whitespace-nowrap text-slate-600">
+                                  {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
+                                  {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800">{v.chofer}</td>
+                                <td className="px-3 py-2 whitespace-nowrap text-slate-700">{v.titular}</td>
+                                <td className="px-3 py-2 text-slate-700 max-w-[260px] truncate" title={`${v.origen} → ${v.destino}`}>
+                                  <span className="font-semibold">{v.origen}</span> → {v.destino}
+                                </td>
+                                <td className="px-4 py-2 whitespace-nowrap text-right font-black text-blue-800">
+                                  ${v.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="px-4 py-2.5 bg-blue-50/80 flex items-center justify-between text-xs font-black text-blue-900">
+                    <span className="uppercase text-[11px]">Total General Transferencias Cuenta Remisería</span>
+                    <span>
+                      ${viajesSeparadosDuenio.totalTransfAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* Detalle separado: Viajes con Cuenta Corriente */}
+          {/* Detalle separado por Coordinador: Viajes con Cuenta Corriente */}
           {viajesSeparadosDuenio.cuentaCorriente.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-purple-200 overflow-hidden">
               <div className="px-4 py-3 bg-purple-50/70 border-b border-purple-100 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-xs sm:text-sm font-extrabold text-purple-900 uppercase tracking-wider">
-                    🏛️ Viajes con Cuenta Corriente ({viajesSeparadosDuenio.cuentaCorriente.length}{' '}
+                    🏛️ Viajes con Cuenta Corriente — Por Coordinador ({viajesSeparadosDuenio.cuentaCorriente.length}{' '}
                     {viajesSeparadosDuenio.cuentaCorriente.length === 1 ? 'viaje' : 'viajes'})
                   </h3>
                   <p className="text-[11px] text-purple-700">
@@ -1673,50 +1819,63 @@ export default function HistorialLiquidacionesPage() {
                 </button>
               </div>
               {showCuentaCorrienteDetalle && (
-                <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-xs">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr>
-                        <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Fecha / Hora</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Chofer</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-purple-800">Titular Cta. Cte. / Empresa</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Recorrido</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Km</th>
-                        <th className="px-4 py-2.5 text-right font-semibold text-purple-800">Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {viajesSeparadosDuenio.cuentaCorriente.map((v) => (
-                        <tr key={v.id} className="hover:bg-purple-50/40">
-                          <td className="px-4 py-2 whitespace-nowrap text-slate-600">
-                            {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
-                            {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800">{v.chofer}</td>
-                          <td className="px-3 py-2 whitespace-nowrap font-bold text-purple-900">{v.titular}</td>
-                          <td className="px-3 py-2 text-slate-700 max-w-[260px] truncate" title={`${v.origen} → ${v.destino}`}>
-                            <span className="font-semibold">{v.origen}</span> → {v.destino}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap text-right text-slate-500">
-                            {v.km.toFixed(1)} km
-                          </td>
-                          <td className="px-4 py-2 whitespace-nowrap text-right font-black text-purple-900">
-                            ${v.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-purple-50/80 border-t border-purple-200">
-                      <tr>
-                        <td colSpan={5} className="px-4 py-2.5 text-right font-extrabold text-purple-900 uppercase text-[11px]">
-                          Total Viajes con Cuenta Corriente
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-black text-purple-900">
-                          ${viajesSeparadosDuenio.totalCuentaCorriente.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                <div className="divide-y divide-purple-100">
+                  {viajesSeparadosDuenio.cuentaCorrientePorCoordinador.map((grupo) => (
+                    <div key={grupo.coordinador}>
+                      <div className="px-4 py-2 bg-purple-50/40 flex flex-wrap items-center justify-between gap-2 border-b border-purple-100/80">
+                        <span className="text-xs font-extrabold text-purple-950">
+                          Turno / Coordinador: {grupo.coordinador}{' '}
+                          <span className="font-semibold text-purple-700">
+                            ({grupo.viajes.length} {grupo.viajes.length === 1 ? 'viaje' : 'viajes'})
+                          </span>
+                        </span>
+                        <span className="text-xs font-black text-purple-800">
+                          Subtotal: ${grupo.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-xs">
+                          <thead className="bg-slate-50 sticky top-0">
+                            <tr>
+                              <th className="px-4 py-2 text-left font-semibold text-slate-600">Fecha / Hora</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-600">Chofer</th>
+                              <th className="px-3 py-2 text-left font-semibold text-purple-800">Titular Cta. Cte. / Empresa</th>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-600">Recorrido</th>
+                              <th className="px-3 py-2 text-right font-semibold text-slate-600">Km</th>
+                              <th className="px-4 py-2 text-right font-semibold text-purple-800">Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {grupo.viajes.map((v) => (
+                              <tr key={v.id} className="hover:bg-purple-50/40">
+                                <td className="px-4 py-2 whitespace-nowrap text-slate-600">
+                                  {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
+                                  {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800">{v.chofer}</td>
+                                <td className="px-3 py-2 whitespace-nowrap font-bold text-purple-900">{v.titular}</td>
+                                <td className="px-3 py-2 text-slate-700 max-w-[260px] truncate" title={`${v.origen} → ${v.destino}`}>
+                                  <span className="font-semibold">{v.origen}</span> → {v.destino}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-right text-slate-500">
+                                  {v.km.toFixed(1)} km
+                                </td>
+                                <td className="px-4 py-2 whitespace-nowrap text-right font-black text-purple-900">
+                                  ${v.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="px-4 py-2.5 bg-purple-50/80 flex items-center justify-between text-xs font-black text-purple-900">
+                    <span className="uppercase text-[11px]">Total General Viajes con Cuenta Corriente</span>
+                    <span>
+                      ${viajesSeparadosDuenio.totalCuentaCorriente.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
