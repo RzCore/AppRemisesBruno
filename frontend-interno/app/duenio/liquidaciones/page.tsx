@@ -76,6 +76,9 @@ export default function HistorialLiquidacionesPage() {
   // Modal de Confirmación de Recepción de Dinero / Pago de Saldo a Favor
   const [recepcionModalLiq, setRecepcionModalLiq] = useState<any | null>(null);
   const [detalleViajesModalLiq, setDetalleViajesModalLiq] = useState<any | null>(null);
+  const [detalleViajesFiltro, setDetalleViajesFiltro] = useState<'TODOS' | 'TR_AG' | 'CC' | 'OTROS'>('TODOS');
+  const [showTransfAgenciaDetalle, setShowTransfAgenciaDetalle] = useState(true);
+  const [showCuentaCorrienteDetalle, setShowCuentaCorrienteDetalle] = useState(true);
   const [metodoEntrega, setMetodoEntrega] = useState<'COORDINADOR' | 'CHOFER_MANO' | 'TRANSFERENCIA'>('COORDINADOR');
   const [notasRecepcion, setNotasRecepcion] = useState('');
   const [submittingRecepcion, setSubmittingRecepcion] = useState(false);
@@ -261,6 +264,22 @@ export default function HistorialLiquidacionesPage() {
     return { agencia: Number(liq?.totalTransferenciaViajes || 0), propia: 0 };
   };
 
+  const getCuentaCorrienteLiq = (liq: any): number => {
+    const ccGuardada = Number(liq?.totalCuentaCorrienteViajes || 0);
+    if (ccGuardada > 0) return ccGuardada;
+    const viajesLiq = Array.isArray(liq?.viajes) ? liq.viajes : [];
+    if (viajesLiq.length > 0) {
+      let cc = 0;
+      for (const v of viajesLiq) {
+        if (v.metodoPago === 'CUENTA_CORRIENTE') {
+          cc += Number(v.precio || 0);
+        }
+      }
+      return cc;
+    }
+    return 0;
+  };
+
   const calcularResumenPorCoordinador = (lista: any[]) => {
     const map = new Map<
       string,
@@ -364,6 +383,67 @@ export default function HistorialLiquidacionesPage() {
     (sum, l) => sum + getTransferenciasLiq(l).propia,
     0
   );
+  const totalCuentaCorrienteChoferes = filteredLiquidaciones.reduce(
+    (sum, l) => sum + getCuentaCorrienteLiq(l),
+    0
+  );
+
+  const viajesSeparadosDuenio = useMemo(() => {
+    const transfAgencia: Array<{
+      id: string;
+      fecha: string;
+      chofer: string;
+      titular: string;
+      origen: string;
+      destino: string;
+      km: number;
+      importe: number;
+    }> = [];
+    const cuentaCorriente: Array<{
+      id: string;
+      fecha: string;
+      chofer: string;
+      titular: string;
+      origen: string;
+      destino: string;
+      km: number;
+      importe: number;
+    }> = [];
+
+    for (const liq of filteredLiquidaciones) {
+      const choferLabel = `${liq.chofer?.nombre || ''} ${liq.chofer?.apellido || ''}`.trim();
+      const viajesLiq = Array.isArray(liq.viajes) ? liq.viajes : [];
+      for (const v of viajesLiq) {
+        const titular = v?.artEmpresa?.nombre
+          ? `ART: ${v.artEmpresa.nombre}`
+          : v?.cliente && `${v.cliente.nombre || ''} ${v.cliente.apellido || ''}`.trim()
+          ? `${v.cliente.nombre || ''} ${v.cliente.apellido || ''}`.trim()
+          : v?.clienteNombre || '—';
+        const item = {
+          id: v.id || `${liq.id}-${v.fecha}-${v.origen}`,
+          fecha: v.fecha,
+          chofer: choferLabel,
+          titular,
+          origen: v.origen || '',
+          destino: v.destino || '',
+          km: Number(v.distanciaKmConPasajero || 0),
+          importe: Number(v.precio || 0),
+        };
+        if (v.metodoPago === 'CUENTA_CORRIENTE') {
+          cuentaCorriente.push(item);
+        } else if (v.metodoPago === 'TRANSFERENCIA' && v.destinoTransferencia !== 'CUENTA_PROPIA') {
+          transfAgencia.push(item);
+        }
+      }
+    }
+
+    return {
+      transfAgencia,
+      cuentaCorriente,
+      totalTransfAgencia: transfAgencia.reduce((s, v) => s + v.importe, 0),
+      totalCuentaCorriente: cuentaCorriente.reduce((s, v) => s + v.importe, 0),
+    };
+  }, [filteredLiquidaciones]);
 
   // Handlers de Cierre de Caja desde panel del Dueño
   const resetCierreForm = () => {
@@ -717,7 +797,7 @@ export default function HistorialLiquidacionesPage() {
       const totViajesEfec = lista.reduce((s, l) => s + (l.totalEfectivoViajes || 0), 0);
       const totViajesTrAg = lista.reduce((s, l) => s + getTransferenciasLiq(l).agencia, 0);
       const totViajesTrProp = lista.reduce((s, l) => s + getTransferenciasLiq(l).propia, 0);
-      const totViajesCC = lista.reduce((s, l) => s + (l.totalCuentaCorrienteViajes || 0), 0);
+      const totViajesCC = lista.reduce((s, l) => s + getCuentaCorrienteLiq(l), 0);
       const totPagarChofer = lista
         .filter((l) => getEstadoFinancieroLiq(l).tipo === 'PAGAR_CHOFER')
         .reduce((s, l) => s + (l.saldoAFavorChofer || 0), 0);
@@ -761,6 +841,9 @@ export default function HistorialLiquidacionesPage() {
             } else if (hookData.column.index === 3) {
               hookData.cell.styles.fillColor = [219, 234, 254];
               hookData.cell.styles.textColor = [29, 78, 216];
+            } else if (hookData.column.index === 5) {
+              hookData.cell.styles.fillColor = [243, 232, 255];
+              hookData.cell.styles.textColor = [107, 33, 168];
             }
           }
         }
@@ -895,7 +978,8 @@ export default function HistorialLiquidacionesPage() {
           minute: '2-digit'
         })}`;
         const { agencia: trAg, propia: trProp } = getTransferenciasLiq(liq);
-        const viajesDesglose = `Ef: ${fmt(liq.totalEfectivoViajes || 0)} | TrAg: ${fmt(trAg)} | TrPr: ${fmt(trProp)} | CC: ${fmt(liq.totalCuentaCorrienteViajes || 0)}`;
+        const ccLiq = getCuentaCorrienteLiq(liq);
+        const viajesDesglose = `Ef: ${fmt(liq.totalEfectivoViajes || 0)} | TrAg: ${fmt(trAg)} | TrPr: ${fmt(trProp)} | CC: ${fmt(ccLiq)}`;
         const est = estadosPorFila[idx];
 
         return [
@@ -947,6 +1031,10 @@ export default function HistorialLiquidacionesPage() {
       const viajesTransfAgenciaRows: any[][] = [];
       let totalTransfAgenciaDetalle = 0;
 
+      // Sección 2B: Control específico de Viajes con Cuenta Corriente (a facturar / cobrar)
+      const viajesCuentaCorrienteRows: any[][] = [];
+      let totalCuentaCorrienteDetalle = 0;
+
       // Sección 3: Detalle completo de todos los viajes incluidos en los cierres (con Titular de Cuenta Corriente)
       const todosLosViajesRows: any[][] = [];
       const tipoFilaViaje: Array<'CC' | 'TR_AG' | 'TR_PR' | 'EF'> = [];
@@ -975,6 +1063,15 @@ export default function HistorialLiquidacionesPage() {
 
           if (v.metodoPago === 'CUENTA_CORRIENTE') {
             tipoFilaViaje.push('CC');
+            totalCuentaCorrienteDetalle += importe;
+            viajesCuentaCorrienteRows.push([
+              fStr,
+              choferLabel,
+              titular,
+              `${v.origen || ''} → ${v.destino || ''}`,
+              `${Number(v.distanciaKmConPasajero || 0).toFixed(1)} km`,
+              fmt(importe)
+            ]);
           } else if (v.metodoPago === 'TRANSFERENCIA' && v.destinoTransferencia === 'CUENTA_PROPIA') {
             tipoFilaViaje.push('TR_PR');
           } else if (v.metodoPago === 'TRANSFERENCIA') {
@@ -1031,6 +1128,52 @@ export default function HistorialLiquidacionesPage() {
             if (hookData.section === 'body' && hookData.row.index === viajesTransfAgenciaRows.length) {
               hookData.cell.styles.fillColor = [219, 234, 254];
               hookData.cell.styles.textColor = [30, 64, 175];
+              hookData.cell.styles.fontStyle = 'bold';
+            }
+          }
+        });
+      }
+
+      if (viajesCuentaCorrienteRows.length > 0) {
+        const afterTransfY = (doc as any).lastAutoTable?.finalY || 90;
+        const startCcY = afterTransfY + 10 > 175 ? 20 : afterTransfY + 10;
+        if (startCcY === 20) {
+          doc.addPage();
+        }
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(107, 33, 168);
+        doc.text(
+          `VIAJES CON CUENTA CORRIENTE (${viajesCuentaCorrienteRows.length} viajes — Total Cuenta Corriente: ${fmt(totalCuentaCorrienteDetalle)})`,
+          14,
+          startCcY
+        );
+
+        autoTable(doc, {
+          startY: startCcY + 4,
+          head: [[
+            'Fecha / Hora',
+            'Chofer',
+            'Titular Cta. Cte. / Empresa',
+            'Recorrido (Origen → Destino)',
+            'Km',
+            'Importe'
+          ]],
+          body: [
+            ...viajesCuentaCorrienteRows,
+            ['', '', '', '', 'TOTAL CUENTA CORRIENTE', fmt(totalCuentaCorrienteDetalle)]
+          ],
+          theme: 'grid',
+          headStyles: { fillColor: [107, 33, 168], fontSize: 7.5 },
+          bodyStyles: { fontSize: 7.5 },
+          columnStyles: {
+            4: { halign: 'right' },
+            5: { halign: 'right', fontStyle: 'bold' }
+          },
+          didParseCell: (hookData: any) => {
+            if (hookData.section === 'body' && hookData.row.index === viajesCuentaCorrienteRows.length) {
+              hookData.cell.styles.fillColor = [243, 232, 255];
+              hookData.cell.styles.textColor = [88, 28, 135];
               hookData.cell.styles.fontStyle = 'bold';
             }
           }
@@ -1299,8 +1442,8 @@ export default function HistorialLiquidacionesPage() {
       {/* ========================================================= */}
       {activeTab === 'choferes' && (
         <div className="space-y-6 animate-in fade-in duration-200 print:hidden">
-          {/* Tarjetas Informativas Choferes (incluye Transferencias a Cuenta Agencia) */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+          {/* Tarjetas Informativas Choferes (incluye Transferencias a Cuenta Agencia y Cuenta Corriente) */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
                 Total Recaudado
@@ -1333,6 +1476,19 @@ export default function HistorialLiquidacionesPage() {
               </span>
             </div>
 
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-purple-200 shadow-xs bg-purple-50/30">
+              <span className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider block">
+                🏛️ Cuenta Corriente
+              </span>
+              <span className="text-xl sm:text-2xl font-black text-purple-800 block mt-1">
+                ${totalCuentaCorrienteChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              </span>
+              <span className="text-[10px] text-purple-600 mt-1 block">
+                {viajesSeparadosDuenio.cuentaCorriente.length}{' '}
+                {viajesSeparadosDuenio.cuentaCorriente.length === 1 ? 'viaje' : 'viajes'} en cta. cte.
+              </span>
+            </div>
+
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-red-200 bg-red-50/30 shadow-xs">
               <span className="text-[11px] font-semibold text-red-700 uppercase tracking-wider block">
                 Pagar a Choferes
@@ -1346,13 +1502,13 @@ export default function HistorialLiquidacionesPage() {
             </div>
 
             <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-100 shadow-xs">
-              <span className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider block">
                 Ganancia Autos
               </span>
-              <span className="text-xl sm:text-2xl font-black text-purple-800 block mt-1">
+              <span className="text-xl sm:text-2xl font-black text-indigo-800 block mt-1">
                 ${totalGananciaPropietarioChoferes.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-purple-600 mt-1 block">Remanente propietarios</span>
+              <span className="text-[10px] text-indigo-600 mt-1 block">Remanente propietarios</span>
             </div>
           </div>
 
@@ -1419,6 +1575,150 @@ export default function HistorialLiquidacionesPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Detalle separado: Transferencias a Cuenta de la Remisería */}
+          {viajesSeparadosDuenio.transfAgencia.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-blue-200 overflow-hidden">
+              <div className="px-4 py-3 bg-blue-50/70 border-b border-blue-100 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-extrabold text-blue-900 uppercase tracking-wider">
+                    🏦 Transferencias a Cuenta de la Remisería ({viajesSeparadosDuenio.transfAgencia.length}{' '}
+                    {viajesSeparadosDuenio.transfAgencia.length === 1 ? 'viaje' : 'viajes'})
+                  </h3>
+                  <p className="text-[11px] text-blue-700">
+                    Total a verificar en cuenta:{' '}
+                    <strong className="font-black">
+                      ${viajesSeparadosDuenio.totalTransfAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTransfAgenciaDetalle((prev) => !prev)}
+                  className="px-3 py-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold transition-colors"
+                >
+                  {showTransfAgenciaDetalle ? 'Ocultar detalle' : 'Ver detalle'}
+                </button>
+              </div>
+              {showTransfAgenciaDetalle && (
+                <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Fecha / Hora</th>
+                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Chofer</th>
+                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Pasajero / Cliente</th>
+                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Recorrido</th>
+                        <th className="px-4 py-2.5 text-right font-semibold text-blue-700">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {viajesSeparadosDuenio.transfAgencia.map((v) => (
+                        <tr key={v.id} className="hover:bg-blue-50/40">
+                          <td className="px-4 py-2 whitespace-nowrap text-slate-600">
+                            {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
+                            {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800">{v.chofer}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-slate-700">{v.titular}</td>
+                          <td className="px-3 py-2 text-slate-700 max-w-[260px] truncate" title={`${v.origen} → ${v.destino}`}>
+                            <span className="font-semibold">{v.origen}</span> → {v.destino}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-right font-black text-blue-800">
+                            ${v.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-blue-50/80 border-t border-blue-200">
+                      <tr>
+                        <td colSpan={4} className="px-4 py-2.5 text-right font-extrabold text-blue-900 uppercase text-[11px]">
+                          Total Transferencias Cuenta Remisería
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-black text-blue-900">
+                          ${viajesSeparadosDuenio.totalTransfAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Detalle separado: Viajes con Cuenta Corriente */}
+          {viajesSeparadosDuenio.cuentaCorriente.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-purple-200 overflow-hidden">
+              <div className="px-4 py-3 bg-purple-50/70 border-b border-purple-100 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-extrabold text-purple-900 uppercase tracking-wider">
+                    🏛️ Viajes con Cuenta Corriente ({viajesSeparadosDuenio.cuentaCorriente.length}{' '}
+                    {viajesSeparadosDuenio.cuentaCorriente.length === 1 ? 'viaje' : 'viajes'})
+                  </h3>
+                  <p className="text-[11px] text-purple-700">
+                    Total Cuenta Corriente:{' '}
+                    <strong className="font-black">
+                      ${viajesSeparadosDuenio.totalCuentaCorriente.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCuentaCorrienteDetalle((prev) => !prev)}
+                  className="px-3 py-1.5 rounded-lg bg-white hover:bg-purple-50 text-purple-700 border border-purple-200 text-xs font-bold transition-colors"
+                >
+                  {showCuentaCorrienteDetalle ? 'Ocultar detalle' : 'Ver detalle'}
+                </button>
+              </div>
+              {showCuentaCorrienteDetalle && (
+                <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Fecha / Hora</th>
+                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Chofer</th>
+                        <th className="px-3 py-2.5 text-left font-semibold text-purple-800">Titular Cta. Cte. / Empresa</th>
+                        <th className="px-3 py-2.5 text-left font-semibold text-slate-600">Recorrido</th>
+                        <th className="px-3 py-2.5 text-right font-semibold text-slate-600">Km</th>
+                        <th className="px-4 py-2.5 text-right font-semibold text-purple-800">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {viajesSeparadosDuenio.cuentaCorriente.map((v) => (
+                        <tr key={v.id} className="hover:bg-purple-50/40">
+                          <td className="px-4 py-2 whitespace-nowrap text-slate-600">
+                            {new Date(v.fecha).toLocaleDateString('es-AR')}{' '}
+                            {new Date(v.fecha).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800">{v.chofer}</td>
+                          <td className="px-3 py-2 whitespace-nowrap font-bold text-purple-900">{v.titular}</td>
+                          <td className="px-3 py-2 text-slate-700 max-w-[260px] truncate" title={`${v.origen} → ${v.destino}`}>
+                            <span className="font-semibold">{v.origen}</span> → {v.destino}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right text-slate-500">
+                            {v.km.toFixed(1)} km
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-right font-black text-purple-900">
+                            ${v.importe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-purple-50/80 border-t border-purple-200">
+                      <tr>
+                        <td colSpan={5} className="px-4 py-2.5 text-right font-extrabold text-purple-900 uppercase text-[11px]">
+                          Total Viajes con Cuenta Corriente
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-black text-purple-900">
+                          ${viajesSeparadosDuenio.totalCuentaCorriente.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -1540,6 +1840,20 @@ export default function HistorialLiquidacionesPage() {
                             <span className="text-sm font-black text-slate-900 block">
                               ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                             </span>
+                            {(getTransferenciasLiq(liq).agencia > 0 || getCuentaCorrienteLiq(liq) > 0) && (
+                              <div className="flex flex-wrap gap-1 mt-0.5">
+                                {getTransferenciasLiq(liq).agencia > 0 && (
+                                  <span className="text-[10px] font-bold text-blue-700">
+                                    TrAg: ${getTransferenciasLiq(liq).agencia.toLocaleString('es-AR')}
+                                  </span>
+                                )}
+                                {getCuentaCorrienteLiq(liq) > 0 && (
+                                  <span className="text-[10px] font-bold text-purple-700">
+                                    CC: ${getCuentaCorrienteLiq(liq).toLocaleString('es-AR')}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <div>
                             <span className="text-[10px] text-emerald-600 font-medium block">Agencia</span>
@@ -1585,7 +1899,10 @@ export default function HistorialLiquidacionesPage() {
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setDetalleViajesModalLiq(liq)}
+                              onClick={() => {
+                                setDetalleViajesFiltro('TODOS');
+                                setDetalleViajesModalLiq(liq);
+                              }}
                               className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 flex items-center gap-1"
                             >
                               <Eye className="w-3.5 h-3.5" />
@@ -1687,7 +2004,10 @@ export default function HistorialLiquidacionesPage() {
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => setDetalleViajesModalLiq(liq)}
+                                  onClick={() => {
+                                    setDetalleViajesFiltro('TODOS');
+                                    setDetalleViajesModalLiq(liq);
+                                  }}
                                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-blue-100 text-blue-700 border border-slate-200 cursor-pointer"
                                   title="Ver listado completo de viajes"
                                 >
@@ -1704,17 +2024,23 @@ export default function HistorialLiquidacionesPage() {
                               <span className="font-black text-slate-900 block">
                                 ${liq.totalRecaudado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                               </span>
-                              <span className="text-[10px] text-slate-500 block">
-                                {getTransferenciasLiq(liq).agencia > 0
-                                  ? `TrAg: $${getTransferenciasLiq(liq).agencia.toLocaleString('es-AR')} `
-                                  : ''}
-                                {getTransferenciasLiq(liq).propia > 0
-                                  ? `TrPr: $${getTransferenciasLiq(liq).propia.toLocaleString('es-AR')} `
-                                  : ''}
-                                {(liq.totalCuentaCorrienteViajes || 0) > 0
-                                  ? `CC: $${liq.totalCuentaCorrienteViajes.toLocaleString('es-AR')}`
-                                  : ''}
-                              </span>
+                              <div className="flex flex-wrap justify-end gap-1 mt-0.5 text-[10px]">
+                                {getTransferenciasLiq(liq).agencia > 0 && (
+                                  <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 font-bold border border-blue-100">
+                                    TrAg: ${getTransferenciasLiq(liq).agencia.toLocaleString('es-AR')}
+                                  </span>
+                                )}
+                                {getTransferenciasLiq(liq).propia > 0 && (
+                                  <span className="px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100">
+                                    TrPr: ${getTransferenciasLiq(liq).propia.toLocaleString('es-AR')}
+                                  </span>
+                                )}
+                                {getCuentaCorrienteLiq(liq) > 0 && (
+                                  <span className="px-1.5 py-0.2 rounded bg-purple-50 text-purple-800 font-bold border border-purple-200">
+                                    CC: ${getCuentaCorrienteLiq(liq).toLocaleString('es-AR')}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-3.5 whitespace-nowrap text-right font-bold text-emerald-700 bg-emerald-50/20">
                               ${liq.comisionAgencia.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -2513,7 +2839,7 @@ export default function HistorialLiquidacionesPage() {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                         <span className="text-slate-500 block font-semibold">Bruto</span>
                         <span className="text-lg font-black text-slate-900">${cierreCalculos.totalRecaudado.toLocaleString('es-AR')}</span>
@@ -2529,6 +2855,10 @@ export default function HistorialLiquidacionesPage() {
                       <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100">
                         <span className="text-indigo-700 block font-semibold">📱 Transf. Propia</span>
                         <span className="text-lg font-black text-indigo-800">${cierreCalculos.totalTransferenciaPropia.toLocaleString('es-AR')}</span>
+                      </div>
+                      <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-200">
+                        <span className="text-purple-700 block font-semibold">🏛️ Cta. Cte.</span>
+                        <span className="text-lg font-black text-purple-800">${cierreCalculos.totalCuentaCorriente.toLocaleString('es-AR')}</span>
                       </div>
                     </div>
 
@@ -2616,6 +2946,23 @@ export default function HistorialLiquidacionesPage() {
       {detalleViajesModalLiq && (() => {
         const est = getEstadoFinancieroLiq(detalleViajesModalLiq);
         const viajesLista = Array.isArray(detalleViajesModalLiq.viajes) ? detalleViajesModalLiq.viajes : [];
+        const viajesTrAg = viajesLista.filter(
+          (v: any) => v.metodoPago === 'TRANSFERENCIA' && v.destinoTransferencia !== 'CUENTA_PROPIA'
+        );
+        const viajesCC = viajesLista.filter((v: any) => v.metodoPago === 'CUENTA_CORRIENTE');
+        const viajesOtros = viajesLista.filter(
+          (v: any) =>
+            v.metodoPago !== 'CUENTA_CORRIENTE' &&
+            !(v.metodoPago === 'TRANSFERENCIA' && v.destinoTransferencia !== 'CUENTA_PROPIA')
+        );
+        const viajesMostrados =
+          detalleViajesFiltro === 'TR_AG'
+            ? viajesTrAg
+            : detalleViajesFiltro === 'CC'
+            ? viajesCC
+            : detalleViajesFiltro === 'OTROS'
+            ? viajesOtros
+            : viajesLista;
         return (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
             <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -2675,13 +3022,65 @@ export default function HistorialLiquidacionesPage() {
                   </div>
                   <div className="p-3 rounded-xl bg-purple-50 border border-purple-200">
                     <span className="text-purple-700 block font-semibold">🏛️ Cta. Cte.</span>
-                    <span className="text-base font-black text-purple-800">${Number(detalleViajesModalLiq.totalCuentaCorrienteViajes || 0).toLocaleString('es-AR')}</span>
+                    <span className="text-base font-black text-purple-800">${getCuentaCorrienteLiq(detalleViajesModalLiq).toLocaleString('es-AR')}</span>
                   </div>
                 </div>
+
+                {/* Filtros rápidos para separar Transferencias a Agencia y Cuenta Corriente */}
+                {viajesLista.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setDetalleViajesFiltro('TODOS')}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all ${
+                        detalleViajesFiltro === 'TODOS'
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      Todos ({viajesLista.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetalleViajesFiltro('TR_AG')}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all ${
+                        detalleViajesFiltro === 'TR_AG'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                      }`}
+                    >
+                      🏦 Transf. Agencia ({viajesTrAg.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetalleViajesFiltro('CC')}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all ${
+                        detalleViajesFiltro === 'CC'
+                          ? 'bg-purple-700 text-white border-purple-700'
+                          : 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100'
+                      }`}
+                    >
+                      🏛️ Cuenta Corriente ({viajesCC.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetalleViajesFiltro('OTROS')}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all ${
+                        detalleViajesFiltro === 'OTROS'
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                      }`}
+                    >
+                      Efectivo / Tr. Propia ({viajesOtros.length})
+                    </button>
+                  </div>
+                )}
 
                 {/* Tabla de viajes */}
                 {viajesLista.length === 0 ? (
                   <p className="text-sm text-slate-500 text-center py-8">No hay viajes asociados a esta liquidación.</p>
+                ) : viajesMostrados.length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-8">No hay viajes en esta categoría.</p>
                 ) : (
                   <div className="overflow-x-auto border border-slate-200 rounded-xl">
                     <table className="min-w-full divide-y divide-slate-200 text-xs">
@@ -2696,7 +3095,7 @@ export default function HistorialLiquidacionesPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
-                        {viajesLista.map((v: any) => {
+                        {viajesMostrados.map((v: any) => {
                           const medio = getMedioPagoViajeInfo(v);
                           const titular = getTitularViaje(v);
                           return (
