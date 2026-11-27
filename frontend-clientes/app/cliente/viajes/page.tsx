@@ -116,19 +116,19 @@ export default function MisViajesPage() {
   const getEstadoBadge = (estado: string) => {
     switch (estado) {
       case 'PENDIENTE':
-        return <span className="bg-yellow-50 text-yellow-700 border border-yellow-200 px-2.5 py-0.5 rounded-full text-xs font-semibold animate-pulse">Buscando Chofer</span>;
+        return <span className="bg-yellow-50 dark:bg-yellow-950/60 text-yellow-700 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-800 px-2.5 py-0.5 rounded-full text-xs font-semibold animate-pulse">Buscando Chofer</span>;
       case 'ACEPTADO':
       case 'EN_CAMINO':
-        return <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">Chofer en Camino</span>;
+        return <span className="bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 px-2.5 py-0.5 rounded-full text-xs font-semibold">Chofer en Camino</span>;
       case 'EN_CURSO':
-        return <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">En Curso</span>;
+        return <span className="bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-2.5 py-0.5 rounded-full text-xs font-semibold">En Curso</span>;
       case 'COMPLETADO':
-        return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">Completado</span>;
+        return <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2.5 py-0.5 rounded-full text-xs font-semibold">Completado</span>;
       case 'CANCELADO':
       case 'CANCELADA':
-        return <span className="bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">Cancelado</span>;
+        return <span className="bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 px-2.5 py-0.5 rounded-full text-xs font-semibold">Cancelado</span>;
       default:
-        return <span className="bg-gray-50 text-gray-700 border border-gray-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">{estado}</span>;
+        return <span className="bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-slate-700 px-2.5 py-0.5 rounded-full text-xs font-semibold">{estado}</span>;
     }
   };
 

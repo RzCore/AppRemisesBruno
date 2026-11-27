@@ -67,6 +67,12 @@
   color-scheme: dark;
 }
 
+.dark .chofer-module option,
+.dark .cliente-module option {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+
 /* Mapas Leaflet en Modo Nocturno para conducción y uso con poca luz */
 .dark .chofer-module .leaflet-tile,
 .dark .cliente-module .leaflet-tile {
