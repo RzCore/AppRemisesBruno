@@ -80,6 +80,75 @@ const CHIVILCOY_KNOWN_PLACES: KnownPlaceEntry[] = [
       state: 'Buenos Aires',
     },
   },
+  {
+    display_name: 'Parador La Posta (Ruta Nacional 5, Chivilcoy)',
+    lat: '-34.9226067',
+    lon: '-59.9886234',
+    keywords: [
+      'parador la posta',
+      'la posta',
+      'la posta chivilcoy',
+      'posta ruta 5',
+    ],
+    address: {
+      amenity: 'Parador La Posta',
+      road: 'Ruta Nacional 5',
+      city: 'Chivilcoy',
+      state: 'Buenos Aires',
+    },
+  },
+  {
+    display_name: 'Parque Industrial Chivilcoy, Chivilcoy',
+    lat: '-34.9284156',
+    lon: '-59.9837861',
+    keywords: [
+      'parque industrial',
+      'parque industrial chivilcoy',
+      'acceso a parque industrial',
+    ],
+    address: {
+      amenity: 'Parque Industrial Chivilcoy',
+      road: 'Acceso a Parque Industrial',
+      city: 'Chivilcoy',
+      state: 'Buenos Aires',
+    },
+  },
+  {
+    display_name: 'Hospital Municipal de Chivilcoy "Dr. Santiago Fornos", Av. Hijas de San José 31, Chivilcoy',
+    lat: '-34.9119734',
+    lon: '-60.0372253',
+    keywords: [
+      'hospital',
+      'hospital municipal',
+      'hospital chivilcoy',
+      'guardia del hospital',
+      'guardia hospital',
+      'santiago fornos',
+    ],
+    address: {
+      amenity: 'Hospital Municipal de Chivilcoy',
+      road: 'Avenida Hijas de San José',
+      house_number: '31',
+      city: 'Chivilcoy',
+      state: 'Buenos Aires',
+    },
+  },
+  {
+    display_name: 'Terminal de Ómnibus de Chivilcoy, Pueyrredón, Chivilcoy',
+    lat: '-34.8885470',
+    lon: '-60.0123600',
+    keywords: [
+      'terminal',
+      'terminal de omnibus',
+      'terminal chivilcoy',
+    ],
+    address: {
+      amenity: 'Terminal de Ómnibus',
+      road: 'Pueyrredón',
+      city: 'Chivilcoy',
+      state: 'Buenos Aires',
+    },
+  },
 ];
 
 function normalizarTextoBusqueda(str: string): string {
@@ -131,8 +200,9 @@ function formatSuggestionDisplayName(
     addr?.town ||
     addr?.village ||
     addr?.municipality ||
-    addr?.suburb ||
-    'Chivilcoy';
+    addr?.county ||
+    addr?.state ||
+    '';
 
   const cleanPoi = (poiName || addr?.amenity || '').trim();
   const poiDifferentFromRoad =
@@ -193,7 +263,7 @@ async function fetchPhotonFallback(qParam: string, limit: number, houseNumberOve
         const coords = f.geometry?.coordinates || [];
         const road = props.street || props.name || '';
         const house_number = props.housenumber || houseNumberOverride || '';
-        const city = props.city || props.town || props.locality || props.county || 'Chivilcoy';
+        const city = props.city || props.town || props.locality || props.county || props.state || '';
         const state = props.state || 'Buenos Aires';
         const addr = { road, house_number, city, state };
         const rawDisplay = [road, house_number, city, state].filter(Boolean).join(', ');
@@ -275,7 +345,15 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
       }
 
       if (!hasCityConstraint && data.length === 0) {
-        data = await fetchNominatimList(queryString, limit, viewboxParam);
+        const rawFallback = await fetchNominatimList(queryString, limit, viewboxParam);
+        // Si el usuario NO pidió otra ciudad, solo aceptar resultados cercanos a Chivilcoy (<= 35 km)
+        // para evitar que un comercio/calle local termine apuntando a un lugar homónimo a 150 km
+        data = rawFallback.filter((item: any) => {
+          const lat = parseFloat(item.lat);
+          const lon = parseFloat(item.lon);
+          if (isNaN(lat) || isNaN(lon)) return false;
+          return haversineDistanceKm(DEFAULT_BASE_LAT, DEFAULT_BASE_LON, lat, lon) <= 35;
+        });
       }
 
       // Fallback a Photon (OSM) si Nominatim limitó o no devolvió resultados
