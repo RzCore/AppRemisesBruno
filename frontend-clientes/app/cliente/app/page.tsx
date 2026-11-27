@@ -18,6 +18,7 @@ import {
   Trash2,
   Calendar,
   Compass,
+  ArrowLeft,
   ArrowRight,
   Info,
   BellRing,
@@ -743,6 +744,15 @@ export default function ClienteApp() {
       );
     }
   }, [user?.cliente?.preferenciaSexoChofer]);
+
+  // Al pasar al paso 2 (cotización/confirmación), llevar suavemente al inicio para evitar scroll
+  useEffect(() => {
+    if (estadoViaje === 'IDLE' && (isCalculando || presupuesto)) {
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  }, [estadoViaje, isCalculando, presupuesto]);
 
   const cargarDisponibilidad = async () => {
     try {
@@ -1506,7 +1516,7 @@ export default function ClienteApp() {
           }}
         ></div>
         <div className="absolute inset-0 bg-gradient-to-b from-white/60 via-transparent to-white/90 dark:from-slate-950/70 dark:via-transparent dark:to-slate-950/90"></div>
-        {estadoViaje === 'IDLE' && estadoAgencia.abierta && (
+        {estadoViaje === 'IDLE' && estadoAgencia.abierta && !presupuesto && !isCalculando && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 p-8 text-center select-none pointer-events-none">
             <Compass className="w-16 h-16 mb-2 text-slate-300 dark:text-slate-600 animate-pulse" />
             <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">¿A dónde quieres ir hoy?</h3>
@@ -1517,8 +1527,8 @@ export default function ClienteApp() {
         )}
       </div>
 
-      {/* CONTROLES SUPERIORES (Ingreso de dirección) */}
-      {estadoViaje === 'IDLE' && (
+      {/* CONTROLES SUPERIORES (Paso 1: Ingreso de dirección — se oculta al pasar al Paso 2 de confirmación) */}
+      {estadoViaje === 'IDLE' && (!estadoAgencia.abierta || (!presupuesto && !isCalculando)) && (
         <div className="relative z-20 p-4 pb-2 w-full max-w-lg mx-auto">
           {/* Banner de Aviso: Agencia Cerrada por Horario Especial o Festividades */}
           {!estadoAgencia.abierta && (
@@ -1825,36 +1835,92 @@ export default function ClienteApp() {
         </div>
       )}
 
-      {/* ÁREA INFERIOR (Presupuesto o Estado del Viaje) */}
-      <div className={`${estadoViaje === 'IDLE' ? 'relative pt-2' : 'mt-auto'} z-10 w-full max-w-lg mx-auto px-4 pb-4 animate-slide-up`}>
+      {/* ÁREA INFERIOR / PASO 2 (Confirmación de Viaje o Estado del Viaje) */}
+      <div className={`${estadoViaje === 'IDLE' ? 'relative pt-3' : 'mt-auto'} z-10 w-full max-w-lg mx-auto px-4 pb-4 animate-slide-up`}>
         
         {/* Caso 2: Calculando */}
         {isCalculando && estadoAgencia.abierta && (
-          <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl text-center space-y-3">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400 mx-auto"></div>
-            <p className="text-gray-600 dark:text-slate-300 font-semibold text-sm">Cotizando viaje y buscando mejor ruta...</p>
+          <div className="p-8 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl text-center space-y-3">
+            <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-primary-600 dark:border-primary-400 mx-auto"></div>
+            <div>
+              <p className="text-gray-900 dark:text-white font-bold text-sm">Calculando tu viaje...</p>
+              <p className="text-gray-500 dark:text-slate-400 text-xs mt-0.5 truncate">
+                {origen} → {destino}
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Caso 3: Presupuesto Listo para pedir */}
+        {/* Caso 3: Paso 2 — Pantalla limpia de Confirmación de Viaje (sin scroll innecesario) */}
         {estadoViaje === 'IDLE' && estadoAgencia.abierta && presupuesto && !isCalculando && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-800 overflow-hidden transition-colors">
-            <div className="p-5 space-y-4">
-              
-              <div className="flex justify-between items-center pb-3 border-b border-gray-100 dark:border-slate-800">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary-50 dark:bg-primary-950/60 p-2.5 rounded-xl text-primary-600 dark:text-primary-400">
-                    <Car className="w-6 h-6" />
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-200/80 dark:border-slate-800 overflow-hidden transition-colors">
+            {/* Cabecera compacta con botón Volver + Resumen de Ruta */}
+            <div className="bg-slate-50 dark:bg-slate-800/70 px-4 py-3 border-b border-gray-100 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPresupuesto(null)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary-600 dark:text-primary-400 hover:text-primary-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-slate-700 shadow-2xs active:scale-95 transition-all"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Cambiar ruta</span>
+                </button>
+                {disponibilidad && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                      disponibilidad.hayAutosDisponibles
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        disponibilidad.hayAutosDisponibles ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                      }`}
+                    />
+                    {disponibilidad.hayAutosDisponibles
+                      ? `${disponibilidad.autosDisponibles} ${disponibilidad.autosDisponibles === 1 ? 'auto libre' : 'autos libres'}`
+                      : 'Alta demanda'}
+                  </span>
+                )}
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 rounded-xl px-3 py-2 border border-gray-200/80 dark:border-slate-700/80 space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="font-semibold text-gray-800 dark:text-slate-100 truncate">{origen}</span>
+                </div>
+                {paradas.filter((p) => p.direccion.trim()).length > 0 && (
+                  <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-400 pl-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    <span className="font-semibold">
+                      +{paradas.filter((p) => p.direccion.trim()).length} parada(s) intermedia(s)
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                  <span className="font-semibold text-gray-800 dark:text-slate-100 truncate">{destino}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {/* Hero de Precio y Tiempo Estimado */}
+              <div className="flex justify-between items-center pb-2.5 border-b border-gray-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-primary-50 dark:bg-primary-950/60 p-2 rounded-xl text-primary-600 dark:text-primary-400">
+                    <Car className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-bold text-gray-900 dark:text-white text-sm">Remís de la Agencia</h3>
                     <p className="text-xs text-gray-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
                       <Clock className="w-3.5 h-3.5" />
-                      Estimado: {presupuesto.tiempo} ({presupuesto.distancia})
+                      {presupuesto.tiempo} • {presupuesto.distancia}
                     </p>
                     {presupuesto.esOrigenRemoto && (
-                      <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mt-1">
-                        Incluye traslado del móvil desde Chivilcoy
+                      <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400 mt-0.5">
+                        Incluye traslado desde Chivilcoy
                       </p>
                     )}
                   </div>
@@ -1864,31 +1930,15 @@ export default function ClienteApp() {
                   {metodoPago === 'CUENTA_CORRIENTE' && (presupuesto.esTarifaDiferenciada || user?.cliente?.tipoTarifa === 'PERSONALIZADA') ? (
                     <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block">⭐ Tarifa Especial Cta. Cte.</span>
                   ) : (
-                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 block">Valor estimativo</span>
+                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 block" title="El importe final puede variar por desvíos, paradas o espera">
+                      Valor estimativo
+                    </span>
                   )}
                 </div>
               </div>
 
-              <div className="bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-xl px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200 leading-snug">
-                ℹ️ <strong>Valor estimativo:</strong> el importe final puede variar si el auto debe desviarse, si se agregan paradas intermedias o por tiempo de espera.
-              </div>
-
-              {/* Indicaciones para el chofer */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Indicaciones para el chofer
-                </label>
-                <input 
-                  type="text" 
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                  placeholder="Ej: Portón verde, timbre B..."
-                  className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:ring-1 focus:ring-primary-500"
-                />
-              </div>
-
               {/* SELECCIÓN DE MÉTODO DE PAGO Y DETALLE DE CAMBIO */}
-              <div className="space-y-2 pt-1 border-t border-gray-100 dark:border-slate-800">
+              <div className="space-y-2">
                 <label className="block text-[11px] font-bold text-gray-600 dark:text-slate-300 uppercase tracking-wider">
                   Método de Pago
                 </label>
@@ -2174,6 +2224,17 @@ export default function ClienteApp() {
                   }
                   return null;
                 })()}
+              </div>
+
+              {/* Indicaciones opcionales para el chofer */}
+              <div className="pt-1">
+                <input
+                  type="text"
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  placeholder="Indicaciones opcionales (ej: Portón verde, timbre B...)"
+                  className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:ring-1 focus:ring-primary-500"
+                />
               </div>
 
               <button 
