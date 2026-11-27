@@ -479,6 +479,8 @@ export interface ReservaCoordinador {
   diasSemana?: string[];
   horaFin?: string;
   estado: 'activa' | 'completada' | 'cancelada';
+  cantidadPasajeros?: number;
+  cantidadVehiculos?: number;
   observaciones?: string;
   createdAt: string;
 }
@@ -606,6 +608,7 @@ export interface SolicitudViajeData {
   preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
   conMascota?: boolean;
   conSillaRuedas?: boolean;
+  cantidadPasajeros?: number;
 }
 
 export interface CalculoPrecioData {
@@ -620,6 +623,10 @@ export interface CalculoPrecioData {
   tarifaPorMinuto: number;
   esOrigenRemoto?: boolean;
   kmAproximacion?: number;
+  latOrigen?: number;
+  lonOrigen?: number;
+  latDestino?: number;
+  lonDestino?: number;
 }
 
 export interface ReservaClienteData {
@@ -639,6 +646,7 @@ export interface ReservaClienteData {
   preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
   conMascota?: boolean;
   conSillaRuedas?: boolean;
+  cantidadPasajeros?: number;
 }
 
 export interface ViajeCliente {
@@ -654,6 +662,10 @@ export interface ViajeCliente {
   preferenciaSexoChofer?: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
   conMascota?: boolean;
   conSillaRuedas?: boolean;
+  cantidadPasajeros?: number;
+  cantidadVehiculos?: number;
+  vehiculoNumero?: number;
+  grupoViajeId?: string | null;
   disponibilidadSexoChofer?: {
     preferencia: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
     disponiblesAhora: number;
@@ -715,6 +727,8 @@ export interface ReservaCliente {
   diasSemana?: string[];
   horaFin?: string;
   estado: 'activa' | 'completada' | 'cancelada';
+  cantidadPasajeros?: number;
+  cantidadVehiculos?: number;
   observaciones?: string;
   createdAt: string;
   viajesGenerados?: ViajeCliente[];

@@ -43,7 +43,8 @@ import {
   ExternalLink,
   MessageCircle,
   Key,
-  ShieldCheck
+  ShieldCheck,
+  Users
 } from 'lucide-react';
 import { DireccionFrecuente, ParadaIntermedia } from '@/types';
 import { clienteService, coordinadorDashboardService, remiseriaService, getSocketUrl } from '@/lib/api';
@@ -221,6 +222,8 @@ export default function ClienteApp() {
   const [preferenciaSexoChofer, setPreferenciaSexoChofer] = useState<'INDISTINTO' | 'FEMENINO' | 'MASCULINO'>('INDISTINTO');
   const [conMascota, setConMascota] = useState(false);
   const [conSillaRuedas, setConSillaRuedas] = useState(false);
+  const [cantidadPasajeros, setCantidadPasajeros] = useState<number>(1);
+  const cantidadVehiculosNecesarios = Math.min(3, Math.ceil(cantidadPasajeros / 4));
   const [cambiandoPreferenciaSexo, setCambiandoPreferenciaSexo] = useState(false);
 
   // Estados del Proceso
@@ -228,7 +231,8 @@ export default function ClienteApp() {
   const [presupuesto, setPresupuesto] = useState<any>(null);
   const [observaciones, setObservaciones] = useState('');
   
-  // Viaje Activo y Polling
+  // Viaje(s) Activo(s) y Polling (soporta 1, 2 o 3 vehículos simultáneos)
+  const [activeViajes, setActiveViajes] = useState<any[]>([]);
   const [activeViaje, setActiveViaje] = useState<any | null>(null);
   const [estadoViaje, setEstadoViaje] = useState<'IDLE' | 'BUSCANDO' | 'ACEPTADO' | 'EN_CAMINO' | 'EN_CURSO'>('IDLE');
   const [choferLiveCoords, setChoferLiveCoords] = useState<[number, number] | null>(null);
@@ -381,10 +385,15 @@ export default function ClienteApp() {
 
   const previousEstadoRef = useRef<string | null>(null);
   const activeViajeRef = useRef<any>(null);
+  const activeViajesRef = useRef<any[]>([]);
   const socketRef = useRef<Socket | null>(null);
   const notificacionesLlegadaRef = useRef<Set<string>>(new Set());
   const notificacionesLlegandoRef = useRef<Set<string>>(new Set());
   const [choferLlegandoAviso, setChoferLlegandoAviso] = useState<boolean>(false);
+
+  useEffect(() => {
+    activeViajesRef.current = activeViajes;
+  }, [activeViajes]);
 
   useEffect(() => {
     activeViajeRef.current = activeViaje;
@@ -395,6 +404,8 @@ export default function ClienteApp() {
           : activeViaje.mensajesChat;
         if (Array.isArray(list)) setMensajesChat(list);
       } catch {}
+    } else {
+      setMensajesChat([]);
     }
   }, [activeViaje]);
 
@@ -577,11 +588,25 @@ export default function ClienteApp() {
     });
 
     socket.on('viaje_estado_actualizado', (data: { viajeId: string; estado: string; mensaje?: string; choferNombre?: string; vehiculo?: any; viaje?: any }) => {
-      if (activeViajeRef.current && data.viajeId === activeViajeRef.current.id) {
-        if (data.estado === 'ACEPTADO') {
+      const matchedViaje =
+        activeViajesRef.current.find((v) => v.id === data.viajeId) ||
+        (activeViajeRef.current?.id === data.viajeId ? activeViajeRef.current : null);
+      if (!matchedViaje) return;
+
+      const isSelected = activeViajeRef.current?.id === data.viajeId;
+      const totalVeh = matchedViaje.cantidadVehiculos || activeViajesRef.current.length || 1;
+      const autoLabel = totalVeh > 1 ? `Auto ${matchedViaje.vehiculoNumero || 1}/${totalVeh}: ` : '';
+
+      if (data.estado === 'ACEPTADO') {
+        const updatedViaje = { ...matchedViaje, estado: 'ACEPTADO', ...(data.viaje || {}) };
+        setActiveViajes((prev) =>
+          prev.length > 0
+            ? prev.map((v) => (v.id === data.viajeId ? updatedViaje : v))
+            : [updatedViaje]
+        );
+        if (isSelected) {
           previousEstadoRef.current = 'ACEPTADO';
           setEstadoViaje('ACEPTADO');
-          const updatedViaje = { ...(activeViajeRef.current || {}), estado: 'ACEPTADO', ...(data.viaje || {}) };
           activeViajeRef.current = updatedViaje;
           setActiveViaje(updatedViaje);
           const vLat = updatedViaje.vehiculo?.latitud ?? updatedViaje.chofer?.vehiculo?.latitud;
@@ -589,56 +614,74 @@ export default function ClienteApp() {
           if (typeof vLat === 'number' && typeof vLon === 'number') {
             setChoferLiveCoords([vLat, vLon]);
           }
+        }
 
-          const choferNombre = data.choferNombre || (updatedViaje.chofer ? `${updatedViaje.chofer.nombre} ${updatedViaje.chofer.apellido || ''}`.trim() : 'Conductor');
-          const vehiculoObj = data.vehiculo || updatedViaje.vehiculo || updatedViaje.chofer?.vehiculo;
-          const marcaAuto = vehiculoObj?.marca || 'Vehículo';
-          const modeloAuto = vehiculoObj?.modelo || '';
-          const colorAuto = vehiculoObj?.color || '';
-          const patenteAuto = vehiculoObj?.patente || '';
-          const colorStr = colorAuto ? ` - Color ${colorAuto}` : '';
-          const patenteStr = patenteAuto ? ` (Patente ${patenteAuto})` : '';
-          const msjAviso = `🚕 ¡Viaje aceptado por ${choferNombre}! Auto: ${marcaAuto} ${modeloAuto}${colorStr}${patenteStr}`;
+        const choferNombre = data.choferNombre || (updatedViaje.chofer ? `${updatedViaje.chofer.nombre} ${updatedViaje.chofer.apellido || ''}`.trim() : 'Conductor');
+        const vehiculoObj = data.vehiculo || updatedViaje.vehiculo || updatedViaje.chofer?.vehiculo;
+        const marcaAuto = vehiculoObj?.marca || 'Vehículo';
+        const modeloAuto = vehiculoObj?.modelo || '';
+        const colorAuto = vehiculoObj?.color || '';
+        const patenteAuto = vehiculoObj?.patente || '';
+        const colorStr = colorAuto ? ` - Color ${colorAuto}` : '';
+        const patenteStr = patenteAuto ? ` (Patente ${patenteAuto})` : '';
+        const msjAviso = `🚕 ${autoLabel}¡Viaje aceptado por ${choferNombre}! Auto: ${marcaAuto} ${modeloAuto}${colorStr}${patenteStr}`;
 
-          toast.success(data.mensaje || msjAviso, {
-            duration: 8000,
-            icon: '🚗',
-            style: {
-              background: '#065f46',
-              color: '#ffffff',
-              fontWeight: 'bold',
-              borderRadius: '16px',
-              padding: '14px',
-              fontSize: '13px'
-            }
-          });
-
-          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            try {
-              new Notification(`¡Viaje aceptado por ${choferNombre}!`, {
-                body: `${marcaAuto} ${modeloAuto}${colorStr} - Patente: ${patenteAuto || 'Asignada'}`,
-                icon: '/favicon.ico',
-              });
-            } catch {}
+        toast.success(data.mensaje || msjAviso, {
+          duration: 8000,
+          icon: '🚗',
+          style: {
+            background: '#065f46',
+            color: '#ffffff',
+            fontWeight: 'bold',
+            borderRadius: '16px',
+            padding: '14px',
+            fontSize: '13px'
           }
-        } else if (data.estado === 'EN_CAMINO') {
+        });
+
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(`${autoLabel}¡Viaje aceptado por ${choferNombre}!`, {
+              body: `${marcaAuto} ${modeloAuto}${colorStr} - Patente: ${patenteAuto || 'Asignada'}`,
+              icon: '/favicon.ico',
+            });
+          } catch {}
+        }
+      } else if (data.estado === 'EN_CAMINO') {
+        const updatedViaje = { ...matchedViaje, estado: 'EN_CAMINO', ...(data.viaje || {}) };
+        setActiveViajes((prev) => prev.map((v) => (v.id === data.viajeId ? updatedViaje : v)));
+        notificarLlegadaChofer(updatedViaje);
+        if (isSelected) {
           previousEstadoRef.current = 'EN_CAMINO';
-          notificarLlegadaChofer(data.viaje || activeViajeRef.current);
           setEstadoViaje('EN_CAMINO');
-          setActiveViaje((prev: any) => ({ ...(prev || {}), estado: 'EN_CAMINO', ...(data.viaje || {}) }));
-        } else if (data.estado === 'COMPLETADO') {
-          const vCompletado = data.viaje || activeViajeRef.current;
-          setViajeParaCalificar(vCompletado);
-          setIsRatingModalOpen(true);
-          toast.success('¡Viaje finalizado! Por favor califica el servicio.');
+          setActiveViaje(updatedViaje);
+        }
+      } else if (data.estado === 'COMPLETADO') {
+        const vCompletado = { ...matchedViaje, ...(data.viaje || {}), estado: 'COMPLETADO' };
+        setViajeParaCalificar(vCompletado);
+        setIsRatingModalOpen(true);
+        toast.success(`${autoLabel}¡Viaje finalizado! Por favor califica el servicio.`);
+        const restantes = activeViajesRef.current.filter((v) => v.id !== data.viajeId);
+        if (restantes.length > 0) {
+          aplicarListaViajesActivos(restantes, isSelected ? restantes[0].id : activeViajeRef.current?.id);
+        } else {
           resetRequestState();
-        } else if (data.estado === 'CANCELADO') {
-          reproducirAlertaCancelacion();
-          toast.error(data.mensaje || 'El viaje fue cancelado.');
+        }
+      } else if (data.estado === 'CANCELADO') {
+        reproducirAlertaCancelacion();
+        toast.error(data.mensaje || `${autoLabel}El viaje fue cancelado.`);
+        const restantes = activeViajesRef.current.filter((v) => v.id !== data.viajeId);
+        if (restantes.length > 0) {
+          aplicarListaViajesActivos(restantes, isSelected ? restantes[0].id : activeViajeRef.current?.id);
+        } else {
           resetRequestState();
-        } else if (data.estado === 'EN_CURSO') {
+        }
+      } else if (data.estado === 'EN_CURSO') {
+        const updatedViaje = { ...matchedViaje, estado: 'EN_CURSO', ...(data.viaje || {}) };
+        setActiveViajes((prev) => prev.map((v) => (v.id === data.viajeId ? updatedViaje : v)));
+        if (isSelected) {
           setEstadoViaje('EN_CURSO');
-          setActiveViaje((prev: any) => ({ ...(prev || {}), estado: 'EN_CURSO', ...(data.viaje || {}) }));
+          setActiveViaje(updatedViaje);
         }
       }
     });
@@ -659,17 +702,27 @@ export default function ClienteApp() {
 
     // Escucha aviso de que el chofer está llegando a pocas cuadras
     socket.on('chofer_llegando', (data: any) => {
-      if (activeViajeRef.current && data.viajeId === activeViajeRef.current.id) {
-        notificarChoferLlegando(data.viaje || activeViajeRef.current);
+      const matched = activeViajesRef.current.find((v) => v.id === data.viajeId) || (activeViajeRef.current?.id === data.viajeId ? activeViajeRef.current : null);
+      if (matched) {
+        notificarChoferLlegando(data.viaje || matched);
       }
     });
 
     // Escucha cancelación con sonido y motivo
     socket.on('viaje_cancelado', (data: any) => {
-      if (activeViajeRef.current && data.viajeId === activeViajeRef.current.id) {
+      const matched = activeViajesRef.current.find((v) => v.id === data.viajeId) || (activeViajeRef.current?.id === data.viajeId ? activeViajeRef.current : null);
+      if (matched) {
         reproducirAlertaCancelacion();
-        toast.error(`Viaje cancelado. ${data.motivo ? `Motivo: ${data.motivo}` : ''}`);
-        resetRequestState();
+        const totalVeh = matched.cantidadVehiculos || activeViajesRef.current.length || 1;
+        const autoLabel = totalVeh > 1 ? `Auto ${matched.vehiculoNumero || 1}/${totalVeh}: ` : '';
+        toast.error(`${autoLabel}Viaje cancelado. ${data.motivo ? `Motivo: ${data.motivo}` : ''}`);
+        const restantes = activeViajesRef.current.filter((v) => v.id !== data.viajeId);
+        if (restantes.length > 0) {
+          const isSelected = activeViajeRef.current?.id === data.viajeId;
+          aplicarListaViajesActivos(restantes, isSelected ? restantes[0].id : activeViajeRef.current?.id);
+        } else {
+          resetRequestState();
+        }
       }
     });
 
@@ -826,6 +879,24 @@ export default function ClienteApp() {
     };
   }, [user?.id, authLoading, router]);
 
+  const aplicarListaViajesActivos = (lista: any[], preferId?: string) => {
+    const ordenados = [...lista].sort((a, b) => (a.vehiculoNumero || 1) - (b.vehiculoNumero || 1));
+    activeViajesRef.current = ordenados;
+    setActiveViajes(ordenados);
+
+    if (ordenados.length === 0) {
+      resetRequestState();
+      return;
+    }
+
+    const objetivo =
+      (preferId ? ordenados.find((v) => v.id === preferId) : null) ||
+      (activeViajeRef.current ? ordenados.find((v) => v.id === activeViajeRef.current.id) : null) ||
+      ordenados[0];
+
+    actualizarEstadoSegunViaje(objetivo);
+  };
+
   const buscarViajeActivo = async () => {
     try {
       const res = await clienteService.getViajes();
@@ -834,7 +905,7 @@ export default function ClienteApp() {
           ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO', 'EN_CURSO'].includes(v.estado)
         );
         if (activos.length > 0) {
-          actualizarEstadoSegunViaje(activos[0]);
+          aplicarListaViajesActivos(activos);
         }
       }
     } catch (error) {
@@ -843,7 +914,8 @@ export default function ClienteApp() {
   };
 
   const actualizarEstadoSegunViaje = (viaje: any) => {
-    const estadoAnterior = previousEstadoRef.current;
+    const mismoViaje = activeViajeRef.current?.id === viaje.id;
+    const estadoAnterior = mismoViaje ? previousEstadoRef.current : null;
     previousEstadoRef.current = viaje.estado;
     activeViajeRef.current = viaje;
     setActiveViaje(viaje);
@@ -851,7 +923,9 @@ export default function ClienteApp() {
     const vLat = viaje.vehiculo?.latitud ?? viaje.chofer?.vehiculo?.latitud;
     const vLon = viaje.vehiculo?.longitud ?? viaje.chofer?.vehiculo?.longitud;
     if (typeof vLat === 'number' && typeof vLon === 'number') {
-      setChoferLiveCoords((prev) => prev || [vLat, vLon]);
+      setChoferLiveCoords((prev) => (mismoViaje && prev ? prev : [vLat, vLon]));
+    } else if (!mismoViaje) {
+      setChoferLiveCoords(null);
     }
 
     if (viaje.estado === 'PENDIENTE') {
@@ -868,7 +942,7 @@ export default function ClienteApp() {
     }
   };
 
-  // Polling único de respaldo del viaje activo cada 7s (los cambios llegan al instante vía Socket.IO)
+  // Polling único de respaldo de los viajes activos cada 7s (los cambios llegan al instante vía Socket.IO)
   // Se pausa si la pantalla está oculta y sincroniza al volver visible o al reconectar 4G
   useEffect(() => {
     const viajeId = activeViaje?.id;
@@ -879,23 +953,33 @@ export default function ClienteApp() {
       try {
         const res = await clienteService.getViajes();
         if (res.success && res.data) {
-          const vActualizado = res.data.find((v: any) => v.id === viajeId);
+          const trackedIds = new Set(
+            activeViajesRef.current.length > 0
+              ? activeViajesRef.current.map((v) => v.id)
+              : [viajeId]
+          );
 
-          if (!vActualizado) {
-            resetRequestState();
-            return;
+          const activosEnServidor = res.data.filter((v: any) =>
+            ['PENDIENTE', 'ACEPTADO', 'EN_CAMINO', 'EN_CURSO'].includes(v.estado)
+          );
+
+          // Revisar si alguno de los viajes que seguíamos terminó o se canceló
+          for (const tId of Array.from(trackedIds)) {
+            const vSrv = res.data.find((v: any) => v.id === tId);
+            if (!vSrv) continue;
+            if (vSrv.estado === 'COMPLETADO') {
+              setViajeParaCalificar(vSrv);
+              setIsRatingModalOpen(true);
+              toast.success('¡Viaje finalizado! Por favor califica tu experiencia.');
+            } else if (vSrv.estado === 'CANCELADO') {
+              toast.error('Un viaje de tu solicitud fue cancelado.');
+            }
           }
 
-          if (vActualizado.estado === 'COMPLETADO') {
-            setViajeParaCalificar(vActualizado);
-            setIsRatingModalOpen(true);
-            toast.success('¡Viaje finalizado! Por favor califica tu experiencia.');
-            resetRequestState();
-          } else if (vActualizado.estado === 'CANCELADO') {
-            toast.error('El viaje fue cancelado.');
-            resetRequestState();
+          if (activosEnServidor.length > 0) {
+            aplicarListaViajesActivos(activosEnServidor);
           } else {
-            actualizarEstadoSegunViaje(vActualizado);
+            resetRequestState();
           }
         }
       } catch (error) {
@@ -907,7 +991,10 @@ export default function ClienteApp() {
   }, [activeViaje?.id]);
 
   const resetRequestState = () => {
+    setActiveViajes([]);
+    activeViajesRef.current = [];
     setActiveViaje(null);
+    activeViajeRef.current = null;
     setEstadoViaje('IDLE');
     setChoferLiveCoords(null);
     setPresupuesto(null);
@@ -920,6 +1007,7 @@ export default function ClienteApp() {
     setIsDestinoSelected(false);
     setObservaciones('');
     setPagaCon('');
+    setCantidadPasajeros(1);
     setMensajesChat([]);
     setChoferLlegandoAviso(false);
     notificacionesLlegadaRef.current.clear();
@@ -1213,6 +1301,14 @@ export default function ClienteApp() {
       );
       
       if (res.success && res.data) {
+        if (typeof res.data.latOrigen === 'number' && typeof res.data.lonOrigen === 'number' && !origenCoords) {
+          setOrigenCoords({ lat: res.data.latOrigen, lon: res.data.lonOrigen });
+          setIsOrigenSelected(true);
+        }
+        if (typeof res.data.latDestino === 'number' && typeof res.data.lonDestino === 'number' && !destinoCoords) {
+          setDestinoCoords({ lat: res.data.latDestino, lon: res.data.lonDestino });
+          setIsDestinoSelected(true);
+        }
         setPresupuesto({
           precio: res.data.precioEstimado,
           distancia: res.data.distanciaViaje
@@ -1226,9 +1322,10 @@ export default function ClienteApp() {
           kmAproximacion: Number(res.data.kmAproximacion || 0),
         });
       } else {
+        setPresupuesto(null);
         toast.error(
           res.message ||
-            'No pudimos cotizar en este momento. Comunicate a los teléfonos fijos 2346-427637 o 2346-433000.',
+            'No pudimos ubicar esa dirección en el mapa. Seleccioná una opción de la lista o verificá que esté bien escrita.',
           { duration: 6000 }
         );
       }
@@ -1243,20 +1340,19 @@ export default function ClienteApp() {
     }
   };
 
-  // Cotización automática ni bien el cliente tiene origen y destino completos
+  // Cotización automática ÚNICAMENTE cuando tanto origen como destino fueron seleccionados
+  // con coordenadas reales (nunca interrumpe al usuario mientras sigue escribiendo)
   useEffect(() => {
     if (estadoViaje !== 'IDLE' || !estadoAgencia.abierta) return;
-    const o = origen.trim();
-    const d = destino.trim();
-    if (o.length < 4 || d.length < 4) return;
+    if (!isOrigenSelected || !origenCoords || !isDestinoSelected || !destinoCoords) return;
 
     const timer = setTimeout(() => {
       calcularPrecio();
-    }, origenCoords && destinoCoords ? 250 : 750);
+    }, 250);
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origen, destino, origenCoords, destinoCoords, paradas, estadoViaje, estadoAgencia.abierta]);
+  }, [isOrigenSelected, origenCoords, isDestinoSelected, destinoCoords, paradas, estadoViaje, estadoAgencia.abierta]);
 
   const pedirAuto = async () => {
     if (!origen || !destino || !presupuesto) return;
@@ -1293,13 +1389,18 @@ export default function ClienteApp() {
         pagaCon: metodoPago === 'EFECTIVO' && pagaCon ? parseFloat(pagaCon) : undefined,
         preferenciaSexoChofer,
         conMascota,
-        conSillaRuedas
+        conSillaRuedas,
+        cantidadPasajeros
       };
 
       const res = await clienteService.solicitarViaje(payload);
       if (res.success && res.data) {
-        setActiveViaje(res.data);
-        const viajeData: any = res.data;
+        const creados =
+          Array.isArray((res as any).viajes) && (res as any).viajes.length > 0
+            ? (res as any).viajes
+            : [res.data];
+        aplicarListaViajesActivos(creados, creados[0]?.id);
+        const viajeData: any = creados[0];
         const rId = viajeData?.remiseriaId || viajeData?.remiseria?.id;
         if (rId && socketRef.current) {
           socketRef.current.emit('join_room', { remiseriaId: rId });
@@ -1309,6 +1410,8 @@ export default function ClienteApp() {
         const saludoCumple = (res as any).saludoCumpleanios;
         if (saludoCumple) {
           toast.success(saludoCumple, { duration: 7500, icon: '🎂' });
+        } else if (creados.length > 1) {
+          toast.success(`Buscando ${creados.length} vehículos para ${cantidadPasajeros} pasajeros...`, { duration: 5000 });
         } else {
           toast.success('Buscando el auto más cercano...');
         }
@@ -1376,7 +1479,12 @@ export default function ClienteApp() {
           toast.success('Viaje cancelado exitosamente');
         }
         setIsCancelModalOpen(false);
-        resetRequestState();
+        const restantes = activeViajesRef.current.filter((v) => v.id !== activeViaje.id);
+        if (restantes.length > 0) {
+          aplicarListaViajesActivos(restantes, restantes[0].id);
+        } else {
+          resetRequestState();
+        }
       } else {
         toast.error(res.message || 'Error al cancelar viaje');
       }
@@ -1527,8 +1635,8 @@ export default function ClienteApp() {
         )}
       </div>
 
-      {/* CONTROLES SUPERIORES (Paso 1: Ingreso de dirección — se oculta al pasar al Paso 2 de confirmación) */}
-      {estadoViaje === 'IDLE' && (!estadoAgencia.abierta || (!presupuesto && !isCalculando)) && (
+      {/* CONTROLES SUPERIORES (Paso 1: Ingreso de dirección — solo se oculta cuando ya hay presupuesto válido) */}
+      {estadoViaje === 'IDLE' && (!estadoAgencia.abierta || !presupuesto) && (
         <div className="relative z-20 p-4 pb-2 w-full max-w-lg mx-auto">
           {/* Banner de Aviso: Agencia Cerrada por Horario Especial o Festividades */}
           {!estadoAgencia.abierta && (
@@ -1735,6 +1843,36 @@ export default function ClienteApp() {
                 )}
               </div>
 
+              {/* Botón explícito para cotizar (útil si el pasajero escribió la dirección sin tocar la lista) */}
+              {origen.trim().length >= 3 && destino.trim().length >= 3 && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => calcularPrecio()}
+                    disabled={isCalculando}
+                    className="w-full py-3 px-4 rounded-xl bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-primary-500/20 active:scale-95 transition-all"
+                  >
+                    {isCalculando ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                        <span>Calculando ruta y precio...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4" />
+                        <span>Cotizar viaje</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                  {(!isOrigenSelected || !isDestinoSelected) && (
+                    <p className="text-[10px] text-center text-slate-400 dark:text-slate-500 mt-1.5">
+                      Tip: elegí una dirección de las sugerencias para mayor precisión, o tocá <strong>Cotizar viaje</strong>.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Lugares Frecuentes */}
               {direccionesFrecuentesList.length > 0 && (
                 <div className="pt-2 border-t border-gray-100 dark:border-slate-800">
@@ -1838,8 +1976,8 @@ export default function ClienteApp() {
       {/* ÁREA INFERIOR / PASO 2 (Confirmación de Viaje o Estado del Viaje) */}
       <div className={`${estadoViaje === 'IDLE' ? 'relative pt-3' : 'mt-auto'} z-10 w-full max-w-lg mx-auto px-4 pb-4 animate-slide-up`}>
         
-        {/* Caso 2: Calculando */}
-        {isCalculando && estadoAgencia.abierta && (
+        {/* Caso 2: Calculando (solo al recalcular desde Paso 2; en Paso 1 el spinner va en el botón) */}
+        {isCalculando && presupuesto && estadoAgencia.abierta && (
           <div className="p-8 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl text-center space-y-3">
             <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-primary-600 dark:border-primary-400 mx-auto"></div>
             <div>
@@ -1926,8 +2064,14 @@ export default function ClienteApp() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="text-2xl font-black text-gray-950 dark:text-white">${presupuesto.precio}</span>
-                  {metodoPago === 'CUENTA_CORRIENTE' && (presupuesto.esTarifaDiferenciada || user?.cliente?.tipoTarifa === 'PERSONALIZADA') ? (
+                  <span className="text-2xl font-black text-gray-950 dark:text-white">
+                    ${(Number(presupuesto.precio) * cantidadVehiculosNecesarios).toLocaleString('es-AR')}
+                  </span>
+                  {cantidadVehiculosNecesarios > 1 ? (
+                    <span className="text-[10px] font-bold text-primary-600 dark:text-primary-400 block">
+                      {cantidadVehiculosNecesarios} autos × ${Number(presupuesto.precio).toLocaleString('es-AR')} c/u
+                    </span>
+                  ) : metodoPago === 'CUENTA_CORRIENTE' && (presupuesto.esTarifaDiferenciada || user?.cliente?.tipoTarifa === 'PERSONALIZADA') ? (
                     <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block">⭐ Tarifa Especial Cta. Cte.</span>
                   ) : (
                     <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 block" title="El importe final puede variar por desvíos, paradas o espera">
@@ -1935,6 +2079,72 @@ export default function ClienteApp() {
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* CANTIDAD DE PASAJEROS (1-4: 1 auto, 5-8: 2 autos, 9-12: 3 autos máx.) */}
+              <div className="space-y-2 pb-2.5 border-b border-gray-100 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
+                    <span>¿Cuántas personas viajan?</span>
+                  </label>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${
+                      cantidadVehiculosNecesarios === 1
+                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                        : cantidadVehiculosNecesarios === 2
+                        ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                    }`}
+                  >
+                    🚗 {cantidadVehiculosNecesarios} {cantidadVehiculosNecesarios === 1 ? 'vehículo' : 'vehículos'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 rounded-xl p-2">
+                  <button
+                    type="button"
+                    onClick={() => setCantidadPasajeros((prev) => Math.max(1, prev - 1))}
+                    disabled={cantidadPasajeros <= 1}
+                    aria-label="Restar pasajero"
+                    className="w-9 h-9 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 font-black text-base text-slate-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 active:scale-95 transition-all"
+                  >
+                    −
+                  </button>
+                  <div className="text-center flex-1">
+                    <div className="text-sm font-black text-gray-900 dark:text-white leading-tight">
+                      {cantidadPasajeros} {cantidadPasajeros === 1 ? 'pasajero' : 'pasajeros'}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      {cantidadPasajeros <= 4
+                        ? 'Hasta 4 personas viajan en 1 vehículo'
+                        : cantidadPasajeros <= 8
+                        ? 'De 5 a 8 personas: se envían 2 vehículos'
+                        : 'De 9 a 12 personas: se envían 3 vehículos (máximo)'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCantidadPasajeros((prev) => Math.min(12, prev + 1))}
+                    disabled={cantidadPasajeros >= 12}
+                    aria-label="Sumar pasajero"
+                    className="w-9 h-9 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 font-black text-base text-slate-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 active:scale-95 transition-all"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {cantidadVehiculosNecesarios > 1 && (
+                  <p className="text-[11px] font-semibold text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 rounded-lg px-2.5 py-1.5">
+                    🚕 Se enviarán <strong>{cantidadVehiculosNecesarios} vehículos</strong> al mismo origen (máx. 4 personas por auto). Cada chofer cobra su viaje individual (${Number(presupuesto.precio).toLocaleString('es-AR')} c/u).
+                  </p>
+                )}
+
+                {cantidadVehiculosNecesarios > 1 && disponibilidad && disponibilidad.autosDisponibles < cantidadVehiculosNecesarios && (
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-2.5 py-1.5">
+                    ⚠️ Necesitás {cantidadVehiculosNecesarios} vehículos y hay {disponibilidad.autosDisponibles} {disponibilidad.autosDisponibles === 1 ? 'libre' : 'libres'} ahora. Se irán asignando automáticamente a medida que se liberen unidades.
+                  </p>
+                )}
               </div>
 
               {/* SELECCIÓN DE MÉTODO DE PAGO Y DETALLE DE CAMBIO */}
@@ -2256,10 +2466,76 @@ export default function ClienteApp() {
                 ) : (
                   <>
                     <Car className="w-4 h-4" />
-                    <span>PEDIR REMÍS AHORA</span>
+                    <span>
+                      {cantidadVehiculosNecesarios > 1
+                        ? `PEDIR ${cantidadVehiculosNecesarios} VEHÍCULOS AHORA`
+                        : 'PEDIR REMÍS AHORA'}
+                    </span>
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Selector de Vehículos Activos (cuando el pasajero pidió 2 o 3 vehículos) */}
+        {estadoViaje !== 'IDLE' && activeViajes.length > 1 && (
+          <div className="mb-3 bg-white dark:bg-slate-900 rounded-2xl border border-primary-200 dark:border-primary-800/60 shadow-lg p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                <span>
+                  {activeViaje?.cantidadPasajeros || activeViajes[0]?.cantidadPasajeros || 5} pasajeros •{' '}
+                  {activeViajes.length} vehículos activos
+                </span>
+              </span>
+              <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                Tocá para ver cada móvil
+              </span>
+            </div>
+            <div className={`grid gap-1.5 ${activeViajes.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+              {activeViajes.map((vItem, idx) => {
+                const isSelected = activeViaje?.id === vItem.id;
+                const numAuto = vItem.vehiculoNumero || idx + 1;
+                const totalAutos = vItem.cantidadVehiculos || activeViajes.length;
+                const estadoCorto =
+                  vItem.estado === 'PENDIENTE'
+                    ? 'Buscando'
+                    : vItem.estado === 'ACEPTADO'
+                    ? 'En camino'
+                    : vItem.estado === 'EN_CAMINO'
+                    ? 'En puerta'
+                    : 'En viaje';
+                const dotColor =
+                  vItem.estado === 'PENDIENTE'
+                    ? 'bg-amber-400 animate-pulse'
+                    : vItem.estado === 'EN_CAMINO'
+                    ? 'bg-amber-500 animate-ping'
+                    : 'bg-emerald-500';
+                return (
+                  <button
+                    key={vItem.id}
+                    type="button"
+                    onClick={() => actualizarEstadoSegunViaje(vItem)}
+                    className={`p-2 rounded-xl border text-left transition-all ${
+                      isSelected
+                        ? 'bg-primary-50 dark:bg-primary-950/50 border-primary-500 ring-1 ring-primary-400 shadow-xs'
+                        : 'bg-slate-50 dark:bg-slate-800/70 border-gray-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[11px] font-black text-gray-900 dark:text-white">
+                        Auto {numAuto}/{totalAutos}
+                      </span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+                    </div>
+                    <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 truncate mt-0.5">
+                      {estadoCorto}
+                      {vItem.chofer?.nombre ? ` • ${vItem.chofer.nombre}` : ''}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -2393,7 +2669,11 @@ export default function ClienteApp() {
               className="mt-6 text-red-500 hover:text-red-700 font-bold text-xs flex items-center justify-center mx-auto gap-1 py-2 px-4 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Cancelar solicitud de viaje</span>
+              <span>
+                {activeViajes.length > 1
+                  ? `Cancelar solo Auto ${activeViaje?.vehiculoNumero || 1}/${activeViaje?.cantidadVehiculos || activeViajes.length}`
+                  : 'Cancelar solicitud de viaje'}
+              </span>
             </button>
           </div>
         )}
@@ -2485,35 +2765,72 @@ export default function ClienteApp() {
               </div>
 
               {/* Código PIN de 4 dígitos para iniciar viaje con el chofer (estilo Uber) */}
-              {activeViaje.codigoPin && ['ACEPTADO', 'EN_CAMINO'].includes(activeViaje.estado) && (
-                <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-3.5 sm:p-4 rounded-2xl shadow-lg shadow-emerald-700/20 border border-emerald-400/40 animate-in fade-in zoom-in-95">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="p-1 rounded-lg bg-white/20 text-white">
-                          <Key className="w-3.5 h-3.5" />
-                        </span>
-                        <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-emerald-100">
-                          Tu Código de Abordaje
+              {activeViaje.codigoPin && ['ACEPTADO', 'EN_CAMINO'].includes(activeViaje.estado) && (() => {
+                const totalAutosGrupo = activeViaje.cantidadVehiculos || activeViajes.length || 1;
+                const esGrupoMulti = totalAutosGrupo > 1;
+                const numAutoActual = activeViaje.vehiculoNumero || 1;
+                const vehiculoInfoObj = activeViaje.vehiculo || activeViaje.chofer?.vehiculo;
+                const textoWhatsapp = encodeURIComponent(
+                  [
+                    `🚕 *Remises Bruno* — Auto ${numAutoActual} de ${totalAutosGrupo}`,
+                    `🔑 *PIN para iniciar viaje:* ${activeViaje.codigoPin}`,
+                    activeViaje.chofer
+                      ? `👤 *Chofer:* ${activeViaje.chofer.nombre} ${activeViaje.chofer.apellido || ''}`.trim()
+                      : null,
+                    vehiculoInfoObj
+                      ? `🚗 *Vehículo:* ${vehiculoInfoObj.marca} ${vehiculoInfoObj.modelo}${vehiculoInfoObj.color ? ` (${vehiculoInfoObj.color})` : ''} — Patente *${vehiculoInfoObj.patente}*`
+                      : null,
+                    `📍 *Origen:* ${activeViaje.origen}`,
+                    `🏁 *Destino:* ${activeViaje.destino}`,
+                  ]
+                    .filter(Boolean)
+                    .join('\n')
+                );
+
+                return (
+                  <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-3.5 sm:p-4 rounded-2xl shadow-lg shadow-emerald-700/20 border border-emerald-400/40 animate-in fade-in zoom-in-95 space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="p-1 rounded-lg bg-white/20 text-white">
+                            <Key className="w-3.5 h-3.5" />
+                          </span>
+                          <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-emerald-100">
+                            {esGrupoMulti ? `PIN Compartido (${totalAutosGrupo} autos)` : 'Tu Código de Abordaje'}
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-white font-medium mt-1 leading-snug">
+                          {esGrupoMulti
+                            ? `Este mismo PIN sirve para los ${totalAutosGrupo} vehículos del grupo. Pasáselo a tus acompañantes.`
+                            : 'Díctale estos 4 números al chofer al subirte para iniciar el viaje.'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col items-center shrink-0">
+                        <div className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-white text-emerald-900 rounded-xl font-mono text-2xl sm:text-3xl font-black tracking-widest shadow-inner border border-emerald-100 select-all">
+                          {activeViaje.codigoPin}
+                        </div>
+                        <span className="text-[9px] uppercase tracking-wider text-emerald-200 mt-1 font-semibold flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3 text-emerald-300" />
+                          Viaje Seguro
                         </span>
                       </div>
-                      <p className="text-xs sm:text-sm text-white font-medium mt-1 leading-snug">
-                        Díctale estos 4 números al chofer al subirte para iniciar el viaje.
-                      </p>
                     </div>
 
-                    <div className="flex flex-col items-center shrink-0">
-                      <div className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-white text-emerald-900 rounded-xl font-mono text-2xl sm:text-3xl font-black tracking-widest shadow-inner border border-emerald-100 select-all">
-                        {activeViaje.codigoPin}
-                      </div>
-                      <span className="text-[9px] uppercase tracking-wider text-emerald-200 mt-1 font-semibold flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3 text-emerald-300" />
-                        Viaje Seguro
-                      </span>
-                    </div>
+                    {esGrupoMulti && (
+                      <a
+                        href={`https://wa.me/?text=${textoWhatsapp}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-2 px-3 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>Compartir datos y PIN del Auto {numAutoActual}/{totalAutosGrupo} por WhatsApp</span>
+                      </a>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Mapa en vivo con el auto yendo a buscar al cliente y recorrido */}
               <ClienteTrackingMap
@@ -2653,7 +2970,11 @@ export default function ClienteApp() {
                   className="w-full text-red-500 hover:text-red-700 font-bold text-xs mt-2 py-2 flex items-center justify-center gap-1 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Cancelar viaje</span>
+                  <span>
+                    {activeViajes.length > 1
+                      ? `Cancelar solo Auto ${activeViaje?.vehiculoNumero || 1}/${activeViaje?.cantidadVehiculos || activeViajes.length}`
+                      : 'Cancelar viaje'}
+                  </span>
                 </button>
               )}
             </div>
@@ -2670,7 +2991,11 @@ export default function ClienteApp() {
             <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
               <div className="flex items-center gap-2 text-rose-600">
                 <AlertTriangle className="w-5 h-5" />
-                <h3 className="font-bold text-base text-slate-900 dark:text-white">Cancelar viaje</h3>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  {activeViajes.length > 1
+                    ? `Cancelar solo Auto ${activeViaje?.vehiculoNumero || 1}/${activeViaje?.cantidadVehiculos || activeViajes.length}`
+                    : 'Cancelar viaje'}
+                </h3>
               </div>
               <button
                 onClick={() => setIsCancelModalOpen(false)}
@@ -2679,6 +3004,12 @@ export default function ClienteApp() {
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {activeViajes.length > 1 && (
+              <div className="p-2.5 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-xl text-[11px] font-semibold text-blue-800 dark:text-blue-200">
+                ℹ️ Solo se cancelará el <strong>Auto {activeViaje?.vehiculoNumero || 1}/{activeViaje?.cantidadVehiculos || activeViajes.length}</strong>. Los demás vehículos de tu pedido seguirán activos normalmente.
+              </div>
+            )}
 
             {/* Banner de regla de 10 cuadras */}
             {activeViaje && ['ACEPTADO', 'EN_CAMINO'].includes(activeViaje.estado) && (

@@ -8,6 +8,7 @@ import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { searchNominatimCached } from './coordinatorDashboardController';
 import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBotService';
 import { calcularAjusteOrigenRemoto } from '../lib/pricingUtils';
+import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
 interface RouteCacheEntry {
@@ -918,7 +919,8 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       pagaCon,
       preferenciaSexoChofer,
       conMascota,
-      conSillaRuedas
+      conSillaRuedas,
+      cantidadPasajeros: rawCantidadPasajeros
     } = req.body;
 
     if (!origen || !destino) {
@@ -927,6 +929,15 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
         error: 'Origen y destino son requeridos'
       });
     }
+
+    const calculoPasajeros = calcularVehiculosPorPasajeros(rawCantidadPasajeros);
+    if (calculoPasajeros.error) {
+      return res.status(400).json({
+        success: false,
+        error: calculoPasajeros.error
+      });
+    }
+    const { cantidadPasajeros, cantidadVehiculos } = calculoPasajeros;
 
     // Obtener remisería del cliente o remisería activa
     const clienteActual = await prisma.cliente.findUnique({
@@ -1007,12 +1018,6 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       ? `${cliente.nombre} ${cliente.apellido}`
       : undefined;
 
-    // Generar trackingToken único para compartir el viaje
-    const trackingToken = crypto.randomBytes(16).toString('hex');
-
-    // Generar código PIN de 4 dígitos para validación de abordaje (estilo Uber)
-    const codigoPin = Math.floor(1000 + Math.random() * 9000).toString();
-
     let pagaConNum: number | null = null;
     let vueltoEstimadoNum: number | null = null;
     if (metodoPagoFinal === 'EFECTIVO' && pagaCon) {
@@ -1029,104 +1034,133 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
 
     const conMascotaFinal = Boolean(conMascota);
     const conSillaRuedasFinal = Boolean(conSillaRuedas);
+    const grupoViajeId = cantidadVehiculos > 1 ? crypto.randomBytes(10).toString('hex') : null;
+    const fechaViaje = fechaHora ? new Date(fechaHora) : new Date();
+    const paradasSerializadas = paradas ? (typeof paradas === 'string' ? paradas : JSON.stringify(paradas)) : null;
 
-    // Crear viaje
-    const viaje = await prisma.viaje.create({
-      data: {
-        origen,
-        destino,
-        precio,
-        fecha: fechaHora ? new Date(fechaHora) : new Date(),
-        estado: 'PENDIENTE',
-        preferenciaSexoChofer: preferenciaSexoFinal,
-        conMascota: conMascotaFinal,
-        conSillaRuedas: conSillaRuedasFinal,
-        observaciones,
-        clienteId,
-        clienteNombre,
-        clienteTelefono: cliente?.telefono,
-        clienteEmail: cliente?.email,
-        remiseriaId: remiseria.id,
-        origenDetallado: latitudOrigen && longitudOrigen ? `${latitudOrigen},${longitudOrigen}` : undefined,
-        destinoDetallado: latitudDestino && longitudDestino ? `${latitudDestino},${longitudDestino}` : undefined,
-        trackingToken,
-        codigoPin,
-        metodoPago: metodoPagoFinal,
-        pagaCon: pagaConNum,
-        vueltoEstimado: vueltoEstimadoNum,
-        paradas: paradas ? (typeof paradas === 'string' ? paradas : JSON.stringify(paradas)) : null
+    const viajeInclude = {
+      cliente: {
+        select: {
+          id: true,
+          nombre: true,
+          apellido: true,
+          telefono: true,
+          fotoUrl: true,
+        }
       },
-      include: {
-        cliente: {
-          select: {
-            id: true,
-            nombre: true,
-            apellido: true,
-            telefono: true,
-            fotoUrl: true,
-          }
-        },
-        chofer: {
-          select: {
-            id: true,
-            nombre: true,
-            apellido: true,
-            sexo: true,
-            telefono: true,
-            fotoUrl: true,
-            vehiculo: {
-              select: {
-                id: true,
-                patente: true,
-                marca: true,
-                modelo: true,
-                color: true,
-                latitud: true,
-                longitud: true,
-                ultimaUbicacion: true
-              }
+      chofer: {
+        select: {
+          id: true,
+          nombre: true,
+          apellido: true,
+          sexo: true,
+          telefono: true,
+          fotoUrl: true,
+          vehiculo: {
+            select: {
+              id: true,
+              patente: true,
+              marca: true,
+              modelo: true,
+              color: true,
+              latitud: true,
+              longitud: true,
+              ultimaUbicacion: true
             }
           }
-        },
-        vehiculo: {
-          select: {
-            id: true,
-            patente: true,
-            marca: true,
-            modelo: true,
-            color: true,
-            latitud: true,
-            longitud: true,
-            ultimaUbicacion: true
-          }
-        },
-        remiseria: {
-          select: {
-            id: true,
-            nombreFantasia: true,
-            telefono: true,
-            direccion: true,
-            latitud: true,
-            longitud: true,
-            valorHoraEspera: true
-          }
+        }
+      },
+      vehiculo: {
+        select: {
+          id: true,
+          patente: true,
+          marca: true,
+          modelo: true,
+          color: true,
+          latitud: true,
+          longitud: true,
+          ultimaUbicacion: true
+        }
+      },
+      remiseria: {
+        select: {
+          id: true,
+          nombreFantasia: true,
+          telefono: true,
+          direccion: true,
+          latitud: true,
+          longitud: true,
+          valorHoraEspera: true
         }
       }
-    });
+    };
 
-    // Notificar en tiempo real por sockets al coordinador y a los choferes
+    // Generar un único PIN de 4 dígitos compartido para todo el grupo de vehículos
+    // (así los acompañantes del 2° o 3° auto usan el mismo código sin confusión)
+    const codigoPinGrupo = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // Crear 1, 2 o 3 viajes según la cantidad de pasajeros (máx. 4 por vehículo)
+    const viajesCreados = await prisma.$transaction(
+      Array.from({ length: cantidadVehiculos }, (_, idx) => {
+        const vehiculoNumero = idx + 1;
+        const trackingToken = crypto.randomBytes(16).toString('hex');
+        const codigoPin = codigoPinGrupo;
+        return prisma.viaje.create({
+          data: {
+            origen,
+            destino,
+            precio,
+            fecha: fechaViaje,
+            estado: 'PENDIENTE',
+            preferenciaSexoChofer: preferenciaSexoFinal,
+            conMascota: conMascotaFinal,
+            conSillaRuedas: conSillaRuedasFinal,
+            cantidadPasajeros,
+            cantidadVehiculos,
+            vehiculoNumero,
+            grupoViajeId,
+            observaciones,
+            clienteId,
+            clienteNombre,
+            clienteTelefono: cliente?.telefono,
+            clienteEmail: cliente?.email,
+            remiseriaId: remiseria.id,
+            origenDetallado: latitudOrigen && longitudOrigen ? `${latitudOrigen},${longitudOrigen}` : undefined,
+            destinoDetallado: latitudDestino && longitudDestino ? `${latitudDestino},${longitudDestino}` : undefined,
+            trackingToken,
+            codigoPin,
+            metodoPago: metodoPagoFinal,
+            pagaCon: pagaConNum,
+            vueltoEstimado: vueltoEstimadoNum,
+            paradas: paradasSerializadas
+          },
+          include: viajeInclude
+        });
+      })
+    );
+
+    const viaje = viajesCreados[0];
+
+    // Notificar en tiempo real por sockets al coordinador y a los choferes por cada vehículo requerido
     try {
       const { getIO } = await import('../lib/socket');
       const io = getIO();
-      io.to(remiseria.id).emit('nuevo_viaje_recibido', viaje);
+      for (const vCreado of viajesCreados) {
+        io.to(remiseria.id).emit('nuevo_viaje_recibido', vCreado);
+      }
     } catch (socketErr) {
       console.warn('Socket aviso nuevo viaje:', socketErr);
     }
 
-    // Notificación Push nativa a todos los choferes activos que cumplan la preferencia de sexo
+    // Notificación Push nativa a todos los choferes activos que cumplan la preferencia
     try {
       const { pushNotificationService } = await import('../services/pushNotificationService');
       const etiquetasEspeciales = [
+        cantidadVehiculos > 1
+          ? `👥 ${cantidadPasajeros} pas. (${cantidadVehiculos} vehículos)`
+          : cantidadPasajeros > 1
+          ? `👥 ${cantidadPasajeros} pasajeros`
+          : null,
         conMascotaFinal ? '🐾 Mascota' : null,
         conSillaRuedasFinal ? '♿ Silla de ruedas' : null,
       ].filter(Boolean).join(' • ');
@@ -1134,11 +1168,13 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
         ? `${etiquetasEspeciales} | ${origen} ➔ ${destino} ($${Number(precio).toLocaleString('es-AR')})`
         : `${origen} ➔ ${destino} ($${Number(precio).toLocaleString('es-AR')})`;
       pushNotificationService.enviarAChoferesDeRemiseria(remiseria.id, {
-        title: '🚕 ¡Nuevo viaje disponible!',
+        title: cantidadVehiculos > 1
+          ? `🚕 ¡Nuevo pedido grupal (${cantidadVehiculos} vehículos)!`
+          : '🚕 ¡Nuevo viaje disponible!',
         body: bodyPush,
         url: '/chofer/app',
-        tag: `nuevo-viaje-${viaje.id}`,
-        data: { viajeId: viaje.id },
+        tag: `nuevo-viaje-${grupoViajeId || viaje.id}`,
+        data: { viajeId: viaje.id, grupoViajeId, cantidadVehiculos },
       }, undefined, {
         preferenciaSexoChofer: preferenciaSexoFinal,
         conMascota: conMascotaFinal,
@@ -1160,14 +1196,32 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
       whatsappBotService.enviarSaludoCumpleaniosPasajero(clienteActual).catch(() => {});
     }
 
+    const viajesConDisp = disponibilidadSexoChofer
+      ? viajesCreados.map((v) => ({ ...v, disponibilidadSexoChofer }))
+      : viajesCreados;
+
     res.json({
       success: true,
-      data: disponibilidadSexoChofer ? { ...viaje, disponibilidadSexoChofer } : viaje,
+      data: viajesConDisp[0],
+      viajes: viajesConDisp,
+      cantidadPasajeros,
+      cantidadVehiculos,
+      grupoViajeId,
       disponibilidadSexoChofer,
       saludoCumpleanios,
-      message: 'Viaje solicitado exitosamente'
+      message:
+        cantidadVehiculos > 1
+          ? `Se solicitaron ${cantidadVehiculos} vehículos para ${cantidadPasajeros} pasajeros`
+          : 'Viaje solicitado exitosamente'
     });
   } catch (error) {
+    if (error instanceof DireccionNoEncontradaError) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+        message: error.message
+      });
+    }
     console.error('Error al solicitar viaje:', error);
     res.status(500).json({
       success: false,
@@ -1249,10 +1303,21 @@ export const calcularPrecio = async (req: Request, res: Response) => {
         tarifaPorMinuto: 0,
         esTarifaDiferenciada: Boolean(customTarifas),
         esOrigenRemoto: cotizacion.esOrigenRemoto,
-        kmAproximacion: cotizacion.kmAproximacion
+        kmAproximacion: cotizacion.kmAproximacion,
+        latOrigen: cotizacion.latOrigen,
+        lonOrigen: cotizacion.lonOrigen,
+        latDestino: cotizacion.latDestino,
+        lonDestino: cotizacion.lonDestino
       }
     });
   } catch (error) {
+    if (error instanceof DireccionNoEncontradaError) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+        message: error.message
+      });
+    }
     console.error('Error al calcular precio:', error);
     res.status(500).json({
       success: false,
@@ -1289,7 +1354,8 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
       longitudDestino,
       preferenciaSexoChofer,
       conMascota,
-      conSillaRuedas
+      conSillaRuedas,
+      cantidadPasajeros: rawCantidadPasajeros
     } = req.body;
 
     if (!origen || !destino || !fechaInicio || !horaInicio || !tipoReserva) {
@@ -1298,6 +1364,15 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
         error: 'Campos requeridos faltantes'
       });
     }
+
+    const calculoPasajeros = calcularVehiculosPorPasajeros(rawCantidadPasajeros);
+    if (calculoPasajeros.error) {
+      return res.status(400).json({
+        success: false,
+        error: calculoPasajeros.error
+      });
+    }
+    const { cantidadPasajeros, cantidadVehiculos } = calculoPasajeros;
 
     // Obtener remisería
     const remiseria =
@@ -1363,6 +1438,8 @@ export const crearReserva = async (req: AuthenticatedRequest, res: Response) => 
         preferenciaSexoChofer: preferenciaSexoReserva,
         conMascota: Boolean(conMascota),
         conSillaRuedas: Boolean(conSillaRuedas),
+        cantidadPasajeros,
+        cantidadVehiculos,
         observaciones,
         clienteId,
         remiseriaId: remiseria.id
@@ -2143,6 +2220,13 @@ export const getUbicacionActual = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
+export class DireccionNoEncontradaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DireccionNoEncontradaError';
+  }
+}
+
 // Función para calcular distancia en km usando Haversine (10 cuadras = 1.0 km)
 export function calcularDistanciaHaversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371; // Radio de la Tierra en km
@@ -2175,6 +2259,10 @@ export async function calcularPrecioViaje(
   tiempoEstimado: number;
   esOrigenRemoto: boolean;
   kmAproximacion: number;
+  latOrigen?: number;
+  lonOrigen?: number;
+  latDestino?: number;
+  lonDestino?: number;
 }> {
   const remiseria = await prisma.remiseria.findFirst({ where: { estado: true } }) || await prisma.remiseria.findFirst();
   const bajadaBandera = (customTarifas?.bajadaBandera && customTarifas.bajadaBandera > 0)
@@ -2188,23 +2276,60 @@ export async function calcularPrecioViaje(
   let tiempoEstimado = 10;
   let calculatedViaRoute = false;
 
-  // Armar lista de coordenadas ordenadas: Origen -> Parada 1 -> Parada 2 -> ... -> Destino
-  const puntosValidos: Array<{ lat: number; lon: number }> = [];
-  if (latitudOrigen && longitudOrigen) {
-    puntosValidos.push({ lat: latitudOrigen, lon: longitudOrigen });
+  // Resolver coordenadas reales si el cliente escribió la dirección sin tocar una sugerencia.
+  // NUNCA inventar distancias/precios por hash si una dirección no existe o no se pudo ubicar.
+  let latOri = typeof latitudOrigen === 'number' && !isNaN(latitudOrigen) ? latitudOrigen : undefined;
+  let lonOri = typeof longitudOrigen === 'number' && !isNaN(longitudOrigen) ? longitudOrigen : undefined;
+  let latDes = typeof latitudDestino === 'number' && !isNaN(latitudDestino) ? latitudDestino : undefined;
+  let lonDes = typeof longitudDestino === 'number' && !isNaN(longitudDestino) ? longitudDestino : undefined;
+
+  if (latOri === undefined || lonOri === undefined) {
+    const resOri = await searchNominatimCached(origen, 1);
+    if (resOri && resOri[0] && resOri[0].lat && resOri[0].lon) {
+      latOri = parseFloat(resOri[0].lat);
+      lonOri = parseFloat(resOri[0].lon);
+    }
   }
+
+  if (latDes === undefined || lonDes === undefined) {
+    const resDes = await searchNominatimCached(destino, 1);
+    if (resDes && resDes[0] && resDes[0].lat && resDes[0].lon) {
+      latDes = parseFloat(resDes[0].lat);
+      lonDes = parseFloat(resDes[0].lon);
+    }
+  }
+
+  if (latOri === undefined || lonOri === undefined || isNaN(latOri) || isNaN(lonOri)) {
+    throw new DireccionNoEncontradaError(
+      'No pudimos ubicar la dirección de origen en el mapa. Seleccioná una opción de la lista o usá tu ubicación GPS.'
+    );
+  }
+
+  if (latDes === undefined || lonDes === undefined || isNaN(latDes) || isNaN(lonDes)) {
+    throw new DireccionNoEncontradaError(
+      'No pudimos ubicar la dirección de destino en el mapa. Verificá que esté bien escrita o elegí una sugerencia de la lista.'
+    );
+  }
+
+  // Armar lista de coordenadas ordenadas: Origen -> Parada 1 -> Parada 2 -> ... -> Destino
+  const puntosValidos: Array<{ lat: number; lon: number }> = [
+    { lat: latOri, lon: lonOri },
+  ];
 
   if (Array.isArray(paradas)) {
     for (const p of paradas) {
-      if (p.lat && p.lon) {
+      if (typeof p.lat === 'number' && typeof p.lon === 'number' && !isNaN(p.lat) && !isNaN(p.lon)) {
         puntosValidos.push({ lat: p.lat, lon: p.lon });
+      } else if (p.direccion && p.direccion.trim().length >= 3) {
+        const resParada = await searchNominatimCached(p.direccion, 1);
+        if (resParada && resParada[0] && resParada[0].lat && resParada[0].lon) {
+          puntosValidos.push({ lat: parseFloat(resParada[0].lat), lon: parseFloat(resParada[0].lon) });
+        }
       }
     }
   }
 
-  if (latitudDestino && longitudDestino) {
-    puntosValidos.push({ lat: latitudDestino, lon: longitudDestino });
-  }
+  puntosValidos.push({ lat: latDes, lon: lonDes });
 
   if (puntosValidos.length >= 2) {
     const coordsQuery = puntosValidos.map((pt) => `${pt.lon.toFixed(3)},${pt.lat.toFixed(3)}`).join(';');
@@ -2267,18 +2392,9 @@ export async function calcularPrecioViaje(
   }
 
   if (!calculatedViaRoute) {
-    const str = (origen + destino).toLowerCase().replace(/\s/g, '');
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const absHash = Math.abs(hash);
-    const baseDistance = 1.5;
-    const maxDistanceRange = 11.0;
-    const extraPorParada = (Array.isArray(paradas) ? paradas.length : 0) * 2.0;
-    const estimatedDistance = baseDistance + ((absHash % 100) / 100) * maxDistanceRange + extraPorParada;
-    distanciaKm = Math.round(estimatedDistance * 10) / 10;
-    tiempoEstimado = Math.max(8, Math.round(distanciaKm * 2.8));
+    throw new DireccionNoEncontradaError(
+      'No pudimos calcular la ruta real entre origen y destino. Por favor verificá las direcciones ingresadas.'
+    );
   }
 
   // Si hubo paradas que no tenían coordenadas en el ruteo OSRM, sumar su distancia estimada
@@ -2287,7 +2403,7 @@ export async function calcularPrecioViaje(
     : [];
   const cantidadParadas = paradasValidas.length;
   if (calculatedViaRoute && cantidadParadas > 0) {
-    const paradasConCoords = puntosValidos.length - (latitudOrigen && longitudOrigen ? 1 : 0) - (latitudDestino && longitudDestino ? 1 : 0);
+    const paradasConCoords = puntosValidos.length - 2;
     const paradasSinCoords = Math.max(0, cantidadParadas - Math.max(0, paradasConCoords));
     if (paradasSinCoords > 0) {
       distanciaKm += paradasSinCoords * 2.0;
@@ -2299,10 +2415,10 @@ export async function calcularPrecioViaje(
   // Ajuste por origen fuera del radio urbano de la base (ej. pasajero en Alberti pidiendo móvil desde Chivilcoy)
   const ajusteRemoto = await calcularAjusteOrigenRemoto({
     distanciaViajeKm: distanciaKm,
-    latOrigen: latitudOrigen,
-    lonOrigen: longitudOrigen,
-    latDestino: latitudDestino,
-    lonDestino: longitudDestino,
+    latOrigen: latOri,
+    lonOrigen: lonOri,
+    latDestino: latDes,
+    lonDestino: lonDes,
     baseLat: remiseria?.latitud,
     baseLon: remiseria?.longitud,
   });
@@ -2330,6 +2446,10 @@ export async function calcularPrecioViaje(
     tiempoEstimado,
     esOrigenRemoto: ajusteRemoto.esOrigenRemoto,
     kmAproximacion: ajusteRemoto.kmAproximacion,
+    latOrigen: latOri,
+    lonOrigen: lonOri,
+    latDestino: latDes,
+    lonDestino: lonDes,
   };
 } 
 // Buscar cliente por DNI

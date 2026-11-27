@@ -373,6 +373,10 @@ model Viaje {
   preferenciaSexoChofer String @default("INDISTINTO") // INDISTINTO | FEMENINO | MASCULINO
   conMascota     Boolean @default(false)
   conSillaRuedas Boolean @default(false)
+  cantidadPasajeros Int @default(1)
+  cantidadVehiculos Int @default(1)
+  vehiculoNumero    Int @default(1)
+  grupoViajeId      String?
   origenDetallado String?
   destinoDetallado String?
   // Kilometraje del viaje
@@ -485,6 +489,7 @@ model Viaje {
   @@index([remiseriaId, estado])
   @@index([choferId, estado])
   @@index([clienteId])
+  @@index([grupoViajeId])
   @@index([createdAt])
   @@map("viajes")
 }
@@ -507,6 +512,8 @@ model Reserva {
   preferenciaSexoChofer String @default("INDISTINTO") // INDISTINTO | FEMENINO | MASCULINO
   conMascota     Boolean @default(false)
   conSillaRuedas Boolean @default(false)
+  cantidadPasajeros Int @default(1)
+  cantidadVehiculos Int @default(1)
   observaciones String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

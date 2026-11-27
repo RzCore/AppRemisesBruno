@@ -1,5 +1,7 @@
+import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { getIO } from '../lib/socket';
+import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 
 // Anticipación por defecto en minutos para disparar el viaje antes de la hora reservada
 const ANTICIPACION_MINUTOS = 15;
@@ -211,38 +213,54 @@ export async function procesarReservasProgramadas() {
         continue;
       }
 
-      // 4. Crear el viaje en estado PENDIENTE para despacho inmediato
+      // 4. Crear 1, 2 o 3 viajes en estado PENDIENTE según cantidad de pasajeros (máx. 4 por vehículo)
       const notaReserva = `📅 Reserva automática (${reserva.horaInicio} hs)`;
       const observacionesFinal = reserva.observaciones
         ? `${notaReserva} • ${reserva.observaciones}`
         : notaReserva;
 
-      const nuevoViaje = await prisma.viaje.create({
-        data: {
-          origen: reserva.origen,
-          destino: reserva.destino,
-          precio: 0,
-          fecha: new Date(ocurrenciaMs),
-          estado: 'PENDIENTE',
-          prioridad: 'ALTA',
-          clienteNombre: reserva.clienteNombre,
-          clienteTelefono: reserva.clienteTelefono,
-          clienteEmail: reserva.clienteEmail || null,
-          clienteId: reserva.clienteId || null,
-          choferId: reserva.choferId || null,
-          vehiculoId: reserva.vehiculoId || null,
-          remiseriaId: reserva.remiseriaId,
-          preferenciaSexoChofer: reserva.preferenciaSexoChofer || 'INDISTINTO',
-          conMascota: Boolean(reserva.conMascota),
-          conSillaRuedas: Boolean(reserva.conSillaRuedas),
-          observaciones: observacionesFinal,
-        },
-        include: {
-          cliente: true,
-          chofer: true,
-          vehiculo: true,
-        },
-      });
+      const { cantidadPasajeros, cantidadVehiculos } = calcularVehiculosPorPasajeros(
+        reserva.cantidadPasajeros || 1
+      );
+      const grupoViajeId = cantidadVehiculos > 1 ? crypto.randomBytes(10).toString('hex') : null;
+
+      const viajesCreados = await prisma.$transaction(
+        Array.from({ length: cantidadVehiculos }, (_, idx) => {
+          const vehiculoNumero = idx + 1;
+          return prisma.viaje.create({
+            data: {
+              origen: reserva.origen,
+              destino: reserva.destino,
+              precio: 0,
+              fecha: new Date(ocurrenciaMs),
+              estado: 'PENDIENTE',
+              prioridad: 'ALTA',
+              clienteNombre: reserva.clienteNombre,
+              clienteTelefono: reserva.clienteTelefono,
+              clienteEmail: reserva.clienteEmail || null,
+              clienteId: reserva.clienteId || null,
+              choferId: vehiculoNumero === 1 ? (reserva.choferId || null) : null,
+              vehiculoId: vehiculoNumero === 1 ? (reserva.vehiculoId || null) : null,
+              remiseriaId: reserva.remiseriaId,
+              preferenciaSexoChofer: reserva.preferenciaSexoChofer || 'INDISTINTO',
+              conMascota: Boolean(reserva.conMascota),
+              conSillaRuedas: Boolean(reserva.conSillaRuedas),
+              cantidadPasajeros,
+              cantidadVehiculos,
+              vehiculoNumero,
+              grupoViajeId,
+              observaciones: observacionesFinal,
+            },
+            include: {
+              cliente: true,
+              chofer: true,
+              vehiculo: true,
+            },
+          });
+        })
+      );
+
+      const nuevoViaje = viajesCreados[0];
 
       reservasDisparadas.add(claveDisparo);
 
@@ -254,12 +272,14 @@ export async function procesarReservasProgramadas() {
       }
 
       console.log(
-        `📅 [Reserva Automática] Viaje #${nuevoViaje.id} generado para ${reserva.clienteNombre} (${candidato.ymd} ${reserva.horaInicio} hs)`
+        `📅 [Reserva Automática] ${cantidadVehiculos} viaje(s) generado(s) (#${nuevoViaje.id}) para ${reserva.clienteNombre} (${cantidadPasajeros} pas., ${candidato.ymd} ${reserva.horaInicio} hs)`
       );
 
       // 5. Notificar en tiempo real a la central y a los choferes conectados
       if (io) {
-        io.to(reserva.remiseriaId).emit('nuevo_viaje_recibido', nuevoViaje);
+        for (const vCreado of viajesCreados) {
+          io.to(reserva.remiseriaId).emit('nuevo_viaje_recibido', vCreado);
+        }
 
         // 6. Si no tiene chofer preasignado, verificar si hay móviles libres ahora mismo.
         // Si no hay ningún vehículo disponible, emitir alerta prioritaria al coordinador.

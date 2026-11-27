@@ -491,6 +491,10 @@ export default function CoordinadorDashboard() {
           preferenciaSexoChofer: v.preferenciaSexoChofer || 'INDISTINTO',
           conMascota: Boolean(v.conMascota),
           conSillaRuedas: Boolean(v.conSillaRuedas),
+          cantidadPasajeros: v.cantidadPasajeros ?? 1,
+          cantidadVehiculos: v.cantidadVehiculos ?? 1,
+          vehiculoNumero: v.vehiculoNumero ?? 1,
+          grupoViajeId: v.grupoViajeId ?? null,
           fecha: formattedDate,
           hora: formattedTime,
           tipo: 'Única',
@@ -5518,8 +5522,16 @@ export default function CoordinadorDashboard() {
                       </span>
                     </div>
                   )}
-                  {(selectedViajeObj.conMascota || selectedViajeObj.conSillaRuedas) && (
+                  {((selectedViajeObj.cantidadPasajeros && selectedViajeObj.cantidadPasajeros > 1) || selectedViajeObj.conMascota || selectedViajeObj.conSillaRuedas) && (
                     <div className="pt-1.5 mt-1 border-t border-red-200 flex flex-wrap gap-1.5">
+                      {selectedViajeObj.cantidadPasajeros && selectedViajeObj.cantidadPasajeros > 1 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
+                          👥 {selectedViajeObj.cantidadPasajeros} pasajeros
+                          {(selectedViajeObj.cantidadVehiculos || 1) > 1
+                            ? ` • Auto ${selectedViajeObj.vehiculoNumero || 1} de ${selectedViajeObj.cantidadVehiculos}`
+                            : ''}
+                        </span>
+                      )}
                       {selectedViajeObj.conMascota && (
                         <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                           🐾 Viaja con mascota

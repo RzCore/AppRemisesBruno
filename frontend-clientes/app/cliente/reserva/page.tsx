@@ -32,6 +32,7 @@ interface ReservaForm {
   preferenciaSexoChofer: 'INDISTINTO' | 'FEMENINO' | 'MASCULINO';
   conMascota: boolean;
   conSillaRuedas: boolean;
+  cantidadPasajeros: number;
 }
 
 export default function NuevaReserva() {
@@ -58,7 +59,8 @@ export default function NuevaReserva() {
     observaciones: '',
     preferenciaSexoChofer: (user?.cliente?.preferenciaSexoChofer as 'INDISTINTO' | 'FEMENINO' | 'MASCULINO') || 'INDISTINTO',
     conMascota: false,
-    conSillaRuedas: false
+    conSillaRuedas: false,
+    cantidadPasajeros: 1
   });
 
   useEffect(() => {
@@ -340,7 +342,8 @@ export default function NuevaReserva() {
         observaciones: formData.observaciones || undefined,
         preferenciaSexoChofer: formData.preferenciaSexoChofer,
         conMascota: formData.conMascota,
-        conSillaRuedas: formData.conSillaRuedas
+        conSillaRuedas: formData.conSillaRuedas,
+        cantidadPasajeros: formData.cantidadPasajeros
       };
 
       const res = await clienteService.crearReserva(datosReserva);
@@ -628,6 +631,62 @@ export default function NuevaReserva() {
                 </div>
               </div>
             )}
+
+            {/* Cantidad de Pasajeros */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
+                  ¿Cuántas personas viajan?
+                </label>
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-primary-950/60 text-blue-800 dark:text-primary-200">
+                  {Math.ceil(formData.cantidadPasajeros / 4)}{' '}
+                  {Math.ceil(formData.cantidadPasajeros / 4) === 1 ? 'vehículo' : 'vehículos'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 p-3 rounded-xl border-2 border-gray-200 dark:border-slate-700 bg-gray-50/70 dark:bg-slate-800/60">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      cantidadPasajeros: Math.max(1, prev.cantidadPasajeros - 1),
+                    }))
+                  }
+                  disabled={formData.cantidadPasajeros <= 1}
+                  className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 text-lg font-black text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                >
+                  −
+                </button>
+                <div className="text-center">
+                  <div className="text-xl font-black text-gray-900 dark:text-white leading-none">
+                    {formData.cantidadPasajeros}{' '}
+                    <span className="text-xs font-semibold text-gray-500 dark:text-slate-400">
+                      {formData.cantidadPasajeros === 1 ? 'persona' : 'personas'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-1">
+                    {formData.cantidadPasajeros <= 4
+                      ? 'Hasta 4 personas viajan en 1 vehículo'
+                      : formData.cantidadPasajeros <= 8
+                      ? 'De 5 a 8 personas: se enviarán 2 vehículos'
+                      : 'De 9 a 12 personas: se enviarán 3 vehículos (máx.)'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      cantidadPasajeros: Math.min(12, prev.cantidadPasajeros + 1),
+                    }))
+                  }
+                  disabled={formData.cantidadPasajeros >= 12}
+                  className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 text-lg font-black text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                >
+                  +
+                </button>
+              </div>
+            </div>
 
             {/* Preferencia de Chofer */}
             <div>

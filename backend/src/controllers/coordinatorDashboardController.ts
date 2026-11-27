@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { batchDispatchService } from '../services/batchDispatchService';
 import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
+import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -149,9 +150,10 @@ function formatSuggestionDisplayName(
 
 async function fetchNominatimList(qParam: string, limit: number, viewboxParam: string): Promise<any[]> {
   try {
+    const viewboxSuffix = viewboxParam ? `&${viewboxParam}&bounded=0` : '';
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
       qParam
-    )}&countrycodes=ar&limit=${limit}&addressdetails=1&${viewboxParam}&bounded=0`;
+    )}&countrycodes=ar&limit=${limit}&addressdetails=1${viewboxSuffix}`;
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'RemisesBrunoApp/1.1 (contacto@brunoremises.com.ar)',
@@ -231,17 +233,31 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
 
       const hasCityConstraint =
         /,/g.test(queryString) ||
-        /chivilcoy|bragado|alberti|suipacha|moquehu[aá]|gorostiaga|chacabuco|25\s+de\s+mayo|buenos\s+aires|caba|federal|ezeiza|retiro|lujan|mercedes/i.test(
+        /chivilcoy|bragado|alberti|suipacha|moquehu[aá]|gorostiaga|chacabuco|25\s+de\s+mayo|9\s+de\s+julio|jun[ií]n|buenos\s+aires|caba|capital\s+federal|federal|ezeiza|retiro|luj[aá]n|mercedes|la\s+plata|saladillo|lobos|navarro|roque\s+p[eé]rez|san\s+andres\s+de\s+giles|aeroparque/i.test(
           queryString
         );
-      const viewboxParam = 'viewbox=-60.55,-34.55,-59.35,-35.20';
+      const mencionaChivilcoy = /chivilcoy/i.test(queryString);
+      const viewboxParam = !hasCityConstraint || mencionaChivilcoy ? 'viewbox=-60.55,-34.55,-59.35,-35.20' : '';
 
       // Extraer altura / número de calle si el usuario lo ingresó (ej: "Sarmiento 340")
       const houseNumMatch = queryString.match(/^(.*?)\s+(\d{1,5})(?:\s*,.*)?$/);
       const streetOnly = houseNumMatch ? houseNumMatch[1].trim() : '';
       const typedHouseNumber = houseNumMatch ? houseNumMatch[2] : undefined;
 
-      const primaryQuery = hasCityConstraint ? queryString : `${queryString}, Chivilcoy`;
+      // Si el usuario escribió solo el nombre de una localidad bonaerense (ej. "Bragado"),
+      // agregar ", Buenos Aires, Argentina" para evitar confusiones con calles homónimas en Chivilcoy.
+      const esSoloLocalidadRegional =
+        !queryString.includes(',') &&
+        !typedHouseNumber &&
+        /^(bragado|alberti|suipacha|moquehu[aá]|gorostiaga|chacabuco|25\s+de\s+mayo|9\s+de\s+julio|jun[ií]n|luj[aá]n|mercedes|saladillo|lobos|navarro|roque\s+p[eé]rez|la\s+plata|ezeiza)$/i.test(
+          queryString
+        );
+
+      const primaryQuery = esSoloLocalidadRegional
+        ? `${queryString}, Buenos Aires, Argentina`
+        : hasCityConstraint
+        ? queryString
+        : `${queryString}, Chivilcoy`;
       let data = await fetchNominatimList(primaryQuery, limit, viewboxParam);
 
       // Si el usuario incluyó coma en un lugar/institución (ej: "universidad nacional de lujan, chivilcoy"),
@@ -1005,7 +1021,8 @@ export const coordinatorDashboardController = {
         metodoPago,
         preferenciaSexoChofer,
         conMascota,
-        conSillaRuedas
+        conSillaRuedas,
+        cantidadPasajeros: rawCantidadPasajeros
       } = req.body;
 
       if (!coordinadorId) {
@@ -1053,6 +1070,8 @@ export const coordinatorDashboardController = {
         }
       }
 
+      const { cantidadPasajeros, cantidadVehiculos } = calcularVehiculosPorPasajeros(rawCantidadPasajeros);
+
       const viaje = await prisma.viaje.create({
         data: {
           origen,
@@ -1067,6 +1086,8 @@ export const coordinatorDashboardController = {
           preferenciaSexoChofer: preferenciaSexoFinal,
           conMascota: Boolean(conMascota),
           conSillaRuedas: Boolean(conSillaRuedas),
+          cantidadPasajeros,
+          cantidadVehiculos,
           metodoPago: metodoPagoFinal,
           origenDetallado,
           destinoDetallado,
@@ -1567,7 +1588,8 @@ export const coordinatorDashboardController = {
         observaciones,
         preferenciaSexoChofer,
         conMascota,
-        conSillaRuedas
+        conSillaRuedas,
+        cantidadPasajeros: rawCantidadPasajeros
       } = req.body;
 
       if (!coordinadorId) {
@@ -1589,6 +1611,8 @@ export const coordinatorDashboardController = {
         });
       }
 
+      const { cantidadPasajeros: cantPasReserva, cantidadVehiculos: cantVehReserva } = calcularVehiculosPorPasajeros(req.body.cantidadPasajeros);
+
       const reserva = await prisma.reserva.create({
         data: {
           clienteNombre,
@@ -1608,6 +1632,8 @@ export const coordinatorDashboardController = {
               : 'INDISTINTO',
           conMascota: Boolean(conMascota),
           conSillaRuedas: Boolean(conSillaRuedas),
+          cantidadPasajeros: cantPasReserva,
+          cantidadVehiculos: cantVehReserva,
           observaciones,
           remiseriaId: coordinador.remiseriaId,
           estado: 'ACTIVA'
@@ -1660,7 +1686,8 @@ export const coordinatorDashboardController = {
         observaciones,
         preferenciaSexoChofer,
         conMascota,
-        conSillaRuedas
+        conSillaRuedas,
+        cantidadPasajeros: rawCantidadPasajeros
       } = req.body;
 
       if (!coordinadorId) {
@@ -1692,6 +1719,11 @@ export const coordinatorDashboardController = {
         return res.status(404).json({ success: false, message: 'Reserva no encontrada' });
       }
 
+      const pasajerosUpdate =
+        rawCantidadPasajeros !== undefined
+          ? calcularVehiculosPorPasajeros(rawCantidadPasajeros)
+          : null;
+
       const reservaActualizada = await prisma.reserva.update({
         where: { id },
         data: {
@@ -1706,6 +1738,12 @@ export const coordinatorDashboardController = {
           horaFin: horaFin || null,
           diasSemana: diasSemana ? JSON.stringify(diasSemana) : null,
           ...(tipo !== undefined ? { tipo } : {}),
+          ...(pasajerosUpdate && !pasajerosUpdate.error
+            ? {
+                cantidadPasajeros: pasajerosUpdate.cantidadPasajeros,
+                cantidadVehiculos: pasajerosUpdate.cantidadVehiculos,
+              }
+            : {}),
           observaciones: observaciones ?? null,
         }
       });
@@ -2460,7 +2498,8 @@ export const coordinatorDashboardController = {
         numeroSiniestro,
         preferenciaSexoChofer,
         conMascota,
-        conSillaRuedas
+        conSillaRuedas,
+        cantidadPasajeros: rawCantidadPasajeros
       } = req.body;
 
       if (!telefono || !origen) {
@@ -2570,6 +2609,8 @@ export const coordinatorDashboardController = {
         }
       }
 
+      const { cantidadPasajeros: cantPasExpress, cantidadVehiculos: cantVehExpress } = calcularVehiculosPorPasajeros(req.body.cantidadPasajeros);
+
       const nuevoViaje = await prisma.viaje.create({
         data: {
           remiseriaId: coordinador.remiseriaId,
@@ -2591,6 +2632,8 @@ export const coordinatorDashboardController = {
               : (cliente?.preferenciaSexoChofer || 'INDISTINTO'),
           conMascota: Boolean(conMascota),
           conSillaRuedas: Boolean(conSillaRuedas),
+          cantidadPasajeros: cantPasExpress,
+          cantidadVehiculos: cantVehExpress,
           choferId: choferId || null,
           vehiculoId: choferVehiculoId,
           recargoTipo: null,

@@ -1,0 +1,12 @@
+-- AlterTable
+ALTER TABLE "viajes" ADD COLUMN IF NOT EXISTS "cantidadPasajeros" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "viajes" ADD COLUMN IF NOT EXISTS "cantidadVehiculos" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "viajes" ADD COLUMN IF NOT EXISTS "vehiculoNumero" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "viajes" ADD COLUMN IF NOT EXISTS "grupoViajeId" TEXT;
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "viajes_grupoViajeId_idx" ON "viajes"("grupoViajeId");
+
+-- AlterTable
+ALTER TABLE "reservas" ADD COLUMN IF NOT EXISTS "cantidadPasajeros" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "reservas" ADD COLUMN IF NOT EXISTS "cantidadVehiculos" INTEGER NOT NULL DEFAULT 1;
