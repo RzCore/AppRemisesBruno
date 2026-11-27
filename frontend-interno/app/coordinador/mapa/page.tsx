@@ -55,9 +55,10 @@ const MapComponent = dynamic(
 
 interface Vehiculo {
   id: string;
+  choferId?: string;
   patente: string;
   chofer: string;
-  estado: 'disponible' | 'en_viaje' | 'fuera_servicio';
+  estado: 'disponible' | 'en_viaje' | 'en_pausa' | 'fuera_servicio';
   ubicacion: {
     lat: number;
     lng: number;
@@ -86,82 +87,6 @@ export default function MapaTiempoReal() {
   const baseDireccion = remiseria?.direccion || 'Av. Sarmiento 271, Chivilcoy';
   const baseTelefono = remiseria?.telefono || '';
 
-  // Vehículos de ejemplo ubicados alrededor de la sede física de la remisería
-  const vehiculosEjemplo: Vehiculo[] = [
-    {
-      id: '1',
-      patente: 'AF123CD',
-      chofer: 'Juan Pérez',
-      estado: 'disponible',
-      ubicacion: { lat: -34.8957, lng: -60.0189 }, // Plaza 25 de Mayo (Centro)
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Plaza 25 de Mayo (Centro), Chivilcoy'
-    },
-    {
-      id: '2',
-      patente: 'AE456GH',
-      chofer: 'María González',
-      estado: 'en_viaje',
-      ubicacion: { lat: -34.8905, lng: -60.0250 }, // Av. Villarino
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Av. Villarino y 25 de Mayo, Chivilcoy'
-    },
-    {
-      id: '3',
-      patente: 'AD789JK',
-      chofer: 'Carlos López',
-      estado: 'disponible',
-      ubicacion: { lat: -34.9010, lng: -60.0120 }, // Av. Soárez
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Av. Soárez 350, Chivilcoy'
-    },
-    {
-      id: '4',
-      patente: 'AC321MN',
-      chofer: 'Ana Martínez',
-      estado: 'en_viaje',
-      ubicacion: { lat: -34.8870, lng: -60.0145 }, // Av. Bernardo de Irigoyen
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Av. Bernardo de Irigoyen 420, Chivilcoy'
-    },
-    {
-      id: '5',
-      patente: 'AB654PQ',
-      chofer: 'Roberto Silva',
-      estado: 'disponible',
-      ubicacion: { lat: -34.9080, lng: -60.0290 }, // Hospital Municipal
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Hospital Municipal / Hijas de San José, Chivilcoy'
-    },
-    {
-      id: '6',
-      patente: 'AA987RS',
-      chofer: 'Laura Fernández',
-      estado: 'fuera_servicio',
-      ubicacion: { lat: -34.8930, lng: -60.0050 }, // Av. Sarmiento
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Av. Sarmiento y Av. Ceballos, Chivilcoy'
-    },
-    {
-      id: '7',
-      patente: 'AG112TV',
-      chofer: 'Diego Rodríguez',
-      estado: 'en_viaje',
-      ubicacion: { lat: -34.7083, lng: -59.7892 }, // Ruta 5 km 132 (Suipacha / Mercedes)
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Ruta 5 km 132 (En viaje interurbano hacia Mercedes/CABA)'
-    },
-    {
-      id: '8',
-      patente: 'AF554XY',
-      chofer: 'Carmen Gómez',
-      estado: 'disponible',
-      ubicacion: { lat: -34.9150, lng: -60.0350 }, // Parque Industrial / Acceso Ruta 30
-      ultimaActualizacion: new Date().toISOString(),
-      direccionActual: 'Acceso Parque Industrial / Ruta 30, Chivilcoy'
-    }
-  ];
-
   // Cargar remisería oficial del coordinador
   const cargarRemiseria = async () => {
     try {
@@ -184,7 +109,7 @@ export default function MapaTiempoReal() {
     }
   };
 
-  // Cargar vehículos reales desde la API con fallback seguro
+  // Cargar vehículos reales con turno activo o pausado desde la API
   const cargarVehiculosReales = async () => {
     setIsLoading(true);
     try {
@@ -193,43 +118,50 @@ export default function MapaTiempoReal() {
         setRemiseria((response as any).remiseria);
       }
 
-      if (response.success && response.data && response.data.length > 0) {
-        const mapped: Vehiculo[] = response.data.map(v => {
-          const chofer =
-            (v as any).choferActivo ||
-            v.choferes?.find((c: any) => c.isOnline) ||
-            (v.choferes && v.choferes[0]);
-          const isOnline = v.choferes?.some((c: any) => c.isOnline) ?? chofer?.isOnline;
-          const estadoOperativo = (v as any).estadoOperativo;
-          const estado = estadoOperativo
-            ? estadoOperativo
-            : (v as any).enViaje
-            ? 'en_viaje'
-            : isOnline
-            ? 'disponible'
-            : (v.estado?.toLowerCase() === 'activo' ? 'disponible' : 'fuera_servicio');
-          return {
-            id: v.id,
-            patente: v.patente || 'Móvil',
-            chofer: chofer
-              ? `${chofer.nombre} ${chofer.apellido}${chofer.esFranquero ? ' (Franquero)' : ''}`
-              : (v.propietario || 'Sin Chofer'),
-            estado: estado as any,
-            ubicacion: {
-              lat: v.latitud || baseLat,
-              lng: v.longitud || baseLng
-            },
-            ultimaActualizacion: v.ultimaUbicacion || new Date().toISOString(),
-            direccionActual: v.observaciones || (v.latitud ? `Lat: ${v.latitud.toFixed(4)}, Lng: ${v.longitud.toFixed(4)}` : baseDireccion)
-          };
-        });
+      if (response.success && Array.isArray(response.data)) {
+        const mapped: Vehiculo[] = response.data
+          .map(v => {
+            const chofer =
+              (v as any).choferActivo ||
+              v.choferes?.find((c: any) => c.isOnline) ||
+              (v.choferes && v.choferes[0]);
+            const estadoOperativo = (v as any).estadoOperativo;
+            if (estadoOperativo === 'fuera_servicio') return null;
+
+            const estado: 'disponible' | 'en_viaje' | 'en_pausa' =
+              estadoOperativo === 'en_viaje' || (v as any).enViaje
+                ? 'en_viaje'
+                : estadoOperativo === 'en_pausa' || (v as any).enPausa
+                ? 'en_pausa'
+                : 'disponible';
+
+            return {
+              id: v.id,
+              choferId: chofer?.id,
+              patente: v.patente || 'Móvil',
+              chofer: chofer
+                ? `${chofer.nombre} ${chofer.apellido}${chofer.esFranquero ? ' (Franquero)' : ''}`
+                : (v.propietario || 'Sin Chofer'),
+              estado,
+              ubicacion: {
+                lat: v.latitud || baseLat,
+                lng: v.longitud || baseLng
+              },
+              ultimaActualizacion: v.ultimaUbicacion || new Date().toISOString(),
+              direccionActual:
+                estado === 'en_pausa'
+                  ? 'Turno en pausa'
+                  : v.observaciones || (v.latitud ? `Lat: ${v.latitud.toFixed(4)}, Lng: ${v.longitud.toFixed(4)}` : baseDireccion)
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null);
         setVehiculos(mapped);
       } else {
-        setVehiculos(vehiculosEjemplo);
+        setVehiculos([]);
       }
     } catch (error) {
-      console.error('Error cargando vehículos reales de la API, usando demo:', error);
-      setVehiculos(vehiculosEjemplo);
+      console.error('Error cargando vehículos en tiempo real:', error);
+      setVehiculos([]);
     } finally {
       setIsLoading(false);
     }
@@ -256,31 +188,95 @@ export default function MapaTiempoReal() {
     });
 
     socket.on('vehiculo_movido', (data: any) => {
+      // Si el chofer se desconectó / cerró turno, quitarlo inmediatamente del mapa
+      if (data.estado === 'fuera_servicio' || data.desconectado) {
+        setVehiculos((prevVehiculos) =>
+          prevVehiculos.filter(
+            (v) =>
+              v.id !== data.id &&
+              (!data.choferId || (v.choferId !== data.choferId && v.id !== data.choferId))
+          )
+        );
+        return;
+      }
+
+      const estadoNormalizado: 'disponible' | 'en_viaje' | 'en_pausa' =
+        data.estado === 'en_viaje'
+          ? 'en_viaje'
+          : data.estado === 'en_pausa'
+          ? 'en_pausa'
+          : 'disponible';
+
       setVehiculos((prevVehiculos) => {
-        const soloReales = prevVehiculos.filter((v) => !['1', '2', '3', '4', '5', '6', '7', '8'].includes(v.id));
-        const index = soloReales.findIndex((v) => v.id === data.id || (data.choferId && v.id === data.choferId) || (data.patente && v.patente === data.patente));
+        const index = prevVehiculos.findIndex(
+          (v) =>
+            v.id === data.id ||
+            (data.choferId && (v.choferId === data.choferId || v.id === data.choferId)) ||
+            (data.patente && data.patente !== 'Auto Propio' && v.patente === data.patente)
+        );
         if (index !== -1) {
-          const updated = [...soloReales];
+          const updated = [...prevVehiculos];
+          const prev = updated[index];
           updated[index] = {
-            ...updated[index],
-            chofer: data.chofer || updated[index].chofer,
-            ubicacion: data.ubicacion,
-            direccionActual: data.direccionActual,
-            ultimaActualizacion: data.ultimaActualizacion,
-            estado: data.estado
+            ...prev,
+            choferId: data.choferId || prev.choferId,
+            chofer: data.chofer || prev.chofer,
+            ubicacion: data.ubicacion && typeof data.ubicacion.lat === 'number' ? data.ubicacion : prev.ubicacion,
+            direccionActual:
+              estadoNormalizado === 'en_pausa'
+                ? data.motivoPausa
+                  ? `En pausa (${data.motivoPausa})`
+                  : 'Turno en pausa'
+                : data.direccionActual || prev.direccionActual,
+            ultimaActualizacion: data.ultimaActualizacion || new Date().toISOString(),
+            estado: estadoNormalizado
           };
           return updated;
         }
-        return [...soloReales, {
-          id: data.id,
-          patente: data.patente || 'Móvil',
-          chofer: data.chofer || 'Chofer',
-          estado: data.estado || 'disponible',
-          ubicacion: data.ubicacion,
-          ultimaActualizacion: data.ultimaActualizacion || new Date().toISOString(),
-          direccionActual: data.direccionActual || `${data.ubicacion.lat.toFixed(5)}, ${data.ubicacion.lng.toFixed(5)}`
-        }];
+        // Si no trae coordenadas válidas aún (ej. solo evento de pausa sin GPS), no crear marcador roto
+        if (!data.ubicacion || typeof data.ubicacion.lat !== 'number' || typeof data.ubicacion.lng !== 'number') {
+          return prevVehiculos;
+        }
+        return [
+          ...prevVehiculos,
+          {
+            id: data.id,
+            choferId: data.choferId,
+            patente: data.patente || 'Móvil',
+            chofer: data.chofer || 'Chofer',
+            estado: estadoNormalizado,
+            ubicacion: data.ubicacion,
+            ultimaActualizacion: data.ultimaActualizacion || new Date().toISOString(),
+            direccionActual: data.direccionActual || `${data.ubicacion.lat.toFixed(5)}, ${data.ubicacion.lng.toFixed(5)}`
+          }
+        ];
       });
+    });
+
+    socket.on('chofer_desconectado_por_central', (data: any) => {
+      if (!data?.choferId) return;
+      setVehiculos((prevVehiculos) =>
+        prevVehiculos.filter((v) => v.choferId !== data.choferId && v.id !== data.choferId)
+      );
+    });
+
+    socket.on('chofer_pausa_cambiada', (data: any) => {
+      if (!data?.choferId) return;
+      setVehiculos((prevVehiculos) =>
+        prevVehiculos.map((v) => {
+          if (v.choferId !== data.choferId && v.id !== data.choferId) return v;
+          return {
+            ...v,
+            estado: data.enPausa ? 'en_pausa' : 'disponible',
+            direccionActual: data.enPausa
+              ? data.motivo
+                ? `En pausa (${data.motivo})`
+                : 'Turno en pausa'
+              : v.direccionActual,
+            ultimaActualizacion: new Date().toISOString()
+          };
+        })
+      );
     });
 
     return () => {
@@ -288,58 +284,21 @@ export default function MapaTiempoReal() {
     };
   }, [user, remiseria?.id]);
 
-  // Sincronizar vehículo seleccionado con actualizaciones
+  // Sincronizar vehículo seleccionado con actualizaciones (y cerrar si se desconectó)
   useEffect(() => {
     if (vehiculoSeleccionado) {
       const match = vehiculos.find(v => v.id === vehiculoSeleccionado.id);
-      if (match && (
+      if (!match) {
+        setVehiculoSeleccionado(null);
+      } else if (
         match.ubicacion.lat !== vehiculoSeleccionado.ubicacion.lat ||
         match.ubicacion.lng !== vehiculoSeleccionado.ubicacion.lng ||
         match.estado !== vehiculoSeleccionado.estado
-      )) {
+      ) {
         setVehiculoSeleccionado(match);
       }
     }
   }, [vehiculos, vehiculoSeleccionado]);
-
-  // Simulación de patrullaje suave en modo demo
-  useEffect(() => {
-    const isDemo = vehiculos.length > 0 && vehiculos.every(v => ['1', '2', '3', '4', '5', '6', '7', '8'].includes(v.id));
-    if (!isDemo || isLoading) return;
-
-    const interval = setInterval(() => {
-      setVehiculos((prev) => 
-        prev.map((v) => {
-          if (v.estado === 'fuera_servicio') return v;
-
-          if (v.id === '7') {
-            return {
-              ...v,
-              ubicacion: {
-                lat: v.ubicacion.lat + 0.0004,
-                lng: v.ubicacion.lng + 0.0006
-              },
-              ultimaActualizacion: new Date().toISOString()
-            };
-          }
-
-          const deltaLat = (Math.random() - 0.5) * 0.0005;
-          const deltaLng = (Math.random() - 0.5) * 0.0005;
-          
-          return {
-            ...v,
-            ubicacion: {
-              lat: v.ubicacion.lat + deltaLat,
-              lng: v.ubicacion.lng + deltaLng
-            },
-            ultimaActualizacion: new Date().toISOString()
-          };
-        })
-      );
-    }, 4500);
-
-    return () => clearInterval(interval);
-  }, [vehiculos, isLoading]);
 
   // Filtrado de vehículos
   const vehiculosFiltrados = useMemo(() => {
@@ -384,14 +343,14 @@ export default function MapaTiempoReal() {
     const total = vehiculos.length;
     const disponibles = vehiculos.filter(v => v.estado === 'disponible').length;
     const enViaje = vehiculos.filter(v => v.estado === 'en_viaje').length;
-    const fueraServicio = vehiculos.filter(v => v.estado === 'fuera_servicio').length;
+    const enPausa = vehiculos.filter(v => v.estado === 'en_pausa').length;
     const enRadioBase = vehiculos.filter(v => {
       const dist = calculateDistance(v.ubicacion.lat, v.ubicacion.lng, baseLat, baseLng);
       return dist <= 12;
     }).length;
     const enRuta = total - enRadioBase;
 
-    return { total, disponibles, enViaje, fueraServicio, enRadioBase, enRuta };
+    return { total, disponibles, enViaje, enPausa, enRadioBase, enRuta };
   }, [vehiculos, baseLat, baseLng]);
 
   return (
@@ -529,7 +488,7 @@ export default function MapaTiempoReal() {
                   <option value="todos">Todos los estados</option>
                   <option value="disponible">🟢 Disponibles</option>
                   <option value="en_viaje">🔵 En Viaje</option>
-                  <option value="fuera_servicio">🔴 Fuera de Servicio</option>
+                  <option value="en_pausa">🟡 En Pausa</option>
                 </select>
               </div>
             </div>
@@ -587,10 +546,10 @@ export default function MapaTiempoReal() {
 
                 <div className="flex justify-between items-center py-1 border-b border-gray-100">
                   <span className="text-gray-600 flex items-center">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 mr-2"></span>
-                    Fuera de Turno
+                    <span className="w-2 h-2 rounded-full bg-amber-500 mr-2"></span>
+                    En Pausa
                   </span>
-                  <span className="font-bold text-rose-600">{stats.fueraServicio}</span>
+                  <span className="font-bold text-amber-600">{stats.enPausa}</span>
                 </div>
 
                 <div className="pt-2">
@@ -810,17 +769,23 @@ export default function MapaTiempoReal() {
                 {vehiculosFiltrados.length === 0 && (
                   <div className="p-8 text-center text-gray-500">
                     <Car className="h-10 w-10 mx-auto mb-2 text-gray-300" />
-                    <p className="text-sm font-medium">No hay vehículos que coincidan con los filtros aplicados</p>
-                    <button
-                      onClick={() => {
-                        setFiltroEstado('todos');
-                        setFiltroZona('todos');
-                        setBusqueda('');
-                      }}
-                      className="mt-2 text-xs text-indigo-600 font-semibold hover:underline"
-                    >
-                      Restablecer filtros
-                    </button>
+                    <p className="text-sm font-medium">
+                      {vehiculos.length === 0
+                        ? 'No hay choferes con turno activo o en pausa en este momento'
+                        : 'No hay vehículos que coincidan con los filtros aplicados'}
+                    </p>
+                    {vehiculos.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setFiltroEstado('todos');
+                          setFiltroZona('todos');
+                          setBusqueda('');
+                        }}
+                        className="mt-2 text-xs text-indigo-600 font-semibold hover:underline"
+                      >
+                        Restablecer filtros
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

@@ -13,6 +13,8 @@ interface ChoferMetaCache {
   baseLat: number;
   baseLng: number;
   isOnline: boolean;
+  turnoActivo: boolean;
+  enPausa: boolean;
   viajeActivo: boolean;
   updatedAt: number;
 }
@@ -105,7 +107,14 @@ export const initSocket = (server: HttpServer): Server => {
             if (!cached || ahora - cached.updatedAt > 25000) {
               const choferActual = await prisma.chofer.findUnique({
                 where: { id: choferId },
-                include: { vehiculo: true, remiseria: true }
+                include: {
+                  vehiculo: true,
+                  remiseria: true,
+                  turnos: {
+                    where: { activo: true },
+                    select: { id: true }
+                  }
+                }
               });
 
               if (choferActual) {
@@ -120,6 +129,15 @@ export const initSocket = (server: HttpServer): Server => {
                   select: { id: true }
                 });
 
+                let enPausa = false;
+                if (choferActual.observaciones && choferActual.observaciones.startsWith('{')) {
+                  try {
+                    enPausa = Boolean(JSON.parse(choferActual.observaciones)?.enPausa);
+                  } catch {
+                    enPausa = false;
+                  }
+                }
+
                 cached = {
                   nombre: `${choferActual.nombre} ${choferActual.apellido}${choferActual.esFranquero ? ' (Franquero)' : ''}`.trim(),
                   vId: choferActual.vehiculoId || undefined,
@@ -128,6 +146,8 @@ export const initSocket = (server: HttpServer): Server => {
                   baseLat: choferActual.remiseria?.latitud ?? -34.901138,
                   baseLng: choferActual.remiseria?.longitud ?? -60.013778,
                   isOnline: Boolean(choferActual.isOnline),
+                  turnoActivo: Boolean(choferActual.turnos && choferActual.turnos.length > 0),
+                  enPausa,
                   viajeActivo: Boolean(viajeActivo),
                   updatedAt: ahora
                 };
@@ -136,6 +156,11 @@ export const initSocket = (server: HttpServer): Server => {
             }
 
             if (cached) {
+              // Si el chofer está desconectado (sin turno activo ni viaje en curso), no mostrarlo en el mapa
+              if (!cached.isOnline && !cached.turnoActivo && !cached.viajeActivo) {
+                return;
+              }
+
               if (!nombre) nombre = cached.nombre;
               if (!vId && cached.vId) vId = cached.vId;
               if (cached.patente) patente = cached.patente;
@@ -150,6 +175,8 @@ export const initSocket = (server: HttpServer): Server => {
                     data: { enParadaVirtual: false, paradaVirtualIngreso: null }
                   }).catch(() => {});
                 }
+              } else if (cached.enPausa) {
+                estadoVehiculo = 'en_pausa';
               } else if (cached.isOnline && estadoVehiculo === 'disponible') {
                 const distMetros = calcularDistanciaMetros(lat, lng, cached.baseLat, cached.baseLng);
                 if (!cached.enParadaVirtual) {

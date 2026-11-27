@@ -1795,6 +1795,16 @@ export const coordinatorDashboardController = {
         });
       }
 
+      const parseEnPausa = (obs?: string | null): boolean => {
+        if (!obs || !obs.startsWith('{')) return false;
+        try {
+          const parsed = JSON.parse(obs);
+          return Boolean(parsed?.enPausa);
+        } catch {
+          return false;
+        }
+      };
+
       const vehiculos = await prisma.vehiculo.findMany({
         where: {
           remiseriaId: coordinador.remiseriaId,
@@ -1810,19 +1820,33 @@ export const coordinatorDashboardController = {
               apellido: true,
               telefono: true,
               isOnline: true,
-              esFranquero: true
+              esFranquero: true,
+              observaciones: true,
+              turnos: {
+                where: { activo: true },
+                select: { id: true }
+              }
             }
           }
         }
       });
 
-      // También traer choferes activos que están online y no tienen vehículo asignado
+      // También traer choferes activos con turno activo/pausado y sin vehículo asignado
       const choferesSinVehiculo = await prisma.chofer.findMany({
         where: {
           remiseriaId: coordinador.remiseriaId,
           estado: 'ACTIVO',
-          isOnline: true,
-          vehiculoId: null
+          vehiculoId: null,
+          OR: [
+            { isOnline: true },
+            { turnos: { some: { activo: true } } }
+          ]
+        },
+        include: {
+          turnos: {
+            where: { activo: true },
+            select: { id: true }
+          }
         }
       });
 
@@ -1839,32 +1863,46 @@ export const coordinatorDashboardController = {
       const choferesEnViajeSet = new Set(viajesActivosFlota.map(v => v.choferId).filter(Boolean));
       const vehiculosEnViajeSet = new Set(viajesActivosFlota.map(v => v.vehiculoId).filter(Boolean));
 
-      const vehiculosConEstado = vehiculos.map(v => {
-        // Priorizar el chofer que actualmente está operando este vehículo compartido:
-        // 1) En viaje activo, 2) Online ahora, 3) Titular (no franquero), 4) Primero disponible
-        const choferesOrdenados = [...(v.choferes || [])].sort((a, b) => {
-          const score = (c: typeof a) =>
-            (choferesEnViajeSet.has(c.id) ? 4 : 0) +
-            (c.isOnline ? 2 : 0) +
-            (!c.esFranquero ? 1 : 0);
-          return score(b) - score(a);
-        });
-        const choferAsig = choferesOrdenados[0];
-        const estaEnViaje =
-          vehiculosEnViajeSet.has(v.id) ||
-          choferesOrdenados.some(c => choferesEnViajeSet.has(c.id));
-        const algunChoferOnline = choferesOrdenados.some(c => c.isOnline);
-        return {
-          ...v,
-          choferes: choferesOrdenados,
-          choferActivo: choferAsig || null,
-          enViaje: Boolean(estaEnViaje),
-          estadoOperativo: estaEnViaje ? 'en_viaje' : (algunChoferOnline ? 'disponible' : 'fuera_servicio')
-        };
-      });
+      // Solo incluir vehículos que tengan al menos un chofer con turno activo o pausado (o en viaje)
+      const vehiculosConEstado = vehiculos
+        .map(v => {
+          const choferesActivosEnTurno = (v.choferes || []).filter(
+            c => c.isOnline || (c.turnos && c.turnos.length > 0) || choferesEnViajeSet.has(c.id)
+          );
+          if (choferesActivosEnTurno.length === 0 && !vehiculosEnViajeSet.has(v.id)) {
+            return null;
+          }
+
+          // Priorizar el chofer que actualmente está operando este vehículo compartido:
+          // 1) En viaje activo, 2) Online ahora (no pausado), 3) Online en pausa / turno activo, 4) Titular
+          const choferesOrdenados = [...choferesActivosEnTurno].sort((a, b) => {
+            const score = (c: typeof a) =>
+              (choferesEnViajeSet.has(c.id) ? 8 : 0) +
+              (c.isOnline && !parseEnPausa(c.observaciones) ? 4 : 0) +
+              (c.isOnline || (c.turnos && c.turnos.length > 0) ? 2 : 0) +
+              (!c.esFranquero ? 1 : 0);
+            return score(b) - score(a);
+          });
+          const choferAsig = choferesOrdenados[0];
+          const estaEnViaje =
+            vehiculosEnViajeSet.has(v.id) ||
+            choferesOrdenados.some(c => choferesEnViajeSet.has(c.id));
+          const estaEnPausa = choferAsig ? parseEnPausa(choferAsig.observaciones) : false;
+
+          return {
+            ...v,
+            choferes: choferesOrdenados,
+            choferActivo: choferAsig || null,
+            enViaje: Boolean(estaEnViaje),
+            enPausa: Boolean(!estaEnViaje && estaEnPausa),
+            estadoOperativo: estaEnViaje ? 'en_viaje' : (estaEnPausa ? 'en_pausa' : 'disponible')
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v !== null);
 
       const choferesMapeados = choferesSinVehiculo.map(c => {
         const estaEnViaje = choferesEnViajeSet.has(c.id);
+        const estaEnPausa = !estaEnViaje && parseEnPausa(c.observaciones);
         return {
           id: c.id,
           patente: 'Auto Propio',
@@ -1876,13 +1914,14 @@ export const coordinatorDashboardController = {
           capacidad: 4,
           estado: 'ACTIVO' as const,
           enViaje: Boolean(estaEnViaje),
-          estadoOperativo: estaEnViaje ? 'en_viaje' : 'disponible',
+          enPausa: Boolean(estaEnPausa),
+          estadoOperativo: estaEnViaje ? 'en_viaje' : (estaEnPausa ? 'en_pausa' : 'disponible'),
           propietario: `${c.nombre} ${c.apellido}`,
           latitud: null,
           longitud: null,
           ultimaUbicacion: null,
           remiseriaId: coordinador.remiseriaId,
-          observaciones: estaEnViaje ? 'En viaje activo' : 'Chofer conectado',
+          observaciones: estaEnViaje ? 'En viaje activo' : (estaEnPausa ? 'Turno en pausa' : 'Chofer conectado'),
           choferes: [{
             id: c.id,
             nombre: c.nombre,

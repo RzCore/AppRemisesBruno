@@ -36,7 +36,7 @@ interface Vehiculo {
   id: string;
   patente: string;
   chofer: string;
-  estado: 'disponible' | 'en_viaje' | 'fuera_servicio';
+  estado: 'disponible' | 'en_viaje' | 'en_pausa' | 'fuera_servicio';
   ubicacion: {
     lat: number;
     lng: number;

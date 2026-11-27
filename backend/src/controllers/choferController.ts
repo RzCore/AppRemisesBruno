@@ -1424,6 +1424,26 @@ export const choferController = {
             },
           });
         }
+
+        // Notificar al mapa en vivo para quitar al chofer inmediatamente
+        try {
+          const { getIO, invalidarChoferCache } = await import('../lib/socket');
+          invalidarChoferCache(choferId);
+          const io = getIO();
+          if (io && updatedChofer.remiseriaId) {
+            io.to(updatedChofer.remiseriaId).emit('vehiculo_movido', {
+              id: updatedChofer.vehiculoId || updatedChofer.id,
+              choferId: updatedChofer.id,
+              vehiculoId: updatedChofer.vehiculoId,
+              chofer: `${updatedChofer.nombre} ${updatedChofer.apellido}`.trim(),
+              estado: 'fuera_servicio',
+              desconectado: true,
+              ultimaActualizacion: new Date().toISOString(),
+            });
+          }
+        } catch (wsErr) {
+          console.warn('Aviso socket al desconectar chofer:', wsErr);
+        }
       }
 
       const relevoMsg =
@@ -3725,6 +3745,27 @@ export const choferController = {
           rechazosConsecutivos: 0,
         },
       });
+
+      // Notificar al mapa en vivo para quitar al chofer al finalizar turno
+      try {
+        const { getIO, invalidarChoferCache } = await import('../lib/socket');
+        invalidarChoferCache(choferId);
+        const io = getIO();
+        if (io && choferInfo?.remiseriaId) {
+          io.to(choferInfo.remiseriaId).emit('vehiculo_movido', {
+            id: choferInfo.vehiculoId || choferInfo.id,
+            choferId: choferInfo.id,
+            vehiculoId: choferInfo.vehiculoId,
+            patente: choferInfo.vehiculo?.patente || 'Auto Propio',
+            chofer: `${choferInfo.nombre} ${choferInfo.apellido}`.trim(),
+            estado: 'fuera_servicio',
+            desconectado: true,
+            ultimaActualizacion: ahoraCierre.toISOString(),
+          });
+        }
+      } catch (wsErr) {
+        console.warn('Aviso socket al finalizar turno:', wsErr);
+      }
 
       choferHeartbeatMap.delete(choferId);
       try {

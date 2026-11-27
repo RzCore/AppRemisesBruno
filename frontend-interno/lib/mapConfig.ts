@@ -36,6 +36,7 @@ export const MAP_CONFIG = {
   VEHICLE_COLORS: {
     DISPONIBLE: '#10B981', // green-500
     EN_VIAJE: '#3B82F6',   // blue-500
+    EN_PAUSA: '#F59E0B',   // amber-500
     FUERA_SERVICIO: '#EF4444', // red-500
     MANTENIMIENTO: '#F59E0B'  // yellow-500
   },
@@ -64,6 +65,8 @@ export const getVehicleColor = (estado: string): string => {
       return MAP_CONFIG.VEHICLE_COLORS.DISPONIBLE;
     case 'en_viaje':
       return MAP_CONFIG.VEHICLE_COLORS.EN_VIAJE;
+    case 'en_pausa':
+      return MAP_CONFIG.VEHICLE_COLORS.EN_PAUSA;
     case 'fuera_servicio':
       return MAP_CONFIG.VEHICLE_COLORS.FUERA_SERVICIO;
     case 'mantenimiento':
@@ -80,6 +83,8 @@ export const getVehicleStatusText = (estado: string): string => {
       return 'Disponible';
     case 'en_viaje':
       return 'En Viaje';
+    case 'en_pausa':
+      return 'En Pausa';
     case 'fuera_servicio':
       return 'Fuera de Servicio';
     case 'mantenimiento':
