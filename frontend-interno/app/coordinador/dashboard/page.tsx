@@ -9,6 +9,7 @@ import { buildGoogleMapsUrl, isSharedLocationText } from '@/lib/mapsLinkUtils';
 import { ArtEmpresa } from '@/types';
 import { useAppTracking } from '@/hooks/useAppTracking';
 import LogoBruno from '@/components/LogoBruno';
+import HelpGuideButton from '@/components/HelpGuideButton';
 import { 
   Car, 
   Shield,
@@ -2340,6 +2341,9 @@ export default function CoordinadorDashboard() {
                 <PanelRight className="h-4 w-4 text-gray-500" />
                 <span>{isSidebarOpen ? 'Ocultar Lateral' : 'Panel Rápido'}</span>
               </button>
+
+              {/* Botón de Ayuda */}
+              <HelpGuideButton role="COORDINADOR" variant="header-light" />
 
               {/* Cerrar sesión */}
               <button 

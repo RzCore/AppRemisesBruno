@@ -6,6 +6,7 @@ import LogoutButton from '@/components/LogoutButton';
 import ChoferBottomNav from '@/components/ChoferBottomNav';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import ThemeToggle from '@/components/ThemeToggle';
+import HelpGuideButton from '@/components/HelpGuideButton';
 import LogoBruno from '@/components/LogoBruno';
 import { ThemeModuleProvider } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -116,6 +117,8 @@ export default function ChoferLayout({
               )}
             </div>
             <div className="flex items-center space-x-1.5 shrink-0">
+              {/* Botón de Ayuda */}
+              <HelpGuideButton role="CHOFER" variant="header-dark" />
               {/* Selector de Modo Oscuro / Claro / Sistema */}
               <ThemeToggle className="text-white hover:text-white" />
               <LogoutButton className="text-white hover:text-red-200" />

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import LogoutButton from '@/components/LogoutButton';
 import ThemeToggle from '@/components/ThemeToggle';
+import HelpGuideButton from '@/components/HelpGuideButton';
 import LogoBruno from '@/components/LogoBruno';
 import { ThemeModuleProvider } from '@/contexts/ThemeContext';
 import { triggerEmergencyPhoneFallback } from '@/components/EmergencyPhoneFallback';
@@ -94,6 +95,8 @@ export default function ClienteLayout({
               <PhoneCall className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Teléfonos</span>
             </button>
+            {/* Botón de Ayuda */}
+            <HelpGuideButton />
             {/* Selector de Modo Oscuro / Claro / Sistema */}
             <ThemeToggle />
             <Link 
