@@ -1996,20 +1996,35 @@ export default function ChoferApp() {
     if (!viajeActual || actionLoading) return;
     setMetodoPagoSeleccionado('EFECTIVO');
 
-    // Calcular si la distancia real por GPS supera la estimación original
+    // Calcular recálculo por distancia real recorrida por GPS (tanto si se cortó antes como si hubo desvío)
     const distGps = tripDistanceRef.current.con;
-    const distEstimada = Number(viajeActual.distanciaKm || viajeActual.distancia || 0);
+    const distEstimada = Number(viajeActual.distanciaKm || viajeActual.distancia || viajeActual.distanciaKmConPasajero || 0);
     const valorKm = viajeActual?.remiseria?.valorKm || 1200;
+    const valorKmRuta = viajeActual?.remiseria?.valorKmRuta || Math.round(valorKm * 0.75);
     const bajadaBandera = viajeActual?.remiseria?.bajadaBandera || 3500;
     const precioBase = Number(viajeActual.precio || 0) - (Number(viajeActual.costoEspera) || 0);
 
+    const calculoGpsPuro =
+      distGps >= 15
+        ? distGps * valorKmRuta
+        : distGps > 1
+        ? bajadaBandera + (distGps - 1) * valorKm
+        : bajadaBandera;
+    const calculoGpsRedondeado = Math.round(calculoGpsPuro / 100) * 100;
+
     let precioSugerido = precioBase + costoEsperaChoferLive;
-    if (distGps > 1 && distGps > distEstimada + 0.3) {
-      const calculoGps = bajadaBandera + (distGps - 1) * valorKm;
-      const calculoGpsRedondeado = Math.round(calculoGps / 100) * 100;
-      if (calculoGpsRedondeado > precioBase) {
-        precioSugerido = calculoGpsRedondeado + costoEsperaChoferLive;
-      }
+    const esViajeCortadoAntes =
+      !viajeActual.artEmpresaId &&
+      distGps >= 0.2 &&
+      distEstimada > 0 &&
+      distGps < distEstimada - 0.3;
+    const esMayorRecorrido =
+      distGps > 1 &&
+      distGps > distEstimada + 0.3 &&
+      calculoGpsRedondeado > precioBase;
+
+    if (esViajeCortadoAntes || esMayorRecorrido) {
+      precioSugerido = calculoGpsRedondeado + costoEsperaChoferLive;
     }
     setMontoFinalACobrar(precioSugerido);
     setPeajesInputChofer(viajeActual.montoPeajes ? String(viajeActual.montoPeajes) : '');
@@ -2321,15 +2336,26 @@ export default function ChoferApp() {
   const precioBaseSinEspera = Number(viajeActual?.precio ?? viajeActual?.precioEstimado ?? 0) - (Number(viajeActual?.costoEspera) || 0);
   const precioActual = Math.max(0, precioBaseSinEspera + costoEsperaChoferLive);
 
-  // Distancias y recálculo por GPS real (útil para desvíos no programados, calles cortadas, etc.)
+  // Distancias y recálculo por GPS real (desvíos, calles cortadas o viajes finalizados antes por barro/lluvia)
   const distGpsRealChofer = tripDistanceRef.current.con;
-  const distEstimadaChofer = Number(viajeActual?.distanciaKm || viajeActual?.distancia || 0);
+  const distEstimadaChofer = Number(
+    viajeActual?.distanciaKm || viajeActual?.distancia || viajeActual?.distanciaKmConPasajero || 0
+  );
   const valorKmChofer = viajeActual?.remiseria?.valorKm || 1200;
+  const valorKmRutaChofer = viajeActual?.remiseria?.valorKmRuta || Math.round(valorKmChofer * 0.75);
   const bajadaBanderaChofer = viajeActual?.remiseria?.bajadaBandera || 3500;
-  const precioGpsPuro = distGpsRealChofer > 1
-    ? bajadaBanderaChofer + (distGpsRealChofer - 1) * valorKmChofer
-    : bajadaBanderaChofer;
+  const precioGpsPuro =
+    distGpsRealChofer >= 15
+      ? distGpsRealChofer * valorKmRutaChofer
+      : distGpsRealChofer > 1
+      ? bajadaBanderaChofer + (distGpsRealChofer - 1) * valorKmChofer
+      : bajadaBanderaChofer;
   const precioRecalculadoGps = Math.round(precioGpsPuro / 100) * 100 + costoEsperaChoferLive;
+  const esViajeCortadoAntesChofer =
+    !viajeActual?.artEmpresaId &&
+    distGpsRealChofer >= 0.2 &&
+    distEstimadaChofer > 0 &&
+    distGpsRealChofer < distEstimadaChofer - 0.3;
   const clienteFotoActual = viajeActual?.clienteFoto || viajeActual?.cliente?.fotoUrl || null;
   const clienteNombreActual =
     viajeActual?.clienteNombre ||
@@ -3669,6 +3695,19 @@ export default function ChoferApp() {
                   </p>
                 </div>
               </div>
+
+              {/* Aviso si el viaje se cortó antes del destino (ej. barro, lluvia o descenso anticipado) */}
+              {esViajeCortadoAntesChofer && (
+                <div className="p-2.5 bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 rounded-xl text-xs text-sky-900 dark:text-sky-200 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-sky-600" />
+                    <span>Viaje finalizado antes del destino (-{(distEstimadaChofer - distGpsRealChofer).toFixed(1)} km)</span>
+                  </p>
+                  <p className="text-[10px] text-sky-800 dark:text-sky-300 leading-tight">
+                    Tarifa recalculada automáticamente según los {distGpsRealChofer.toFixed(1)} km reales recorridos con el pasajero.
+                  </p>
+                </div>
+              )}
 
               {/* Aviso si se detectó desvío o mayor recorrido */}
               {distGpsRealChofer > (distEstimadaChofer + 0.3) && (

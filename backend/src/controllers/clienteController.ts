@@ -1171,6 +1171,7 @@ export const solicitarViaje = async (req: AuthenticatedRequest, res: Response) =
             remiseriaId: remiseria.id,
             origenDetallado: latitudOrigen && longitudOrigen ? `${latitudOrigen},${longitudOrigen}` : undefined,
             destinoDetallado: latitudDestino && longitudDestino ? `${latitudDestino},${longitudDestino}` : undefined,
+            distanciaKmConPasajero: cotizacion.distanciaKm,
             trackingToken,
             codigoPin,
             metodoPago: metodoPagoFinal,
