@@ -590,7 +590,7 @@ export default function ClienteApp() {
       }
     });
 
-    socket.on('viaje_estado_actualizado', (data: { viajeId: string; estado: string; mensaje?: string; choferNombre?: string; vehiculo?: any; viaje?: any }) => {
+    socket.on('viaje_estado_actualizado', (data: { viajeId: string; estado: string; mensaje?: string; choferNombre?: string; vehiculo?: any; viaje?: any; choferFinalizandoViajeAnterior?: boolean }) => {
       const matchedViaje =
         activeViajesRef.current.find((v) => v.id === data.viajeId) ||
         (activeViajeRef.current?.id === data.viajeId ? activeViajeRef.current : null);
@@ -601,7 +601,14 @@ export default function ClienteApp() {
       const autoLabel = totalVeh > 1 ? `Auto ${matchedViaje.vehiculoNumero || 1}/${totalVeh}: ` : '';
 
       if (data.estado === 'ACEPTADO') {
-        const updatedViaje = { ...matchedViaje, estado: 'ACEPTADO', ...(data.viaje || {}) };
+        const updatedViaje = {
+          ...matchedViaje,
+          estado: 'ACEPTADO',
+          ...(data.viaje || {}),
+          ...(data.choferFinalizandoViajeAnterior !== undefined
+            ? { choferFinalizandoViajeAnterior: data.choferFinalizandoViajeAnterior }
+            : {}),
+        };
         setActiveViajes((prev) =>
           prev.length > 0
             ? prev.map((v) => (v.id === data.viajeId ? updatedViaje : v))
@@ -2752,7 +2759,7 @@ export default function ClienteApp() {
                 </p>
               </div>
             ) : (
-              <div className="bg-emerald-600 text-white p-4 text-center">
+              <div className={`${estadoViaje === 'ACEPTADO' && activeViaje.choferFinalizandoViajeAnterior ? 'bg-indigo-600' : 'bg-emerald-600'} text-white p-4 text-center`}>
                 <h3 className="font-bold text-sm flex items-center justify-center gap-2">
                   <Car className="w-4 h-4" />
                   {estadoViaje === 'EN_CURSO' ? '¡Estás en viaje!' : '¡Tu remís está asignado!'}
@@ -2760,6 +2767,8 @@ export default function ClienteApp() {
                 <p className="text-[11px] text-emerald-100 mt-0.5">
                   {estadoViaje === 'EN_CURSO'
                     ? 'Buen viaje a tu destino'
+                    : activeViaje.choferFinalizandoViajeAnterior
+                    ? `🔗 El chofer está finalizando un viaje cercano${activeViaje.etaFinalizacionAnteriorMin ? ` (~${activeViaje.etaFinalizacionAnteriorMin} min)` : ''} y enseguida va hacia vos`
                     : choferLlegandoAviso
                     ? '📍 ¡El chofer te avisó que está a pocas cuadras llegando!'
                     : 'El chofer se encuentra en camino a tu ubicación'}

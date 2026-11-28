@@ -9,9 +9,10 @@ import { evaluarDocumentacionChoferYVehiculo, emitirAlertaDocumentacionSiCorresp
 // ============================================================================
 interface OfertaViajeState {
   choferOfertadoId: string;
-  motivoOferta: 'CERCANIA' | 'TABLA';
+  motivoOferta: 'CERCANIA' | 'TABLA' | 'ENCADENADO';
   puestoTabla: number;
   distanciaMetros: number | null;
+  etaTotalEncadenadoMin?: number | null;
   expiraEn: number;
   rechazadosIds: Set<string>;
 }
@@ -21,6 +22,8 @@ const OFERTA_TIMEOUT_SIN_APP_MS = 8000; // 8 segundos para choferes online en BD
 const HEARTBEAT_ACTIVO_MS = 20000; // 20 segundos máximo sin latido para detectar sesión activa en navegador
 const RADIO_CERCANIA_METROS = 600; // ~5 a 6 cuadras del pedido
 const VENTAJA_MINIMA_CERCANIA_METROS = 250; // Al menos 2.5 cuadras más cerca que el #1 de la tabla
+const RADIO_FIN_VIAJE_ENCADENADO_METROS = 2000; // Máx. 2 km restantes para terminar viaje EN_CURSO (~4-5 min)
+const RADIO_DESTINO_ENCADENADO_METROS = 1500; // Máx. 1.5 km entre el destino del viaje actual y el nuevo pasajero
 
 export const ofertasViajesMap = new Map<string, OfertaViajeState>();
 export const choferHeartbeatMap = new Map<string, number>();
@@ -1547,9 +1550,9 @@ export const choferController = {
       }
 
       // Ejecutar en paralelo las consultas de estado del chofer y de la flota
-      const [viajeActual, viajesEnCursoRemiseria, choferesOnlineRemiseria, turnoActivo] =
+      const [viajesActivosChofer, viajesEnCursoRemiseria, choferesOnlineRemiseria, turnoActivo] =
         await Promise.all([
-          prisma.viaje.findFirst({
+          prisma.viaje.findMany({
             where: {
               choferId: chofer.id,
               OR: [
@@ -1578,7 +1581,7 @@ export const choferController = {
               },
             },
             orderBy: {
-              updatedAt: 'desc',
+              createdAt: 'asc',
             },
           }),
           prisma.viaje.findMany({
@@ -1590,7 +1593,13 @@ export const choferController = {
                 { estado: 'ACEPTADO', artEmpresaId: null },
               ],
             },
-            select: { choferId: true },
+            select: {
+              id: true,
+              choferId: true,
+              estado: true,
+              destinoDetallado: true,
+              artEmpresaId: true,
+            },
           }),
           prisma.chofer.findMany({
             where: {
@@ -1630,6 +1639,26 @@ export const choferController = {
             },
           }),
         ]);
+
+      // Resolver viajeActual (prioridad: EN_CURSO > EN_CAMINO > ACEPTADO más antiguo)
+      // y viajeEnColaEncadenado (si tiene un segundo viaje ACEPTADO en cola mientras finaliza el actual)
+      const prioridadEstadoViaje: Record<string, number> = {
+        EN_CURSO: 3,
+        EN_CAMINO: 2,
+        ACEPTADO: 1,
+      };
+      const viajesActivosOrdenados = [...viajesActivosChofer].sort((a, b) => {
+        const diff = (prioridadEstadoViaje[b.estado] || 0) - (prioridadEstadoViaje[a.estado] || 0);
+        if (diff !== 0) return diff;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+      const viajeActual = viajesActivosOrdenados[0] || null;
+      const viajeEnColaEncadenado =
+        viajesActivosOrdenados.length > 1
+          ? viajesActivosOrdenados.find(
+              (v) => v.id !== viajeActual?.id && v.estado === 'ACEPTADO' && !v.artEmpresaId
+            ) || null
+          : null;
 
       // Extraer datos de pausa de observaciones
       let enPausa = false;
@@ -1690,9 +1719,12 @@ export const choferController = {
       const puestoEnTabla = miIndiceTabla !== -1 ? miIndiceTabla + 1 : null;
       const totalEnTabla = tablaChoferesLibres.length;
 
-      // Si no tiene viaje activo y no está en pausa, buscar viajes pendientes y aplicar:
+      // Si no tiene viaje activo (modo normal) O está en viaje EN_CURSO sin un segundo viaje en cola (modo encadenado),
+      // buscar viajes pendientes y aplicar:
       // 1) Proximidad si algún chofer libre está a pocas cuadras (<= 600m) del pedido y más cerca que la base/#1
       // 2) Si no, respetar estrictamente el orden de la Tabla (#1, luego #2 si rechaza/vence, etc.)
+      // 3) Si NO hay choferes libres elegibles, ofrecer como VIAJE ENCADENADO (Back-to-Back) al chofer EN_CURSO
+      //    que esté próximo a finalizar (<= 2 km) y cuyo destino quede cerca del nuevo pasajero (<= 1.5 km).
       let viajesDisponibles: any[] = [];
       let viajeEnColaTabla: {
         viajeId: string;
@@ -1700,7 +1732,11 @@ export const choferController = {
         choferOfertadoNombre: string;
         segundosRestantes: number;
       } | null = null;
-      if (!viajeActual && !enPausa && chofer.isOnline) {
+      const puedeRecibirOfertaNormal = !viajeActual && !enPausa && chofer.isOnline;
+      const puedeRecibirOfertaEncadenada =
+        Boolean(viajeActual && viajeActual.estado === 'EN_CURSO' && !viajeEnColaEncadenado && !enPausa && chofer.isOnline);
+
+      if (puedeRecibirOfertaNormal || puedeRecibirOfertaEncadenada) {
         const candidatosViajes = await prisma.viaje.findMany({
           where: {
             estado: 'PENDIENTE',
@@ -1740,6 +1776,26 @@ export const choferController = {
         const baseLat = chofer.remiseria?.latitud ?? -34.901138;
         const baseLng = chofer.remiseria?.longitud ?? -60.013778;
 
+        // Mapa de choferes EN_CURSO elegibles para despacho encadenado (sin otro viaje ACEPTADO en cola)
+        const choferesConViajeAceptadoEnCola = new Set(
+          viajesEnCursoRemiseria
+            .filter((vr) => vr.estado === 'ACEPTADO' && !vr.artEmpresaId && vr.choferId)
+            .map((vr) => vr.choferId as string)
+        );
+        const viajeEnCursoPorChoferMap = new Map<string, { destinoDetallado: string | null }>();
+        for (const vr of viajesEnCursoRemiseria) {
+          if (vr.estado === 'EN_CURSO' && vr.choferId) {
+            viajeEnCursoPorChoferMap.set(vr.choferId, { destinoDetallado: vr.destinoDetallado });
+          }
+        }
+        const candidatosEncadenadosBase = choferesOnlineRemiseria.filter((c) => {
+          if (estaChoferEnPausa(c.observaciones)) return false;
+          if (!viajeEnCursoPorChoferMap.has(c.id)) return false;
+          if (choferesConViajeAceptadoEnCola.has(c.id)) return false;
+          const destStr = viajeEnCursoPorChoferMap.get(c.id)?.destinoDetallado;
+          return Boolean(parsearCoordenadasOrigen(destStr));
+        });
+
         // Limpiar ofertas en memoria de viajes que ya no están en PENDIENTE
         const idsPendientesSet = new Set(candidatosViajes.map((cv) => cv.id));
         for (const key of ofertasViajesMap.keys()) {
@@ -1768,17 +1824,16 @@ export const choferController = {
               cantidadVehiculos: v.cantidadVehiculos ?? 1,
               vehiculoNumero: v.vehiculoNumero ?? 1,
               grupoViajeId: v.grupoViajeId ?? null,
-              motivoOferta: 'ASIGNADO_DIRECTO',
+              motivoOferta: viajeActual ? 'ENCADENADO' : 'ASIGNADO_DIRECTO',
               puestoTabla: puestoEnTabla || 1,
+              esEncadenado: Boolean(viajeActual),
             });
             continue;
           }
 
-          if (tablaChoferesLibres.length === 0) continue;
-
           // Filtrar por preferencia de sexo del chofer, mascota y silla de ruedas
           const prefSexoViaje = (v.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
-          const tablaElegiblePorSexo = tablaChoferesLibres.filter((c) => {
+          const cumpleFiltrosChofer = (c: (typeof choferesOnlineRemiseria)[number]) => {
             if (
               (prefSexoViaje === 'FEMENINO' || prefSexoViaje === 'MASCULINO') &&
               (c.sexo || 'MASCULINO').toUpperCase() !== prefSexoViaje
@@ -1788,9 +1843,9 @@ export const choferController = {
             if (v.conMascota && !c.aceptaMascotas) return false;
             if (v.conSillaRuedas && !c.aceptaSillaRuedas) return false;
             return true;
-          });
+          };
 
-          if (tablaElegiblePorSexo.length === 0) continue;
+          const tablaElegiblePorSexo = tablaChoferesLibres.filter(cumpleFiltrosChofer);
 
           let state = ofertasViajesMap.get(v.id);
           if (!state) {
@@ -1799,113 +1854,189 @@ export const choferController = {
               motivoOferta: 'TABLA',
               puestoTabla: 1,
               distanciaMetros: null,
+              etaTotalEncadenadoMin: null,
               expiraEn: 0,
               rechazadosIds: new Set<string>(),
             };
             ofertasViajesMap.set(v.id, state);
           }
 
-          // Si la oferta actual venció por tiempo, pasar al siguiente chofer de la tabla
+          // Si la oferta actual venció por tiempo, pasar al siguiente chofer
           if (state.choferOfertadoId && ahoraMs >= state.expiraEn) {
             state.rechazadosIds.add(state.choferOfertadoId);
             state.choferOfertadoId = '';
           }
 
           // Si este chofer ya tiene otra oferta activa de mayor prioridad/antigüedad en este ciclo,
-          // reasignar este viaje al siguiente chofer libre para evitar embudo en el Puesto #1
+          // reasignar este viaje al siguiente chofer libre para evitar embudo
           if (state.choferOfertadoId && choferesConOfertaActiva.has(state.choferOfertadoId)) {
             state.choferOfertadoId = '';
           }
 
-          // Verificar si el chofer actualmente ofertado sigue libre y cumple preferencia de sexo
-          const ofertadoSigueLibre =
-            state.choferOfertadoId &&
-            !state.rechazadosIds.has(state.choferOfertadoId) &&
-            tablaElegiblePorSexo.some((c) => c.id === state!.choferOfertadoId);
-
-          if (ofertadoSigueLibre) {
-            choferesConOfertaActiva.add(state.choferOfertadoId);
-          } else {
-            // Filtrar choferes de la tabla que aún no rechazaron ni dejaron vencer este viaje
-            // y que NO tengan ya otro viaje ofreciéndose en simultáneo
-            let elegibles = tablaElegiblePorSexo.filter(
-              (c) => !state!.rechazadosIds.has(c.id) && !choferesConOfertaActiva.has(c.id)
-            );
-
-            if (elegibles.length === 0) {
-              // Si todos los que no tienen oferta activa ya habían rechazado este viaje,
-              // reiniciar historial de rechazos pero respetando a los que están ocupados con otra oferta
-              const libresSinOtraOferta = tablaElegiblePorSexo.filter(
-                (c) => !choferesConOfertaActiva.has(c.id)
-              );
-              if (libresSinOtraOferta.length > 0) {
-                state.rechazadosIds.clear();
-                elegibles = libresSinOtraOferta;
-              }
+          // === MODO NORMAL: HAY CHOFERES LIBRES ELEGIBLES EN LA TABLA ===
+          if (tablaElegiblePorSexo.length > 0) {
+            // Si la oferta previa era ENCADENADO pero ahora se liberó un chofer en Tabla, priorizar al libre
+            if (state.motivoOferta === 'ENCADENADO') {
+              state.choferOfertadoId = '';
             }
 
-            // Si hay más viajes que choferes libres y todos los choferes libres ya tienen 1 oferta activa en pantalla,
-            // este viaje aguarda en cola hasta que el próximo chofer se desocupe o responda
-            if (elegibles.length > 0) {
-              const primeroTabla = elegibles[0];
-              let ganador = primeroTabla;
-              let motivo: 'CERCANIA' | 'TABLA' = 'TABLA';
-              let distGanadorMetros: number | null = null;
+            const ofertadoSigueLibre =
+              state.choferOfertadoId &&
+              !state.rechazadosIds.has(state.choferOfertadoId) &&
+              tablaElegiblePorSexo.some((c) => c.id === state!.choferOfertadoId);
 
-              const coordsPedido = parsearCoordenadasOrigen(v.origenDetallado);
-              if (coordsPedido) {
-                const latPrimero = primeroTabla.vehiculo?.latitud ?? baseLat;
-                const lngPrimero = primeroTabla.vehiculo?.longitud ?? baseLng;
-                const distPrimero = calcularDistanciaMetros(
-                  latPrimero,
-                  lngPrimero,
-                  coordsPedido.lat,
-                  coordsPedido.lng
+            if (ofertadoSigueLibre) {
+              choferesConOfertaActiva.add(state.choferOfertadoId);
+            } else {
+              let elegibles = tablaElegiblePorSexo.filter(
+                (c) => !state!.rechazadosIds.has(c.id) && !choferesConOfertaActiva.has(c.id)
+              );
+
+              if (elegibles.length === 0) {
+                const libresSinOtraOferta = tablaElegiblePorSexo.filter(
+                  (c) => !choferesConOfertaActiva.has(c.id)
                 );
-                distGanadorMetros = distPrimero;
+                if (libresSinOtraOferta.length > 0) {
+                  state.rechazadosIds.clear();
+                  elegibles = libresSinOtraOferta;
+                }
+              }
 
-                // Buscar si hay algún chofer libre "a pocas cuadras" (<= 600m) del pedido
-                // y al menos 250m más cerca que el #1 elegible de la tabla
-                let mejorCercano: typeof primeroTabla | null = null;
-                let menorDistanciaCercano = Infinity;
+              if (elegibles.length > 0) {
+                const primeroTabla = elegibles[0];
+                let ganador = primeroTabla;
+                let motivo: 'CERCANIA' | 'TABLA' = 'TABLA';
+                let distGanadorMetros: number | null = null;
 
-                for (const cand of elegibles) {
-                  const cLat = cand.vehiculo?.latitud ?? baseLat;
-                  const cLng = cand.vehiculo?.longitud ?? baseLng;
-                  const dMetros = calcularDistanciaMetros(cLat, cLng, coordsPedido.lat, coordsPedido.lng);
+                const coordsPedido = parsearCoordenadasOrigen(v.origenDetallado);
+                if (coordsPedido) {
+                  const latPrimero = primeroTabla.vehiculo?.latitud ?? baseLat;
+                  const lngPrimero = primeroTabla.vehiculo?.longitud ?? baseLng;
+                  const distPrimero = calcularDistanciaMetros(
+                    latPrimero,
+                    lngPrimero,
+                    coordsPedido.lat,
+                    coordsPedido.lng
+                  );
+                  distGanadorMetros = distPrimero;
 
-                  if (
-                    dMetros <= RADIO_CERCANIA_METROS &&
-                    dMetros + VENTAJA_MINIMA_CERCANIA_METROS < distPrimero &&
-                    dMetros < menorDistanciaCercano
-                  ) {
-                    menorDistanciaCercano = dMetros;
-                    mejorCercano = cand;
+                  // Buscar si hay algún chofer libre "a pocas cuadras" (<= 600m) del pedido
+                  // y al menos 250m más cerca que el #1 elegible de la tabla
+                  let mejorCercano: typeof primeroTabla | null = null;
+                  let menorDistanciaCercano = Infinity;
+
+                  for (const cand of elegibles) {
+                    const cLat = cand.vehiculo?.latitud ?? baseLat;
+                    const cLng = cand.vehiculo?.longitud ?? baseLng;
+                    const dMetros = calcularDistanciaMetros(cLat, cLng, coordsPedido.lat, coordsPedido.lng);
+
+                    if (
+                      dMetros <= RADIO_CERCANIA_METROS &&
+                      dMetros + VENTAJA_MINIMA_CERCANIA_METROS < distPrimero &&
+                      dMetros < menorDistanciaCercano
+                    ) {
+                      menorDistanciaCercano = dMetros;
+                      mejorCercano = cand;
+                    }
+                  }
+
+                  if (mejorCercano) {
+                    ganador = mejorCercano;
+                    motivo = 'CERCANIA';
+                    distGanadorMetros = menorDistanciaCercano;
                   }
                 }
 
-                if (mejorCercano) {
-                  ganador = mejorCercano;
-                  motivo = 'CERCANIA';
-                  distGanadorMetros = menorDistanciaCercano;
-                }
+                const puestoGanador = tablaChoferesLibres.findIndex((c) => c.id === ganador.id) + 1;
+                const ganadorLatido = choferHeartbeatMap.get(ganador.id) || 0;
+                const tieneAppAbierta = ahoraMs - ganadorLatido <= HEARTBEAT_ACTIVO_MS;
+                const timeoutMs = tieneAppAbierta ? OFERTA_TIMEOUT_MS : OFERTA_TIMEOUT_SIN_APP_MS;
+
+                state.choferOfertadoId = ganador.id;
+                state.motivoOferta = motivo;
+                state.puestoTabla = puestoGanador > 0 ? puestoGanador : 1;
+                state.distanciaMetros = distGanadorMetros;
+                state.etaTotalEncadenadoMin = null;
+                state.expiraEn = ahoraMs + timeoutMs;
+                choferesConOfertaActiva.add(ganador.id);
               }
+            }
+          } else {
+            // === MODO ENCADENADO (BACK-TO-BACK): TODOS LOS CHOFERES ESTÁN OCUPADOS ===
+            const coordsPedido = parsearCoordenadasOrigen(v.origenDetallado);
+            const encadenablesElegibles = coordsPedido
+              ? candidatosEncadenadosBase
+                  .filter(cumpleFiltrosChofer)
+                  .map((cand) => {
+                    const destCoords = parsearCoordenadasOrigen(
+                      viajeEnCursoPorChoferMap.get(cand.id)?.destinoDetallado
+                    )!;
+                    const cLat = cand.vehiculo?.latitud ?? baseLat;
+                    const cLng = cand.vehiculo?.longitud ?? baseLng;
+                    const distRestanteMetros = calcularDistanciaMetros(
+                      cLat,
+                      cLng,
+                      destCoords.lat,
+                      destCoords.lng
+                    );
+                    const distDestinoNuevoMetros = calcularDistanciaMetros(
+                      destCoords.lat,
+                      destCoords.lng,
+                      coordsPedido.lat,
+                      coordsPedido.lng
+                    );
+                    return {
+                      cand,
+                      distRestanteMetros,
+                      distDestinoNuevoMetros,
+                      distTotalMetros: distRestanteMetros + distDestinoNuevoMetros,
+                    };
+                  })
+                  .filter(
+                    (item) =>
+                      item.distRestanteMetros <= RADIO_FIN_VIAJE_ENCADENADO_METROS &&
+                      item.distDestinoNuevoMetros <= RADIO_DESTINO_ENCADENADO_METROS
+                  )
+                  .sort((a, b) => a.distTotalMetros - b.distTotalMetros)
+              : [];
 
-              const puestoGanador = tablaChoferesLibres.findIndex((c) => c.id === ganador.id) + 1;
-              const ganadorLatido = choferHeartbeatMap.get(ganador.id) || 0;
-              const tieneAppAbierta = ahoraMs - ganadorLatido <= HEARTBEAT_ACTIVO_MS;
-              const timeoutMs = tieneAppAbierta ? OFERTA_TIMEOUT_MS : OFERTA_TIMEOUT_SIN_APP_MS;
+            if (encadenablesElegibles.length === 0) continue;
 
-              state.choferOfertadoId = ganador.id;
-              state.motivoOferta = motivo;
-              state.puestoTabla = puestoGanador > 0 ? puestoGanador : 1;
-              state.distanciaMetros = distGanadorMetros;
-              state.expiraEn = ahoraMs + timeoutMs;
-              choferesConOfertaActiva.add(ganador.id);
+            const ofertadoSigueEncadenable =
+              state.choferOfertadoId &&
+              state.motivoOferta === 'ENCADENADO' &&
+              !state.rechazadosIds.has(state.choferOfertadoId) &&
+              encadenablesElegibles.some((item) => item.cand.id === state!.choferOfertadoId);
+
+            if (ofertadoSigueEncadenable) {
+              choferesConOfertaActiva.add(state.choferOfertadoId);
+            } else {
+              const elegiblesEnc = encadenablesElegibles.filter(
+                (item) =>
+                  !state!.rechazadosIds.has(item.cand.id) &&
+                  !choferesConOfertaActiva.has(item.cand.id)
+              );
+
+              if (elegiblesEnc.length > 0) {
+                const mejor = elegiblesEnc[0];
+                const distTotalKm = Math.max(0.5, mejor.distTotalMetros / 1000);
+                const etaTotalMin = Math.max(2, Math.round(((distTotalKm * 1.3) / 28) * 60));
+                const ganadorLatido = choferHeartbeatMap.get(mejor.cand.id) || 0;
+                const tieneAppAbierta = ahoraMs - ganadorLatido <= HEARTBEAT_ACTIVO_MS;
+                const timeoutMs = tieneAppAbierta ? OFERTA_TIMEOUT_MS : OFERTA_TIMEOUT_SIN_APP_MS;
+
+                state.choferOfertadoId = mejor.cand.id;
+                state.motivoOferta = 'ENCADENADO';
+                state.puestoTabla = 0;
+                state.distanciaMetros = mejor.distDestinoNuevoMetros;
+                state.etaTotalEncadenadoMin = etaTotalMin;
+                state.expiraEn = ahoraMs + timeoutMs;
+                choferesConOfertaActiva.add(mejor.cand.id);
+              }
             }
           }
 
-          // Solo notificar si ESTE chofer es el destinatario actual según la Tabla o Cercanía.
+          // Solo notificar si ESTE chofer es el destinatario actual según la Tabla, Cercanía o Encadenado.
           // Por privacidad y equidad, no se envían origen, destino, tarifa ni pasajero antes de aceptar.
           if (state.choferOfertadoId === chofer.id) {
             viajesDisponibles.push({
@@ -1924,9 +2055,12 @@ export const choferController = {
               motivoOferta: state.motivoOferta,
               puestoTabla: state.puestoTabla,
               distanciaOfertaMetros: state.distanciaMetros,
+              etaTotalEncadenadoMin: state.etaTotalEncadenadoMin ?? null,
+              esEncadenado: state.motivoOferta === 'ENCADENADO',
               segundosParaAceptar: Math.max(1, Math.ceil((state.expiraEn - ahoraMs) / 1000)),
             });
           } else if (
+            puedeRecibirOfertaNormal &&
             !viajeEnColaTabla &&
             state.choferOfertadoId &&
             (prefSexoViaje === 'INDISTINTO' ||
@@ -1998,6 +2132,7 @@ export const choferController = {
           },
           documentacion,
           viajeActual: viajeActualConDeudas,
+          viajeEnColaEncadenado,
           viajesDisponibles,
           viajeEnColaTabla,
           viajesProgramados,
@@ -2219,6 +2354,32 @@ export const choferController = {
         });
       }
 
+      // Verificar si el chofer está aceptando un viaje encadenado (Back-to-Back mientras está EN_CURSO)
+      // y garantizar como máximo 1 viaje encadenado en cola.
+      const viajesActivosDelChofer = await prisma.viaje.findMany({
+        where: {
+          choferId: chofer.id,
+          id: { not: viajeId },
+          OR: [
+            { estado: { in: ['EN_CAMINO', 'EN_CURSO'] } },
+            { estado: 'ACEPTADO', artEmpresaId: null },
+          ],
+        },
+        select: { id: true, estado: true },
+      });
+
+      const tieneViajeEnCurso = viajesActivosDelChofer.some((va) => va.estado === 'EN_CURSO');
+      const yaTieneViajeEnCola = viajesActivosDelChofer.some((va) => va.estado === 'ACEPTADO');
+
+      if (tieneViajeEnCurso && yaTieneViajeEnCola) {
+        return res.status(409).json({
+          success: false,
+          message: 'Ya tenés un próximo viaje en cola. Completá tu viaje actual antes de aceptar otro.',
+        });
+      }
+
+      const esViajeEncadenado = tieneViajeEnCurso;
+
       // ATOMIC UPDATE (Blindaje Concurrencia QA):
       // Garantiza a nivel de PostgreSQL que si dos choferes aceptan en el mismo milisegundo,
       // solo uno gane el viaje y se evite la doble asignación (Race Condition).
@@ -2350,7 +2511,10 @@ export const choferController = {
           io.to(viaje.remiseriaId).emit('viaje_estado_actualizado', {
             viajeId: viajeActualizado.id,
             estado: 'ACEPTADO',
-            mensaje: `¡Tu viaje fue aceptado por ${nombreChofer}! Auto: ${autoDescripcion}`,
+            choferFinalizandoViajeAnterior: esViajeEncadenado,
+            mensaje: esViajeEncadenado
+              ? `¡Tu viaje fue aceptado por ${nombreChofer}! Está finalizando un viaje cercano y enseguida va hacia vos. Auto: ${autoDescripcion}`
+              : `¡Tu viaje fue aceptado por ${nombreChofer}! Auto: ${autoDescripcion}`,
             choferNombre: nombreChofer,
             vehiculo: {
               marca: marcaAuto,
@@ -2358,7 +2522,10 @@ export const choferController = {
               color: colorAuto,
               patente: patenteAuto,
             },
-            viaje: viajeActualizado,
+            viaje: {
+              ...viajeActualizado,
+              choferFinalizandoViajeAnterior: esViajeEncadenado,
+            },
           });
           const baseLat = viajeActualizado.remiseria?.latitud ?? -34.901138;
           const baseLng = viajeActualizado.remiseria?.longitud ?? -60.013778;
@@ -2411,11 +2578,15 @@ export const choferController = {
 
       res.json({
         success: true,
+        esViajeEncadenado,
         data: {
           ...viajeActualizado,
           deudasPendientesPasajero,
+          esViajeEncadenado,
         },
-        message: 'Viaje aceptado exitosamente',
+        message: esViajeEncadenado
+          ? 'Siguiente viaje cargado en cola. Se activará automáticamente al finalizar tu viaje actual.'
+          : 'Viaje aceptado exitosamente',
       });
     } catch (error) {
       console.error('Error aceptando viaje:', error);
@@ -2748,17 +2919,52 @@ export const choferController = {
         }
       }
 
-      // Sistema de Tablas: cuando el chofer finaliza el viaje y queda libre,
-      // se lo agrega automáticamente al FINAL de la cola (tabla)
+      // Sistema de Tablas + Viajes Encadenados:
+      // Si el chofer finaliza el viaje y YA tiene un viaje encadenado ACEPTADO en cola,
+      // NO vuelve a la Tabla: ese viaje pasa a ser automáticamente su viaje activo.
+      // Si NO tiene viaje en cola, reingresa al FINAL de la Tabla.
+      let siguienteViajeEncadenado: any = null;
       if (choferId && estado === 'COMPLETADO') {
         ofertasViajesMap.delete(viaje.id);
-        await prisma.chofer.update({
-          where: { id: choferId },
-          data: {
-            enParadaVirtual: true,
-            paradaVirtualIngreso: new Date(),
+        siguienteViajeEncadenado = await prisma.viaje.findFirst({
+          where: {
+            choferId,
+            estado: 'ACEPTADO',
+            artEmpresaId: null,
+            id: { not: viaje.id },
           },
+          include: {
+            cliente: {
+              select: {
+                id: true,
+                nombre: true,
+                apellido: true,
+                telefono: true,
+                fotoUrl: true,
+              },
+            },
+            vehiculo: {
+              select: {
+                id: true,
+                patente: true,
+                marca: true,
+                modelo: true,
+                color: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
         });
+
+        if (!siguienteViajeEncadenado) {
+          await prisma.chofer.update({
+            where: { id: choferId },
+            data: {
+              enParadaVirtual: true,
+              paradaVirtualIngreso: new Date(),
+            },
+          });
+        }
       }
 
       // Si el viaje finalizado es en Cuenta Corriente, sumamos al saldo adeudado del cliente
@@ -2788,10 +2994,23 @@ export const choferController = {
           viaje: viajeActualizado,
         });
         if (estado === 'COMPLETADO') {
-          ioInstance.to(viaje.remiseriaId).emit('parada_virtual_actualizada', {
-            choferId,
-            accion: 'INGRESO_FIN_VIAJE',
-          });
+          if (siguienteViajeEncadenado) {
+            ioInstance.to(viaje.remiseriaId).emit('viaje_estado_actualizado', {
+              viajeId: siguienteViajeEncadenado.id,
+              estado: 'ACEPTADO',
+              choferFinalizandoViajeAnterior: false,
+              mensaje: '¡Tu chofer ya finalizó su viaje anterior y se dirige hacia vos!',
+              viaje: {
+                ...siguienteViajeEncadenado,
+                choferFinalizandoViajeAnterior: false,
+              },
+            });
+          } else {
+            ioInstance.to(viaje.remiseriaId).emit('parada_virtual_actualizada', {
+              choferId,
+              accion: 'INGRESO_FIN_VIAJE',
+            });
+          }
         }
       } catch (errSocket) {
         // Sockets opcional
@@ -2835,7 +3054,10 @@ export const choferController = {
       res.json({
         success: true,
         data: viajeActualizado,
-        message: 'Estado del viaje actualizado',
+        siguienteViajeEncadenado,
+        message: siguienteViajeEncadenado
+          ? 'Viaje completado. Se activó automáticamente tu próximo viaje en cola.'
+          : 'Estado del viaje actualizado',
       });
     } catch (error) {
       console.error('Error actualizando estado del viaje del chofer:', error);

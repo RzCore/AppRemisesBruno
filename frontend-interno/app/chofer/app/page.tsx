@@ -658,6 +658,7 @@ export default function ChoferApp() {
     choferOfertadoNombre: string;
     segundosRestantes: number;
   } | null>(null);
+  const [viajeEnColaEncadenado, setViajeEnColaEncadenado] = useState<any>(null);
   const [cargandoParadaVirtual, setCargandoParadaVirtual] = useState(false);
 
   const cargarEstadoParadaVirtual = useCallback(async () => {
@@ -1238,6 +1239,7 @@ export default function ChoferApp() {
 
       const dataEstado = res.data;
       setViajeEnColaTabla(dataEstado?.viajeEnColaTabla || null);
+      setViajeEnColaEncadenado(dataEstado?.viajeEnColaEncadenado || null);
       if (chofer?.enParadaVirtual !== undefined || dataEstado?.puestoEnTabla !== undefined) {
         setParadaVirtualEstado((prev) => ({
           ...prev,
@@ -1301,7 +1303,10 @@ export default function ChoferApp() {
       viajeActualRef.current = viajeEnCurso || null;
       setViajeActual(viajeEnCurso || null);
 
-      if (viajeEnCurso) {
+      const puedeMostrarOfertaEncadenada =
+        Boolean(viajeEnCurso && viajeEnCurso.estado === 'EN_CURSO' && !dataEstado?.viajeEnColaEncadenado);
+
+      if (viajeEnCurso && !puedeMostrarOfertaEncadenada) {
         setAlertaViaje(null);
         return;
       }
@@ -1323,7 +1328,12 @@ export default function ChoferApp() {
           setAlertaViaje(siguienteViaje);
           if (lastAlertedIdRef.current !== siguienteViaje.id) {
             lastAlertedIdRef.current = siguienteViaje.id;
-            toast('¡Nueva solicitud de viaje disponible!', { icon: '🚕', duration: 6000 });
+            toast(
+              siguienteViaje.motivoOferta === 'ENCADENADO' || siguienteViaje.esEncadenado
+                ? '🔗 ¡Próximo viaje cercano en cola disponible!'
+                : '¡Nueva solicitud de viaje disponible!',
+              { icon: '🚕', duration: 6000 }
+            );
 
             // Alerta sonora y vibración inmediata para que el chofer note el viaje entrante
             try {
@@ -1788,24 +1798,31 @@ export default function ChoferApp() {
         user?.chofer?.id || choferIdRef.current
       );
       if (res.success && res.data) {
-        acceptedAtRef.current = Date.now();
-        previousViajeIdRef.current = res.data.id;
-        viajeActualRef.current = res.data;
-        tripDistanceRef.current = { con: 0, sin: 0 };
-        setViajeActual(res.data);
+        const esEncadenado = Boolean((res as any).esViajeEncadenado || res.data?.esViajeEncadenado);
         setAlertaViaje(null);
         setRechazosConsecutivos(0);
         setModalConfirmarRechazoOpen(false);
         setViajeEnColaTabla(null);
-        setParadaVirtualEstado((prev) => ({
-          ...prev,
-          enParadaVirtual: false,
-          puesto: null,
-        }));
-        if (lastCoordsRef.current) {
-          emitirUbicacionGps(lastCoordsRef.current[0], lastCoordsRef.current[1], 'en_viaje');
+
+        if (esEncadenado) {
+          setViajeEnColaEncadenado(res.data);
+          toast.success('🔗 ¡Siguiente viaje cargado en cola! Se activará automáticamente al finalizar el actual.');
+        } else {
+          acceptedAtRef.current = Date.now();
+          previousViajeIdRef.current = res.data.id;
+          viajeActualRef.current = res.data;
+          tripDistanceRef.current = { con: 0, sin: 0 };
+          setViajeActual(res.data);
+          setParadaVirtualEstado((prev) => ({
+            ...prev,
+            enParadaVirtual: false,
+            puesto: null,
+          }));
+          if (lastCoordsRef.current) {
+            emitirUbicacionGps(lastCoordsRef.current[0], lastCoordsRef.current[1], 'en_viaje');
+          }
+          toast.success('¡Viaje aceptado! Dirígete al punto de origen.');
         }
-        toast.success('¡Viaje aceptado! Dirígete al punto de origen.');
       } else {
         toast.error(res.message || 'No se pudo aceptar el viaje');
         setAlertaViaje(null);
@@ -2083,15 +2100,28 @@ export default function ChoferApp() {
 
       if (res.success) {
         const viajeFin = viajeActual;
-        previousViajeIdRef.current = null;
+        const siguienteEnc = (res as any).siguienteViajeEncadenado || null;
         tripDistanceRef.current = { con: 0, sin: 0 };
         setUltimoDestinoCompletado(viajeFin?.destino || null);
-        setViajeActual(null);
+        if (siguienteEnc) {
+          previousViajeIdRef.current = siguienteEnc.id;
+          viajeActualRef.current = siguienteEnc;
+          setViajeActual(siguienteEnc);
+          setViajeEnColaEncadenado(null);
+        } else {
+          previousViajeIdRef.current = null;
+          viajeActualRef.current = null;
+          setViajeActual(null);
+        }
         setModalFinalizarViaje(false);
         setPeajesInputChofer('');
         setObservacionesPeajeChofer('');
         setMostrarPeajesManual(false);
-        toast.success(`¡Viaje completado! Cobro en ${metodoPagoSeleccionado === 'EFECTIVO' ? 'Efectivo 💵' : 'Transferencia 💳'}`);
+        toast.success(
+          siguienteEnc
+            ? '🔗 ¡Viaje completado! Se activó tu próximo viaje en cola.'
+            : `¡Viaje completado! Cobro en ${metodoPagoSeleccionado === 'EFECTIVO' ? 'Efectivo 💵' : 'Transferencia 💳'}`
+        );
         // Abrir calificación del pasajero
         setViajeParaCalificar(viajeFin);
         setModalCalificarPasajeroOpen(true);
@@ -3008,14 +3038,20 @@ export default function ChoferApp() {
       {alertaViaje && (
         <div className="fixed inset-x-0 bottom-16 p-4 z-50 animate-slide-up">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-primary-100 dark:border-slate-800 overflow-hidden max-w-md mx-auto transition-colors">
-            <div className="bg-primary-600 dark:bg-slate-800 text-white p-3.5 flex items-center justify-between">
+            <div className={`${alertaViaje.motivoOferta === 'ENCADENADO' || alertaViaje.esEncadenado ? 'bg-indigo-600 dark:bg-indigo-900' : 'bg-primary-600 dark:bg-slate-800'} text-white p-3.5 flex items-center justify-between`}>
               <div className="min-w-0">
                 <span className="font-bold flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5 animate-pulse text-amber-300 shrink-0" />
-                  <span className="truncate">¡NUEVO VIAJE DISPONIBLE!</span>
+                  <span className="truncate">
+                    {alertaViaje.motivoOferta === 'ENCADENADO' || alertaViaje.esEncadenado
+                      ? '¡PRÓXIMO VIAJE EN COLA!'
+                      : '¡NUEVO VIAJE DISPONIBLE!'}
+                  </span>
                 </span>
                 <span className="text-[11px] text-amber-200 font-semibold block mt-0.5">
-                  {alertaViaje.motivoOferta === 'CERCANIA'
+                  {alertaViaje.motivoOferta === 'ENCADENADO' || alertaViaje.esEncadenado
+                    ? `🔗 Cerca de tu destino actual${alertaViaje.distanciaOfertaMetros ? ` (~${alertaViaje.distanciaOfertaMetros}m)` : ''} — Se activa al finalizar`
+                    : alertaViaje.motivoOferta === 'CERCANIA'
                     ? `⚡ Prioridad por Cercanía (a ~${alertaViaje.distanciaOfertaMetros || 300}m del pedido)`
                     : alertaViaje.motivoOferta === 'ASIGNADO_DIRECTO'
                     ? '🎯 Asignado por Coordinación'
@@ -3065,7 +3101,11 @@ export default function ChoferApp() {
                   disabled={actionLoading}
                   className="flex-1 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 active:bg-primary-700 disabled:opacity-50 text-sm"
                 >
-                  {actionLoading ? 'ACEPTANDO...' : 'ACEPTAR VIAJE'}
+                  {actionLoading
+                    ? 'ACEPTANDO...'
+                    : alertaViaje.motivoOferta === 'ENCADENADO' || alertaViaje.esEncadenado
+                    ? 'ACEPTAR EN COLA'
+                    : 'ACEPTAR VIAJE'}
                 </button>
               </div>
             </div>
@@ -3104,6 +3144,36 @@ export default function ChoferApp() {
               >
                 Rechazar e ir último
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tarjeta compacta de Próximo Viaje Encadenado en Cola */}
+      {viajeActual && viajeEnColaEncadenado && (
+        <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/70 rounded-2xl p-3.5 shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-indigo-800 dark:text-indigo-200">
+              🔗 PRÓXIMO VIAJE EN COLA
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+              Se activa al finalizar
+            </span>
+          </div>
+          <div className="text-xs text-indigo-950 dark:text-indigo-100 space-y-0.5">
+            <p className="truncate">
+              <span className="font-bold">Origen:</span> {viajeEnColaEncadenado.origen}
+            </p>
+            <p className="truncate">
+              <span className="font-bold">Destino:</span> {viajeEnColaEncadenado.destino}
+            </p>
+            <div className="flex items-center justify-between pt-1 text-[11px] text-indigo-700 dark:text-indigo-300 font-semibold">
+              <span>
+                👤 {viajeEnColaEncadenado.clienteNombre || (viajeEnColaEncadenado.cliente ? `${viajeEnColaEncadenado.cliente.nombre} ${viajeEnColaEncadenado.cliente.apellido || ''}`.trim() : 'Pasajero')}
+              </span>
+              {viajeEnColaEncadenado.precio ? (
+                <span>${Number(viajeEnColaEncadenado.precio).toLocaleString('es-AR')}</span>
+              ) : null}
             </div>
           </div>
         </div>

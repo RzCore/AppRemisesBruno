@@ -343,6 +343,7 @@ export default function CoordinadorDashboard() {
     tipoViaje: 'inmediato' as 'inmediato' | 'programado',
     observaciones: '',
     prioridad: 'NORMAL' as 'BAJA' | 'NORMAL' | 'ALTA' | 'URGENTE',
+    choferId: '',
     artEmpresaId: '',
     numeroSiniestro: ''
   });
@@ -1317,13 +1318,20 @@ export default function CoordinadorDashboard() {
         clienteEmail: clientData.email || '',
         clienteId: clientData.id || null,
         metodoPago: clientData.cuentaCorrienteHabilitada ? 'CUENTA_CORRIENTE' : undefined,
-        prioridad: 'NORMAL',
+        prioridad: tripData.prioridad || 'NORMAL',
+        choferId: tripData.choferId || undefined,
+        origenDetallado: origenCoords ? `${origenCoords.lat},${origenCoords.lon}` : undefined,
+        destinoDetallado: destinoCoords ? `${destinoCoords.lat},${destinoCoords.lon}` : undefined,
         observaciones: tripData.observaciones
       };
 
       const res = await coordinadorDashboardService.createViaje(payload);
       if (res.success) {
-        toast.success('Viaje creado exitosamente');
+        toast.success(
+          tripData.choferId
+            ? 'Viaje creado y despachado al chofer seleccionado'
+            : 'Viaje creado — asignación automática del sistema en curso'
+        );
         setIsModalOpen(false);
         setModalStep(1);
         setDniSearch('');
@@ -1338,6 +1346,7 @@ export default function CoordinadorDashboard() {
           tipoViaje: 'inmediato',
           observaciones: '',
           prioridad: 'NORMAL',
+          choferId: '',
           artEmpresaId: '',
           numeroSiniestro: ''
         });
@@ -1418,6 +1427,7 @@ export default function CoordinadorDashboard() {
           tipoViaje: 'inmediato',
           observaciones: '',
           prioridad: 'NORMAL',
+          choferId: '',
           artEmpresaId: '',
           numeroSiniestro: ''
         });
@@ -4779,31 +4789,55 @@ export default function CoordinadorDashboard() {
                   </div>
 
                   {modalMode === 'viaje' ? (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-0.5 flex items-center justify-between">
-                        <span>Precio Estimado ($)</span>
-                        {calculandoPrecioNuevoViaje && (
-                          <span className="inline-flex items-center text-[11px] text-blue-600 font-semibold">
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" /> Calculando...
-                          </span>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-0.5 flex items-center justify-between">
+                          <span>Precio Estimado ($)</span>
+                          {calculandoPrecioNuevoViaje && (
+                            <span className="inline-flex items-center text-[11px] text-blue-600 font-semibold">
+                              <Loader2 className="w-3 h-3 animate-spin mr-1" /> Calculando...
+                            </span>
+                          )}
+                        </label>
+                        <input 
+                          type="number"
+                          min="0"
+                          value={tripData.precio}
+                          onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
+                          placeholder="Se calcula automáticamente..."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base font-bold text-emerald-700"
+                        />
+                        {distanciaEstimada !== null && (
+                          <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                            🛣️ Distancia estimada: {distanciaEstimada} km
+                          </p>
                         )}
-                      </label>
-                      <input 
-                        type="number"
-                        min="0"
-                        value={tripData.precio}
-                        onChange={(e) => setTripData({ ...tripData, precio: e.target.value })}
-                        placeholder="Se calcula automáticamente..."
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base font-bold text-emerald-700"
-                      />
-                      {distanciaEstimada !== null && (
-                        <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                          🛣️ Distancia estimada: {distanciaEstimada} km
+                        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5">
+                          ℹ️ Valor estimativo: el importe final puede variar por desvíos, paradas adicionales o tiempo de espera.
                         </p>
-                      )}
-                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5">
-                        ℹ️ Valor estimativo: el importe final puede variar por desvíos, paradas adicionales o tiempo de espera.
-                      </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          🚖 Asignar Chofer (Opcional)
+                        </label>
+                        <select
+                          value={tripData.choferId}
+                          onChange={(e) => setTripData({ ...tripData, choferId: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        >
+                          <option value="">Asignación automática del sistema</option>
+                          {choferesParaAsignar.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.nombre} {c.apellido} — {c.vehiculo?.patente || 'Auto'} ({c.estado || 'Disponible'})
+                              {c.enParadaVirtual ? ' [En Base]' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          Si no elegís ningún chofer, el sistema lo asignará automáticamente al móvil óptimo.
+                        </p>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 pt-1">

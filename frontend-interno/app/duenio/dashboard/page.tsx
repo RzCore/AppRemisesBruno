@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { TELEFONOS_FIJOS } from '@/lib/constants/telefonos';
+import DuenioNuevoViajeModal from '@/components/duenio/DuenioNuevoViajeModal';
 
 type PeriodType = 'hoy' | 'semana' | 'mes';
 
@@ -99,6 +100,7 @@ export default function DuenioDashboard() {
   const [cierreAutomaticoFiestas, setCierreAutomaticoFiestas] = useState<boolean>(() => initialRems[0] ? initialRems[0].cierreAutomaticoFiestas !== false : true);
   const [isGuardandoEstado, setIsGuardandoEstado] = useState<boolean>(false);
   const [mostrarConfigCierre, setMostrarConfigCierre] = useState<boolean>(false);
+  const [nuevoViajeOpen, setNuevoViajeOpen] = useState<boolean>(false);
 
   const loadData = useCallback(async (isManualRefresh = false) => {
     const targetKey = selectedRemiseriaId !== 'todas' ? selectedRemiseriaId : 'todas';
@@ -396,16 +398,35 @@ export default function DuenioDashboard() {
           </div>
         </div>
 
-        <button
-          onClick={() => loadData(true)}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all active:scale-95"
-          title="Actualizar datos"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
-          <span className="hidden sm:inline">Actualizar</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setNuevoViajeOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold transition-all active:scale-95 shadow-sm"
+            title="Cargar un nuevo viaje y asignarlo a un chofer"
+          >
+            <Car className="w-3.5 h-3.5" />
+            <span>Nuevo Viaje</span>
+          </button>
+          <button
+            onClick={() => loadData(true)}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all active:scale-95"
+            title="Actualizar datos"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
+            <span className="hidden sm:inline">Actualizar</span>
+          </button>
+        </div>
       </div>
+
+      <DuenioNuevoViajeModal
+        open={nuevoViajeOpen}
+        onClose={() => setNuevoViajeOpen(false)}
+        onCreated={() => loadData(true)}
+        choferes={choferesList}
+        remiserias={remiserias}
+        remiseriaId={selectedRemiseriaId !== 'todas' ? selectedRemiseriaId : remiserias[0]?.id}
+      />
 
       {/* WIDGET DESTACADO: CONTROL OPERATIVO DE LA CENTRAL (ABIERTA / CERRADA / MENSAJE BOT Y APP) */}
       <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4">

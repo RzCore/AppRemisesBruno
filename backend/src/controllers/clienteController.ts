@@ -836,17 +836,85 @@ export const getClienteViajes = async (req: AuthenticatedRequest, res: Response)
       }
     }
 
-    const viajesConCola = viajes.map((v) =>
-      v.estado === 'PENDIENTE' && !v.artEmpresaId
-        ? {
-            ...v,
-            posicionEnCola,
-            ...(v.id === viajePendiente?.id && disponibilidadSexoChofer
-              ? { disponibilidadSexoChofer }
-              : {}),
-          }
-        : v
+    // Detectar si algún viaje ACEPTADO del cliente está encadenado (el chofer todavía está finalizando un viaje EN_CURSO anterior)
+    const choferesViajesAceptados = Array.from(
+      new Set(
+        viajes
+          .filter((v) => v.estado === 'ACEPTADO' && v.choferId && !v.artEmpresaId)
+          .map((v) => v.choferId as string)
+      )
     );
+    const viajeAnteriorEnCursoPorChofer = new Map<string, { id: string; destinoDetallado: string | null }>();
+    if (choferesViajesAceptados.length > 0) {
+      const viajesPreviosEnCurso = await prisma.viaje.findMany({
+        where: {
+          choferId: { in: choferesViajesAceptados },
+          estado: 'EN_CURSO',
+        },
+        select: {
+          id: true,
+          choferId: true,
+          destinoDetallado: true,
+        },
+      });
+      for (const vp of viajesPreviosEnCurso) {
+        if (vp.choferId) {
+          viajeAnteriorEnCursoPorChofer.set(vp.choferId, {
+            id: vp.id,
+            destinoDetallado: vp.destinoDetallado,
+          });
+        }
+      }
+    }
+
+    const calcularEtaRestanteMin = (
+      lat1?: number | null,
+      lng1?: number | null,
+      destinoDetallado?: string | null
+    ): number | null => {
+      if (lat1 == null || lng1 == null || !destinoDetallado || !destinoDetallado.includes(',')) {
+        return null;
+      }
+      const parts = destinoDetallado.split(',');
+      const lat2 = parseFloat(parts[0]);
+      const lng2 = parseFloat(parts[1]);
+      if (isNaN(lat2) || isNaN(lng2)) return null;
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lng2 - lng1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.max(1, Math.round(((Math.max(0.3, distKm) * 1.3) / 28) * 60));
+    };
+
+    const viajesConCola = viajes.map((v) => {
+      const extra: Record<string, any> = {};
+      if (v.estado === 'PENDIENTE' && !v.artEmpresaId) {
+        extra.posicionEnCola = posicionEnCola;
+        if (v.id === viajePendiente?.id && disponibilidadSexoChofer) {
+          extra.disponibilidadSexoChofer = disponibilidadSexoChofer;
+        }
+      }
+      if (v.estado === 'ACEPTADO' && v.choferId && !v.artEmpresaId) {
+        const previo = viajeAnteriorEnCursoPorChofer.get(v.choferId);
+        if (previo && previo.id !== v.id) {
+          extra.choferFinalizandoViajeAnterior = true;
+          const vehLat = v.vehiculo?.latitud ?? v.chofer?.vehiculo?.latitud;
+          const vehLng = v.vehiculo?.longitud ?? v.chofer?.vehiculo?.longitud;
+          extra.etaFinalizacionAnteriorMin = calcularEtaRestanteMin(
+            vehLat,
+            vehLng,
+            previo.destinoDetallado
+          );
+        }
+      }
+      return Object.keys(extra).length > 0 ? { ...v, ...extra } : v;
+    });
 
     res.json({
       success: true,
@@ -2126,6 +2194,44 @@ export const getViajeTracking = async (req: Request, res: Response) => {
       coordsDestino = { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
     }
 
+    let choferFinalizandoViajeAnterior = false;
+    let etaFinalizacionAnteriorMin: number | null = null;
+    if (viaje.estado === 'ACEPTADO' && viaje.choferId && !viaje.artEmpresaId) {
+      const viajePrevio = await prisma.viaje.findFirst({
+        where: {
+          choferId: viaje.choferId,
+          estado: 'EN_CURSO',
+          id: { not: viaje.id },
+        },
+        select: { id: true, destinoDetallado: true },
+      });
+      if (viajePrevio) {
+        choferFinalizandoViajeAnterior = true;
+        if (
+          viaje.vehiculo?.latitud != null &&
+          viaje.vehiculo?.longitud != null &&
+          viajePrevio.destinoDetallado?.includes(',')
+        ) {
+          const p = viajePrevio.destinoDetallado.split(',');
+          const dLat2 = parseFloat(p[0]);
+          const dLng2 = parseFloat(p[1]);
+          if (!isNaN(dLat2) && !isNaN(dLng2)) {
+            const R = 6371;
+            const dLat = ((dLat2 - viaje.vehiculo.latitud) * Math.PI) / 180;
+            const dLon = ((dLng2 - viaje.vehiculo.longitud) * Math.PI) / 180;
+            const a =
+              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos((viaje.vehiculo.latitud * Math.PI) / 180) *
+                Math.cos((dLat2 * Math.PI) / 180) *
+                Math.sin(dLon / 2) *
+                Math.sin(dLon / 2);
+            const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            etaFinalizacionAnteriorMin = Math.max(1, Math.round(((Math.max(0.3, km) * 1.3) / 28) * 60));
+          }
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -2141,6 +2247,8 @@ export const getViajeTracking = async (req: Request, res: Response) => {
         remiseria: viaje.remiseria,
         chofer: viaje.chofer,
         vehiculo: viaje.vehiculo,
+        choferFinalizandoViajeAnterior,
+        etaFinalizacionAnteriorMin,
         tiempoEsperaSegundos: viaje.tiempoEsperaSegundos,
         costoEspera: viaje.costoEspera,
         enEspera: viaje.enEspera

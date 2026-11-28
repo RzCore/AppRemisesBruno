@@ -217,7 +217,7 @@ export const batchDispatchService = {
           { estado: { in: ['PENDIENTE', 'ACEPTADO'] }, artEmpresaId: null }
         ]
       },
-      select: { choferId: true }
+      select: { id: true, choferId: true, estado: true, destinoDetallado: true, artEmpresaId: true }
     });
 
     const choferesOcupadosIds = new Set(viajesActivosChoferes.map((v) => v.choferId));
@@ -236,21 +236,192 @@ export const batchDispatchService = {
       return true;
     });
 
-    // Si no hay viajes o choferes libres, retornar resultado vacío
-    if (viajesPendientes.length === 0 || choferesDisponibles.length === 0) {
+    // Si no hay viajes pendientes, retornar vacío
+    if (viajesPendientes.length === 0) {
       return {
         success: true,
-        totalViajesPendientes: viajesPendientes.length,
+        totalViajesPendientes: 0,
         totalChoferesDisponibles: choferesDisponibles.length,
         matches: [],
         tiempoTotalOptimoMinutos: 0,
         tiempoTotalGreedyMinutos: 0,
         ahorroTotalMinutos: 0,
         porcentajeMejora: 0,
+        mensaje: 'No hay viajes pendientes por asignar'
+      };
+    }
+
+    // Si NO hay choferes libres, evaluar DESPACHO ENCADENADO (Back-to-Back):
+    // Choferes en viaje EN_CURSO sin otro viaje ACEPTADO/PENDIENTE en cola cuyo destino quede cerca del nuevo pedido
+    if (choferesDisponibles.length === 0) {
+      const choferConViajeEnColaSet = new Set(
+        viajesActivosChoferes
+          .filter((v) => (v.estado === 'ACEPTADO' || v.estado === 'PENDIENTE') && !v.artEmpresaId && v.choferId)
+          .map((v) => v.choferId as string)
+      );
+      const viajeEnCursoPorChofer = new Map<string, { destinoDetallado: string | null }>();
+      for (const v of viajesActivosChoferes) {
+        if (v.estado === 'EN_CURSO' && v.choferId) {
+          viajeEnCursoPorChofer.set(v.choferId, { destinoDetallado: v.destinoDetallado });
+        }
+      }
+
+      const choferesEncadenables = choferesActivos.filter((c) => {
+        if (!viajeEnCursoPorChofer.has(c.id)) return false;
+        if (choferConViajeEnColaSet.has(c.id)) return false;
+        if (c.observaciones && c.observaciones.startsWith('{')) {
+          try {
+            const obs = JSON.parse(c.observaciones);
+            if (obs.enPausa === true) return false;
+          } catch {
+            // ignore
+          }
+        }
+        const destStr = viajeEnCursoPorChofer.get(c.id)?.destinoDetallado;
+        return Boolean(parsearCoordenadas(destStr));
+      });
+
+      if (choferesEncadenables.length === 0) {
+        return {
+          success: true,
+          totalViajesPendientes: viajesPendientes.length,
+          totalChoferesDisponibles: 0,
+          matches: [],
+          tiempoTotalOptimoMinutos: 0,
+          tiempoTotalGreedyMinutos: 0,
+          ahorroTotalMinutos: 0,
+          porcentajeMejora: 0,
+          mensaje: 'No hay choferes disponibles u online en este momento (algunos pueden estar en pausa/almuerzo)'
+        };
+      }
+
+      const fallbackLatEnc = -34.8957;
+      const fallbackLngEnc = -60.0189;
+      const MAX_RESTANTE_KM = 2.0; // Máx 2 km restantes para terminar el viaje actual
+      const MAX_DESTINO_A_ORIGEN_KM = 1.5; // Máx 1.5 km entre destino actual y nuevo pasajero
+
+      const encCostMatrix: number[][] = [];
+      const encEtaMatrix: number[][] = [];
+      const encDistMatrix: number[][] = [];
+
+      for (let i = 0; i < choferesEncadenables.length; i++) {
+        encCostMatrix[i] = [];
+        encEtaMatrix[i] = [];
+        encDistMatrix[i] = [];
+        const chofer = choferesEncadenables[i];
+        const cLat = chofer.vehiculo?.latitud || fallbackLatEnc;
+        const cLng = chofer.vehiculo?.longitud || fallbackLngEnc;
+        const destCoords = parsearCoordenadas(viajeEnCursoPorChofer.get(chofer.id)?.destinoDetallado)!;
+        const distRestanteKm = calcularDistanciaHaversine(cLat, cLng, destCoords.lat, destCoords.lng);
+
+        for (let j = 0; j < viajesPendientes.length; j++) {
+          const viaje = viajesPendientes[j];
+          const origenCoords = parsearCoordenadas(viaje.origenDetallado);
+          const prefSexo = (viaje.preferenciaSexoChofer || 'INDISTINTO').toUpperCase();
+          const sexoChofer = (chofer.sexo || 'MASCULINO').toUpperCase();
+          const cumpleRequisitos =
+            (prefSexo === 'INDISTINTO' || prefSexo === sexoChofer) &&
+            (!viaje.conMascota || Boolean(chofer.aceptaMascotas)) &&
+            (!viaje.conSillaRuedas || Boolean(chofer.aceptaSillaRuedas));
+
+          if (!origenCoords || !cumpleRequisitos || distRestanteKm > MAX_RESTANTE_KM) {
+            encCostMatrix[i][j] = 1e9;
+            encEtaMatrix[i][j] = 999;
+            encDistMatrix[i][j] = 999;
+            continue;
+          }
+
+          const distDestinoOrigenKm = calcularDistanciaHaversine(
+            destCoords.lat,
+            destCoords.lng,
+            origenCoords.lat,
+            origenCoords.lng
+          );
+
+          if (distDestinoOrigenKm > MAX_DESTINO_A_ORIGEN_KM) {
+            encCostMatrix[i][j] = 1e9;
+            encEtaMatrix[i][j] = 999;
+            encDistMatrix[i][j] = 999;
+            continue;
+          }
+
+          const distTotalKm = Math.round((distRestanteKm + distDestinoOrigenKm) * 10) / 10;
+          const etaTotalMin = Math.max(2, Math.round(((Math.max(0.5, distTotalKm) * 1.3) / 28) * 60));
+          encCostMatrix[i][j] = etaTotalMin;
+          encEtaMatrix[i][j] = etaTotalMin;
+          encDistMatrix[i][j] = distTotalKm;
+        }
+      }
+
+      const asignacionEnc = algoritmoHungaro(encCostMatrix);
+      const encMatches: BatchMatch[] = [];
+      let totalEtaEnc = 0;
+
+      for (let i = 0; i < choferesEncadenables.length; i++) {
+        const j = asignacionEnc[i];
+        if (j !== undefined && j >= 0 && j < viajesPendientes.length && encCostMatrix[i][j] < 1e8) {
+          const viaje = viajesPendientes[j];
+          const chofer = choferesEncadenables[i];
+          const etaMin = encEtaMatrix[i][j];
+          totalEtaEnc += etaMin;
+          const minutosEspera = Math.max(
+            0,
+            Math.floor((ahora.getTime() - new Date(viaje.createdAt).getTime()) / (1000 * 60))
+          );
+          encMatches.push({
+            viajeId: viaje.id,
+            viaje: {
+              id: viaje.id,
+              origen: viaje.origen,
+              destino: viaje.destino,
+              clienteNombre: viaje.clienteNombre || (viaje.cliente ? `${viaje.cliente.nombre} ${viaje.cliente.apellido}` : 'Cliente'),
+              clienteTelefono: viaje.clienteTelefono || viaje.cliente?.telefono || null,
+              fecha: viaje.fecha,
+              precio: Number(viaje.precio),
+              tiempoEsperaMinutos: minutosEspera,
+              preferenciaSexoChofer: viaje.preferenciaSexoChofer || 'INDISTINTO',
+              conMascota: Boolean(viaje.conMascota),
+              conSillaRuedas: Boolean(viaje.conSillaRuedas)
+            },
+            choferId: chofer.id,
+            chofer: {
+              id: chofer.id,
+              nombre: chofer.nombre,
+              apellido: chofer.apellido,
+              telefono: chofer.telefono,
+              sexo: chofer.sexo || 'MASCULINO',
+              aceptaMascotas: Boolean(chofer.aceptaMascotas),
+              aceptaSillaRuedas: chofer.aceptaSillaRuedas !== false,
+              numeroChofer: chofer.numeroChofer
+            },
+            vehiculoId: chofer.vehiculo?.id || chofer.vehiculoId || null,
+            vehiculo: chofer.vehiculo
+              ? {
+                  id: chofer.vehiculo.id,
+                  patente: chofer.vehiculo.patente,
+                  marca: chofer.vehiculo.marca,
+                  modelo: chofer.vehiculo.modelo
+                }
+              : null,
+            distanciaKm: encDistMatrix[i][j],
+            etaMinutos: etaMin
+          });
+        }
+      }
+
+      return {
+        success: true,
+        totalViajesPendientes: viajesPendientes.length,
+        totalChoferesDisponibles: 0,
+        matches: encMatches,
+        tiempoTotalOptimoMinutos: totalEtaEnc,
+        tiempoTotalGreedyMinutos: totalEtaEnc,
+        ahorroTotalMinutos: 0,
+        porcentajeMejora: 0,
         mensaje:
-          viajesPendientes.length === 0
-            ? 'No hay viajes pendientes por asignar'
-            : 'No hay choferes disponibles u online en este momento (algunos pueden estar en pausa/almuerzo)'
+          encMatches.length > 0
+            ? `Despacho encadenado calculado: ${encMatches.length} viaje(s) en cola para choferes próximos a finalizar.`
+            : 'No hay choferes disponibles ni próximos a finalizar cerca de los pedidos'
       };
     }
 

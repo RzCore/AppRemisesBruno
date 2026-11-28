@@ -1135,11 +1135,51 @@ export const coordinatorDashboardController = {
         include: { remiseria: true }
       });
 
-      if (!coordinador) {
+      let remiseriaIdFinal: string | null = coordinador?.remiseriaId || null;
+      const userEmailAudit: string = coordinador?.email || req.user?.email || 'sistema@remisesbruno.com';
+
+      // El Dueño (o Admin) también puede crear viajes desde su módulo sin depender del coordinador
+      if (!remiseriaIdFinal && (req.user?.rol === 'DUENIO' || req.user?.rol === 'ADMIN')) {
+        const requestedRemiseriaId = req.body?.remiseriaId ? String(req.body.remiseriaId).trim() : null;
+        if (req.user.rol === 'DUENIO') {
+          const duenio = await prisma.duenio.findUnique({
+            where: { userId: coordinadorId },
+            include: { remiserias: { select: { remiseriaId: true } } }
+          });
+          if (duenio) {
+            const idsDuenio = duenio.remiserias.map((r) => r.remiseriaId);
+            remiseriaIdFinal =
+              requestedRemiseriaId && idsDuenio.includes(requestedRemiseriaId)
+                ? requestedRemiseriaId
+                : idsDuenio[0] || null;
+          }
+        } else if (requestedRemiseriaId) {
+          remiseriaIdFinal = requestedRemiseriaId;
+        } else {
+          const primeraRem = await prisma.remiseria.findFirst({ select: { id: true } });
+          remiseriaIdFinal = primeraRem?.id || null;
+        }
+      }
+
+      if (!remiseriaIdFinal) {
         return res.status(404).json({
           success: false,
-          message: 'Coordinador no encontrado'
+          message: 'No se encontró una remisería asociada al usuario'
         });
+      }
+
+      // Validar que el chofer elegido (si lo hay) pertenezca a la misma remisería
+      if (choferId && String(choferId).trim() !== '') {
+        const choferValido = await prisma.chofer.findFirst({
+          where: { id: String(choferId).trim(), remiseriaId: remiseriaIdFinal },
+          select: { id: true }
+        });
+        if (!choferValido) {
+          return res.status(400).json({
+            success: false,
+            message: 'El chofer seleccionado no pertenece a esta remisería'
+          });
+        }
       }
 
       let metodoPagoFinal: 'EFECTIVO' | 'TRANSFERENCIA' | 'CUENTA_CORRIENTE' = 'EFECTIVO';
@@ -1170,6 +1210,25 @@ export const coordinatorDashboardController = {
 
       const { cantidadPasajeros, cantidadVehiculos } = calcularVehiculosPorPasajeros(rawCantidadPasajeros);
 
+      // Si el coordinador seleccionó un chofer específico y no envió vehiculoId, resolver el vehículo asignado al chofer
+      const choferIdLimpio = choferId && String(choferId).trim() !== '' ? String(choferId).trim() : null;
+      let vehiculoIdFinal = vehiculoId && String(vehiculoId).trim() !== '' ? String(vehiculoId).trim() : null;
+      if (choferIdLimpio && !vehiculoIdFinal) {
+        const ch = await prisma.chofer.findUnique({
+          where: { id: choferIdLimpio },
+          select: { vehiculoId: true }
+        });
+        if (ch?.vehiculoId) {
+          vehiculoIdFinal = ch.vehiculoId;
+        }
+      }
+
+      // Para viajes de ART con chofer asignado se mantiene ACEPTADO (programado).
+      // Para viajes normales, queda en PENDIENTE:
+      // - con choferId => se oferta directamente a ese chofer en su app (ASIGNADO_DIRECTO)
+      // - sin choferId => entra al despacho automático del sistema (Tabla / Cercanía / Encadenado / Lotes)
+      const estadoInicial = artEmpresaId && choferIdLimpio ? 'ACEPTADO' : 'PENDIENTE';
+
       const viaje = await prisma.viaje.create({
         data: {
           origen,
@@ -1190,12 +1249,12 @@ export const coordinatorDashboardController = {
           origenDetallado,
           destinoDetallado,
           observaciones,
-          choferId: choferId || null,
-          vehiculoId: vehiculoId || null,
+          choferId: choferIdLimpio,
+          vehiculoId: vehiculoIdFinal,
           artEmpresaId: artEmpresaId || null,
           numeroSiniestro: numeroSiniestro ? String(numeroSiniestro).trim() : null,
-          remiseriaId: coordinador.remiseriaId,
-          estado: choferId ? 'ACEPTADO' : 'PENDIENTE'
+          remiseriaId: remiseriaIdFinal,
+          estado: estadoInicial
         },
         include: {
           cliente: true,
@@ -1205,12 +1264,24 @@ export const coordinatorDashboardController = {
         }
       });
 
-      // Emitir socket en tiempo real para que los choferes reciban la oferta al instante
+      // Emitir socket en tiempo real para que los choferes (o el chofer específico elegido) reciban el viaje al instante
       try {
         const { getIO } = await import('../lib/socket');
         const io = getIO();
-        if (io && !artEmpresaId && viaje.estado === 'PENDIENTE') {
-          io.to(coordinador.remiseriaId).emit('nuevo_viaje_recibido', viaje);
+        if (io && !artEmpresaId) {
+          io.to(remiseriaIdFinal).emit('nuevo_viaje_recibido', viaje);
+          if (choferIdLimpio) {
+            io.to(remiseriaIdFinal).emit('viaje_asignado', {
+              choferId: choferIdLimpio,
+              viaje
+            });
+            io.to(remiseriaIdFinal).emit('viaje_estado_actualizado', {
+              viajeId: viaje.id,
+              estado: viaje.estado,
+              choferId: choferIdLimpio,
+              viaje
+            });
+          }
         }
       } catch {}
 
@@ -1218,9 +1289,9 @@ export const coordinatorDashboardController = {
       await prisma.appUsage.create({
         data: {
           userId: coordinadorId,
-          userEmail: coordinador.email,
-          action: 'CREATE_VIAJE',
-          details: JSON.stringify({ viajeId: viaje.id }),
+          userEmail: userEmailAudit,
+          action: req.user?.rol === 'DUENIO' ? 'DUENIO_CREATE_VIAJE' : 'CREATE_VIAJE',
+          details: JSON.stringify({ viajeId: viaje.id, choferId: choferIdLimpio }),
           ipAddress: req.ip,
           userAgent: req.get('User-Agent') || null
         }
@@ -1396,12 +1467,22 @@ export const coordinatorDashboardController = {
       let remiseriaActual = coordinador?.remiseria || null;
       const esDuenioSolicitante = req.user?.rol === 'DUENIO';
 
-      if (!remiseriaActual && esDuenioSolicitante) {
-        const duenio = await prisma.duenio.findUnique({
-          where: { userId: coordinadorId },
-          include: { remiserias: { include: { remiseria: true } } }
-        });
-        remiseriaActual = duenio?.remiserias?.[0]?.remiseria || null;
+      if (!remiseriaActual && (esDuenioSolicitante || req.user?.rol === 'ADMIN')) {
+        const requestedRemiseriaId = req.body?.remiseriaId ? String(req.body.remiseriaId).trim() : null;
+        if (esDuenioSolicitante) {
+          const duenio = await prisma.duenio.findUnique({
+            where: { userId: coordinadorId },
+            include: { remiserias: { include: { remiseria: true } } }
+          });
+          const match = requestedRemiseriaId
+            ? duenio?.remiserias?.find((r) => r.remiseriaId === requestedRemiseriaId)?.remiseria
+            : null;
+          remiseriaActual = match || duenio?.remiserias?.[0]?.remiseria || null;
+        } else if (requestedRemiseriaId) {
+          remiseriaActual = await prisma.remiseria.findUnique({ where: { id: requestedRemiseriaId } });
+        } else {
+          remiseriaActual = await prisma.remiseria.findFirst();
+        }
       }
 
       if (!remiseriaActual) {

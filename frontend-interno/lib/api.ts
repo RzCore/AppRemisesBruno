@@ -691,10 +691,10 @@ export const choferService = {
     }
   },
 
-  getMiEstado: async (choferId?: string): Promise<ApiResponse<{ chofer: any; viajeActual: any; viajesDisponibles: any[]; viajesProgramados?: any[]; viajeEnColaTabla?: any; turnoActivo?: any; enPausa?: boolean; motivoPausa?: string | null; pausaInicio?: string | null; puestoEnTabla?: number | null; totalEnTabla?: number; documentacion?: ResumenDocumentacion }>> => {
+  getMiEstado: async (choferId?: string): Promise<ApiResponse<{ chofer: any; viajeActual: any; viajeEnColaEncadenado?: any; viajesDisponibles: any[]; viajesProgramados?: any[]; viajeEnColaTabla?: any; turnoActivo?: any; enPausa?: boolean; motivoPausa?: string | null; pausaInicio?: string | null; puestoEnTabla?: number | null; totalEnTabla?: number; documentacion?: ResumenDocumentacion }>> => {
     try {
       const response = await api.get('/choferes/mi-estado', { params: choferId ? { choferId } : undefined });
-      return handleApiResponse<{ chofer: any; viajeActual: any; viajesDisponibles: any[]; viajesProgramados?: any[]; viajeEnColaTabla?: any; turnoActivo?: any; enPausa?: boolean; motivoPausa?: string | null; pausaInicio?: string | null; puestoEnTabla?: number | null; totalEnTabla?: number; documentacion?: ResumenDocumentacion }>(response);
+      return handleApiResponse<{ chofer: any; viajeActual: any; viajeEnColaEncadenado?: any; viajesDisponibles: any[]; viajesProgramados?: any[]; viajeEnColaTabla?: any; turnoActivo?: any; enPausa?: boolean; motivoPausa?: string | null; pausaInicio?: string | null; puestoEnTabla?: number | null; totalEnTabla?: number; documentacion?: ResumenDocumentacion }>(response);
     } catch (error: any) {
       return {
         success: false,
@@ -1597,6 +1597,7 @@ export const coordinadorDashboardService = {
       clienteId?: string;
       esViajeLocal?: boolean;
       cobrarDesdeBase?: boolean;
+      remiseriaId?: string;
     }
   ): Promise<ApiResponse<any>> => {
     try {
@@ -1610,7 +1611,8 @@ export const coordinadorDashboardService = {
         artEmpresaId: coords?.artEmpresaId,
         clienteId: coords?.clienteId,
         esViajeLocal: coords?.esViajeLocal,
-        cobrarDesdeBase: coords?.cobrarDesdeBase
+        cobrarDesdeBase: coords?.cobrarDesdeBase,
+        remiseriaId: coords?.remiseriaId
       });
       return handleApiResponse<any>(response);
     } catch (error: any) {

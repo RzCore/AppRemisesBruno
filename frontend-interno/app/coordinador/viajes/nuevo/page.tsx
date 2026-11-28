@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppTracking } from '@/hooks/useAppTracking';
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { clienteAuthService } from '@/lib/api';
+import { clienteAuthService, coordinadorDashboardService } from '@/lib/api';
 
 interface ViajeFormData {
   dniCliente: string;
@@ -32,6 +32,7 @@ interface ViajeFormData {
   observaciones: string;
   prioridad: 'normal' | 'alta' | 'urgente';
   metodoContacto: 'app' | 'telefono' | 'personal';
+  choferId: string;
 }
 
 export default function NuevoViaje() {
@@ -49,12 +50,30 @@ export default function NuevoViaje() {
     tipoViaje: 'inmediato',
     observaciones: '',
     prioridad: 'normal',
-    metodoContacto: 'telefono'
+    metodoContacto: 'telefono',
+    choferId: ''
   });
 
   const [isLoading, setIsLoading] = useState(false);
   const [buscandoCliente, setBuscandoCliente] = useState(false);
   const [clienteEncontrado, setClienteEncontrado] = useState(false);
+  const [clienteIdEncontrado, setClienteIdEncontrado] = useState<string | null>(null);
+  const [choferesDisponibles, setChoferesDisponibles] = useState<any[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    coordinadorDashboardService
+      .getChoferesTiempoReal()
+      .then((res) => {
+        if (mounted && res.success && Array.isArray(res.data)) {
+          setChoferesDisponibles(res.data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const soloNumeros = (val: string) => val.replace(/\D/g, '');
   const soloLetras = (val: string) =>
@@ -78,13 +97,16 @@ export default function NuevoViaje() {
           telefonoCliente: soloNumeros(response.data.telefono || '')
         }));
         setClienteEncontrado(true);
+        setClienteIdEncontrado(response.data.id || null);
         toast.success('Cliente encontrado');
       } else {
         setClienteEncontrado(false);
+        setClienteIdEncontrado(null);
         toast.error('Cliente no encontrado. Puede ingresar los datos manualmente');
       }
     } catch (error) {
       setClienteEncontrado(false);
+      setClienteIdEncontrado(null);
       toast.error('Error al buscar cliente');
     } finally {
       setBuscandoCliente(false);
@@ -109,11 +131,32 @@ export default function NuevoViaje() {
     setIsLoading(true);
 
     try {
-      // Aquí irá la llamada a la API
-      console.log('Datos del viaje:', formData);
+      const res = await coordinadorDashboardService.createViaje({
+        origen: formData.direccionOrigen,
+        destino: formData.direccionDestino,
+        precio: '0',
+        fecha:
+          formData.tipoViaje === 'inmediato'
+            ? new Date().toISOString()
+            : new Date(formData.fechaHora).toISOString(),
+        clienteNombre: formData.nombreCliente.trim(),
+        clienteTelefono: formData.telefonoCliente.trim(),
+        clienteId: clienteIdEncontrado || null,
+        prioridad: formData.prioridad.toUpperCase(),
+        observaciones: formData.observaciones,
+        choferId: formData.choferId || undefined
+      });
 
-      toast.success('Viaje creado exitosamente');
-      router.push('/coordinador/dashboard');
+      if (res.success) {
+        toast.success(
+          formData.choferId
+            ? 'Viaje creado y despachado al chofer seleccionado'
+            : 'Viaje creado — asignación automática del sistema en curso'
+        );
+        router.push('/coordinador/dashboard');
+      } else {
+        toast.error(res.message || 'Error al crear el viaje');
+      }
     } catch (error) {
       toast.error('Error al crear el viaje');
       console.error('Error:', error);
@@ -394,6 +437,28 @@ export default function NuevoViaje() {
                     <span className="text-sm">Personal</span>
                   </label>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  🚖 Asignar Chofer (Opcional)
+                </label>
+                <select
+                  value={formData.choferId}
+                  onChange={(e) => handleInputChange('choferId', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  <option value="">Asignación automática del sistema</option>
+                  {choferesDisponibles.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre} {c.apellido} — {c.vehiculo?.patente || 'Auto'} ({c.estadoOperativo || c.estado || 'Disponible'})
+                      {c.enParadaVirtual ? ' [En Base]' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Si no seleccionás ningún chofer, el sistema lo asignará automáticamente al mejor móvil disponible.
+                </p>
               </div>
 
               <div>
