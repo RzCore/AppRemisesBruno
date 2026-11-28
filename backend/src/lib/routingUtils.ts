@@ -6,12 +6,14 @@
  * Si Valhalla no responde a tiempo, hace fallback automático a OSRM y luego a Haversine.
  */
 
+import { calcularRutaGoogleRoutes, hasGoogleMapsKey } from './googleMapsUtils';
+
 export interface RutaCalculada {
   distanciaKm: number;
   duracionMin: number;
   coords: [number, number][]; // [lat, lon][]
   tienePeajes: boolean;
-  provider: 'valhalla' | 'osrm';
+  provider: 'google' | 'valhalla' | 'osrm';
 }
 
 // Cabinas de peaje reales en rutas nacionales alrededor de Chivilcoy
@@ -120,6 +122,27 @@ export async function calcularRutaAsfaltada(
   const cached = cacheMap.get(cacheKey);
   if (cached && cached.expiresAt > ahora) {
     return cached.data;
+  }
+
+  // 0. Intentar Google Routes API si hay clave configurada (máxima precisión en rutas asfaltadas)
+  if (hasGoogleMapsKey()) {
+    const gRoute = await calcularRutaGoogleRoutes(puntos, { includeGeometry, timeoutMs });
+    if (gRoute && gRoute.distanciaKm >= 0) {
+      const tienePeajes = gRoute.hasTollFromGoogle || polilineaPasaPorCabinaPeaje(gRoute.coords);
+      const result: RutaCalculada = {
+        distanciaKm: gRoute.distanciaKm,
+        duracionMin: gRoute.duracionMin,
+        coords: includeGeometry ? gRoute.coords : [],
+        tienePeajes,
+        provider: 'google',
+      };
+      if (cacheMap.size >= 1500) {
+        const oldestKey = cacheMap.keys().next().value;
+        if (oldestKey) cacheMap.delete(oldestKey);
+      }
+      cacheMap.set(cacheKey, { data: result, expiresAt: ahora + CACHE_TTL_MS });
+      return result;
+    }
   }
 
   // 1. Intentar Valhalla (evita caminos de tierra y tracks rurales)

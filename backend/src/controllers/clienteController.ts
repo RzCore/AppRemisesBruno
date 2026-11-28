@@ -10,6 +10,7 @@ import { esCumpleaniosCliente, whatsappBotService } from '../services/whatsappBo
 import { calcularAjusteOrigenRemoto, calcularMinimoPorAnillo, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 import { calcularRutaAsfaltada } from '../lib/routingUtils';
+import { reverseGeocodeGoogle } from '../lib/googleMapsUtils';
 
 // Cache y Circuit Breaker para cotizaciones (Blindaje de Carga y Resiliencia QA)
 interface RouteCacheEntry {
@@ -2226,23 +2227,28 @@ export const getUbicacionActual = async (req: AuthenticatedRequest, res: Respons
     let direccion = remiseria?.direccion || 'Chivilcoy, Buenos Aires';
 
     if (latParam && lngParam && !isNaN(lat) && !isNaN(lng)) {
-      try {
-        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`, {
-          headers: { 'User-Agent': 'AppRemises/1.0 (cliente@app.com)' }
-        });
-        const geoData = await geoRes.json() as any;
-        if (geoData?.address) {
-          const road = geoData.address.road || geoData.address.pedestrian || geoData.address.street;
-          const houseNumber = geoData.address.house_number || '';
-          const city = geoData.address.city || geoData.address.town || geoData.address.village || 'Chivilcoy';
-          if (road) {
-            direccion = `${road} ${houseNumber}`.trim() + `, ${city}`;
-          } else if (geoData.display_name) {
-            direccion = geoData.display_name;
+      const googleDir = await reverseGeocodeGoogle(lat, lng);
+      if (googleDir) {
+        direccion = googleDir;
+      } else {
+        try {
+          const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`, {
+            headers: { 'User-Agent': 'AppRemises/1.0 (cliente@app.com)' }
+          });
+          const geoData = await geoRes.json() as any;
+          if (geoData?.address) {
+            const road = geoData.address.road || geoData.address.pedestrian || geoData.address.street;
+            const houseNumber = geoData.address.house_number || '';
+            const city = geoData.address.city || geoData.address.town || geoData.address.village || 'Chivilcoy';
+            if (road) {
+              direccion = `${road} ${houseNumber}`.trim() + `, ${city}`;
+            } else if (geoData.display_name) {
+              direccion = geoData.display_name;
+            }
           }
+        } catch (geoErr) {
+          console.warn('Reverse geocode fallback:', geoErr);
         }
-      } catch (geoErr) {
-        console.warn('Reverse geocode fallback:', geoErr);
       }
     }
 

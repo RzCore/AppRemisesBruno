@@ -7,6 +7,7 @@ import { checkAgenciaEstado } from '../services/agencyScheduleService';
 import { calcularAjusteOrigenRemoto, calcularDistanciaRutaKm, calcularMinimoPorAnillo, calcularPrecioTarifaNormal, detectarPeajesEnRecorrido, DEFAULT_BASE_LAT, DEFAULT_BASE_LON, redondearKmArt, redondearPrecioMultiplo100 } from '../lib/pricingUtils';
 import { calcularVehiculosPorPasajeros } from '../lib/passengerUtils';
 import { calcularRutaAsfaltada } from '../lib/routingUtils';
+import { hasGoogleMapsKey, searchGooglePlaces } from '../lib/googleMapsUtils';
 
 const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚàèìòùÀÈÌÒÙäëïöüÄËÏÖÜâêîôûÂÊÎÔÛãõÃÕçÇñÑ\s'´¨-]+$/;
 
@@ -329,7 +330,24 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
         : hasCityConstraint
         ? queryString
         : `${queryString}, Chivilcoy`;
-      let data = await fetchNominatimList(primaryQuery, limit, viewboxParam);
+
+      // 2) Intentar Google Places API (New) si hay clave configurada (máxima cobertura de comercios y calles)
+      let data: any[] = [];
+      if (hasGoogleMapsKey()) {
+        const googleRes = await searchGooglePlaces(
+          esSoloLocalidadRegional ? `${queryString}, Buenos Aires, Argentina` : queryString,
+          limit,
+          hasCityConstraint || esSoloLocalidadRegional
+        );
+        if (Array.isArray(googleRes) && googleRes.length > 0) {
+          data = googleRes;
+        }
+      }
+
+      // 3) Fallback a OpenStreetMap Nominatim + Photon si Google no devolvió resultados o no hay clave
+      if (data.length === 0) {
+        data = await fetchNominatimList(primaryQuery, limit, viewboxParam);
+      }
 
       // Si el usuario incluyó coma en un lugar/institución (ej: "universidad nacional de lujan, chivilcoy"),
       // reintentar sin comas porque Nominatim suele resolver POIs mejor sin coma
@@ -369,6 +387,7 @@ export async function searchNominatimCached(rawQuery: string, limit = 5): Promis
       } else {
         // Enriquecer display_name limpio preservando la altura ingresada por el usuario y el nombre de POI
         data = data.map((item: any) => {
+          if (item.provider === 'google') return item;
           const addr = { ...(item.address || {}) };
           if (typedHouseNumber && !addr.house_number && (addr.road || addr.pedestrian || addr.street)) {
             addr.house_number = typedHouseNumber;
